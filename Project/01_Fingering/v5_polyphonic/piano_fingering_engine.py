@@ -254,9 +254,9 @@ def analyze_polyphonic(file_path):
                 final_notes.append(d)
     final_notes.sort(key=lambda x: x["start_ms"])
     
-    # 스크립트 위치 기준으로 결과 폴더 지정
+    # 스크립트 위치 기준으로 상위 폴더(01_Fingering) 내의 결과 폴더 지정
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    output_dir = os.path.abspath(os.path.join(base_dir, "../../results"))
+    output_dir = os.path.abspath(os.path.join(base_dir, "../results"))
     
     if not os.path.exists(output_dir): os.makedirs(output_dir)
     output_path = os.path.join(output_dir, "mario_polyphonic_result.json")
@@ -265,7 +265,7 @@ def analyze_polyphonic(file_path):
 
 if __name__ == "__main__":
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    midi_path = os.path.abspath(os.path.join(base_dir, "../../assets/midi/Super Mario 64 - Medley.mid"))
+    midi_path = os.path.abspath(os.path.join(base_dir, "../assets/midi/Super Mario 64 - Medley.mid"))
     
     if os.path.exists(midi_path): analyze_polyphonic(midi_path)
     else: print(f"Error: File not found at {midi_path}")

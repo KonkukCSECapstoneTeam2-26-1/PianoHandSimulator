@@ -46,8 +46,11 @@ VISUAL_OFFSET_MS = 100
 
 def load_v5_data():
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    path = os.path.abspath(os.path.join(base_dir, "../../results/mario_polyphonic_result.json"))
-    if not os.path.exists(path): return None
+    # Project/01_Fingering/results/mario_polyphonic_result.json
+    path = os.path.abspath(os.path.join(base_dir, "../results/mario_polyphonic_result.json"))
+    if not os.path.exists(path):
+        print(f"Error: {path} not found.")
+        return None
     with open(path, encoding='utf-8') as f: return json.load(f)
 
 def compute_key_positions():
@@ -184,7 +187,8 @@ def main():
     if not data: return
     
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    midi_path = os.path.abspath(os.path.join(base_dir, "../../assets/midi/Super Mario 64 - Medley.mid"))
+    # Project/01_Fingering/assets/midi/Super Mario 64 - Medley.mid
+    midi_path = os.path.abspath(os.path.join(base_dir, "../assets/midi/Super Mario 64 - Medley.mid"))
     
     try:
         pygame.mixer.init()
@@ -199,7 +203,7 @@ def main():
     ani = animation.FuncAnimation(sim.fig, sim.update, interval=1000/FPS, blit=True, cache_frame_data=False)
     
     plt.tight_layout()
-    print("V5 Simulator Running (Corrected Perspective)...")
+    print("V5 Simulator Running (Corrected Path & Perspective)...")
     print("Red: Melody | Blue: Bass | Gold: Inner")
     plt.show()
     
