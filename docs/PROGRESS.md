@@ -29,16 +29,23 @@
     - **Wrist ROM Clamping**: 손목 회전 각도를 인간의 가동 범위(Yaw ±35°, Roll ±20°) 내로 강제 제한.
     - **안정성 확보**: 유효 경로가 없는 극한 상황에서도 '최선의 대안'을 찾도록 DP 알고리즘 예외 처리 강화.
 
-### [단계 7] 최종 인사이트 종합
-- **물리적 정당성 확보**: 이제 생성된 데이터는 단순히 '음표를 치는 것'을 넘어, '인간의 손 구조로 치는 것'을 시뮬레이션함.
-- **애니메이션 최적화**: 손목 회전각의 상한선이 정해짐에 따라, Unreal Engine의 IK 솔버가 Singularity(특이점) 문제 없이 더 안정적으로 수렴할 수 있게 됨.
+### [단계 8] 프로젝트 구조 체계화 및 성부 분리 로직(V5) 구현 - 완료 (2026-04-26)
+- **프로젝트 구조 개편**:
+    - `01_Fingering`, `02_IK`, `03_Skinning`으로 대분류하여 확장성 확보.
+    - `assets`, `docs`, `results` 폴더를 통한 리소스 및 출력물 관리 체계 구축.
+- **V5 Polyphonic Voice Leading 엔진**:
+    - **성부 분리 (Voice Separation)**: 한 손 내에서 멜로디, 화음, 베이스 성부를 구분하여 인식.
+    - **음악적 비용 함수 (Musical Cost Function)**:
+        - 멜로디(4, 5번) 및 베이스(5번) 손가락 선호도 반영.
+        - 멜로디 라인의 수평적 연결성(Legato)을 위한 가중치 시스템 도입.
+    - **결과 데이터 포맷 확장**: JSON 출력에 `role` 필드를 추가하여 UE5 애니메이션 제어용 메타데이터 확보.
 
 ## 3. 기술적 결정 사항 (Architecture Decisions)
 1. **시간 단위**: 절대 시간(ms) 기반.
-2. **알고리즘**: `Chord-based DP` + `Anatomical Penalty System`.
+2. **알고리즘**: `Chord-based DP` + `Anatomical Penalty System` + `Voice Leading Weights`.
 3. **ROM 제약**: MCP/Wrist 관절 가동 범위를 상수로 관리하여 클램핑 적용.
+4. **폴더 구조**: 기능 중심의 번호 체계(`01_`, `02_` 등)를 사용하여 개발 순서 및 도메인 분리.
 
 ## 4. 향후 계획 (Next Steps)
-- [ ] **Unreal Engine 플러그인 연동**: `mario_rom_result.json`을 사용하여 실제 Skeletal Mesh 구동 및 렌더링 테스트.
-- [ ] **PBD 변형 데이터 연동**: 압력(Pressure) 기반 살 뭉침 시뮬레이션 시각화.
-- [ ] **UI 시스템 구현**: 사용자가 손 크기(Hand Size) 파라미터를 조절하면 `MAX_SPAN`이 동적으로 변하는 기능 검토.
+- [ ] **Unreal Engine 5 성부 기반 애니메이션**: `role` 데이터를 활용하여 멜로디 노트 연주 시 더 강조된 모션을 적용하는 IK 로직 개발.
+- [ ] **V5 결과 검증**: 시각화 툴(`visualizer.py`)을 업데이트하여 성부별로 색상을 다르게 표시하는 기능 추가.
