@@ -1,0 +1,31 @@
+# Unreal Engine - per-module gitignore
+
+# Build / cache folders
+DerivedDataCache/
+Intermediate/
+Saved/
+Build/
+Binaries/
+
+# Plugins
+Plugins/*/Binaries/
+Plugins/*/Intermediate/
+
+# Chaos / Simulation cache
+Caches/
+SimCache/
+*Cache*
+
+# Unreal generated data
+*_BuiltData.uasset
+
+# Python / Pip
+PipInstall/
+
+# Logs
+*.log
+
+# OS / Editor
+.vs/
+.DS_Store
+Thumbs.db
