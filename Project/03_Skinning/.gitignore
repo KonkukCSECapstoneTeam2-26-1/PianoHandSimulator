@@ -1,31 +1,28 @@
-# Unreal Engine - per-module gitignore
+# ===== Unreal Engine safe ignore (module-level) =====
 
-# Build / cache folders
+# Build / generated folders
+Binaries/
 DerivedDataCache/
 Intermediate/
 Saved/
-Build/
-Binaries/
 
-# Plugins
+# Plugins build
 Plugins/*/Binaries/
 Plugins/*/Intermediate/
 
-# Chaos / Simulation cache
+# Simulation cache only 
 Caches/
 SimCache/
-*Cache*
 
-# Unreal generated data
+# Unreal generated map data
 *_BuiltData.uasset
-
-# Python / Pip
-PipInstall/
 
 # Logs
 *.log
 
-# OS / Editor
+# Visual Studio
 .vs/
+
+# OS
 .DS_Store
 Thumbs.db
