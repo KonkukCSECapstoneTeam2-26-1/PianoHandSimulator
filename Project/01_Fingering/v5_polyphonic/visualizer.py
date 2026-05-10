@@ -6,7 +6,7 @@ import matplotlib.patches as patches
 def load_data():
     # 스크립트 위치 기준으로 결과 파일 경로 설정
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    path = os.path.abspath(os.path.join(base_dir, "../../results/mario_polyphonic_result.json"))
+    path = os.path.abspath(os.path.join(base_dir, "../results/mario_polyphonic_result.json"))
     
     if not os.path.exists(path):
         print(f"Error: Result file not found at {path}")

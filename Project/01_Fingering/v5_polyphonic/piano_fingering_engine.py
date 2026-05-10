@@ -144,7 +144,12 @@ def split_wide_chords_between_hands(hand_chords, max_span=17):
 # --- 2. Polyphonic DP Solver ---
 def solve_fingering_chord_dp(chord_sequence, hand_id):
     if not chord_sequence: return
-    def get_combinations(k): return list(combinations(range(1, 6), k))
+    
+    def get_combinations(k): 
+        combos = list(combinations(range(1, 6), k))
+        if hand_id == 0: # Left Hand: Lowest pitch gets highest finger number (5 -> 1)
+            return [tuple(reversed(c)) for c in combos]
+        return combos
 
     dp = []
     first_chord = chord_sequence[0]
@@ -152,7 +157,8 @@ def solve_fingering_chord_dp(chord_sequence, hand_id):
     for f_tuple in get_combinations(len(first_chord)):
         is_possible = True
         for i in range(len(f_tuple)-1):
-            if (first_chord[i+1].pitch - first_chord[i].pitch) > MAX_SPAN.get((f_tuple[i], f_tuple[i+1]), 12):
+            f_pair = tuple(sorted((f_tuple[i], f_tuple[i+1])))
+            if (first_chord[i+1].pitch - first_chord[i].pitch) > MAX_SPAN.get(f_pair, 12):
                 is_possible = False; break
         if is_possible:
             cost = sum(FINGER_DIFFICULTY[f] for f in f_tuple)
@@ -166,7 +172,8 @@ def solve_fingering_chord_dp(chord_sequence, hand_id):
         penalty = 0
         # 1. Span Check
         for i in range(len(curr_f_tuple)-1):
-            if (curr_notes[i+1].pitch - curr_notes[i].pitch) > MAX_SPAN.get((curr_f_tuple[i], curr_f_tuple[i+1]), 12):
+            f_pair = tuple(sorted((curr_f_tuple[i], curr_f_tuple[i+1])))
+            if (curr_notes[i+1].pitch - curr_notes[i].pitch) > MAX_SPAN.get(f_pair, 12):
                 penalty += 5000
 
         # 2. Role Affinity
@@ -190,14 +197,14 @@ def solve_fingering_chord_dp(chord_sequence, hand_id):
             p_dist = cm_note.pitch - pm_note.pitch
             if 0 < abs(p_dist) <= 2 and pm_f == cm_f: penalty += 40
 
-        # 4. Wrist & Crossing (Standard V4 logic)
+        # 4. Wrist & Crossing (Standard V4 logic updated for LH)
         p_diff = curr_notes[0].pitch - prev_notes[-1].pitch
-        if hand_id == 1:
+        if hand_id == 1: # Right Hand
             if p_diff > 0 and curr_f_tuple[0] < prev_f_tuple[-1] and curr_f_tuple[0] != 1: penalty += 2000
             if p_diff < 0 and curr_f_tuple[-1] > prev_f_tuple[0] and prev_f_tuple[0] != 1: penalty += 2000
-        else:
-            if p_diff < 0 and curr_f_tuple[-1] > prev_f_tuple[0] and curr_f_tuple[-1] != 1: penalty += 2000
-            if p_diff > 0 and curr_f_tuple[0] < prev_f_tuple[-1] and prev_f_tuple[-1] != 1: penalty += 2000
+        else: # Left Hand (Fingers 5->1)
+            if p_diff < 0 and curr_f_tuple[-1] < prev_f_tuple[0] and curr_f_tuple[-1] != 1: penalty += 2000
+            if p_diff > 0 and curr_f_tuple[0] > prev_f_tuple[-1] and prev_f_tuple[-1] != 1: penalty += 2000
 
         wrist_move = abs((sum(n.pitch for n in curr_notes)/len(curr_notes)) - (sum(n.pitch for n in prev_notes)/len(prev_notes)))
         if wrist_move > POSITION_SHIFT_THRESHOLD: penalty += (wrist_move - POSITION_SHIFT_THRESHOLD) * 2
@@ -229,7 +236,11 @@ def solve_fingering_chord_dp(chord_sequence, hand_id):
 def calculate_wrist_rotation_rom(chord_group, hand_id):
     if not chord_group: return 0, 0
     avg_pitch = sum(n.pitch for n in chord_group) / len(chord_group)
-    yaw_score = sum((n.pitch - avg_pitch) - (n.finger - 3) * 2.5 for n in chord_group)
+    
+    # Use proper finger-to-wrist offsets
+    offsets = FINGER_WRIST_OFFSET_R if hand_id == 1 else FINGER_WRIST_OFFSET_L
+    yaw_score = sum((n.pitch - avg_pitch) - offsets.get(n.finger, 0) for n in chord_group)
+    
     yaw_deg = max(min(yaw_score * 2.5 * (-1 if hand_id == 0 else 1), WRIST_ROM["yaw_max"]), -WRIST_ROM["yaw_max"])
     roll_deg = 0
     thumb, pinky = next((n for n in chord_group if n.finger == 1), None), next((n for n in chord_group if n.finger == 5), None)
