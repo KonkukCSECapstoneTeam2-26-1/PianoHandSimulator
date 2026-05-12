@@ -1,0 +1,28 @@
+# ===== Unreal Engine safe ignore (module-level) =====
+
+# Build / generated folders
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+
+# Plugins build
+Plugins/*/Binaries/
+Plugins/*/Intermediate/
+
+# Simulation cache only 
+Caches/
+SimCache/
+
+# Unreal generated map data
+*_BuiltData.uasset
+
+# Logs
+*.log
+
+# Visual Studio
+.vs/
+
+# OS
+.DS_Store
+Thumbs.db
