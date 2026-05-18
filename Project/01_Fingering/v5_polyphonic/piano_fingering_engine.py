@@ -275,6 +275,34 @@ def solve_fingering_chord_dp(chord_sequence, hand_id):
             if 0 < p_dist <= 2 and pm_f == cm_f: penalty -= 20  # step motion + 같은 손가락 → 보상
             if p_dist >= 3 and pm_f == cm_f:     penalty += 30  # 도약 + 같은 손가락 → 패널티
 
+        # 5. 동시 누름 충돌 방지
+        # 이전 음표가 아직 눌린 상태(duration 내)인데 현재 화음에서 같은 손가락 재사용 시 패널티
+        curr_start = curr_notes[0].start_ms
+        busy_fingers = {
+            prev_f_tuple[i]
+            for i, n in enumerate(prev_notes)
+            if n.start_ms + n.duration_ms > curr_start
+        }
+        for f in curr_f_tuple:
+            if f in busy_fingers:
+                penalty += 2500  # 물리적으로 불가능에 가까움
+
+        # 6. 아르페지오 롤링
+        # 연속 단음에서 피치 방향과 손가락 방향이 일치해야 자연스러운 롤링
+        if len(prev_notes) == 1 and len(curr_notes) == 1:
+            p_f, c_f = prev_f_tuple[0], curr_f_tuple[0]
+            pitch_dir = curr_notes[0].pitch - prev_notes[0].pitch
+            if pitch_dir != 0:
+                if p_f == c_f:
+                    penalty += 60  # 단음 연속에서 같은 손가락 반복
+                else:
+                    # 오른손: 상행=손가락 증가, 하행=손가락 감소
+                    # 왼손: 상행=손가락 감소(5→1 방향), 하행=손가락 증가
+                    rh_mismatch = (hand_id == 1 and ((pitch_dir > 0 and c_f < p_f) or (pitch_dir < 0 and c_f > p_f)))
+                    lh_mismatch = (hand_id == 0 and ((pitch_dir > 0 and c_f > p_f) or (pitch_dir < 0 and c_f < p_f)))
+                    if rh_mismatch or lh_mismatch:
+                        penalty += 35
+
         # 4. Wrist & Crossing (Standard V4 logic updated for LH)
         p_diff = curr_notes[0].pitch - prev_notes[-1].pitch
         if hand_id == 1: # Right Hand
