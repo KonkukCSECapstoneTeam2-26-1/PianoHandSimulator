@@ -576,12 +576,81 @@ flowchart LR
 </blockquote>
 <p><img src="./ChaosFlesh_%20(4).png" alt="ChaosFlesh Physics Asset"></p>
 <h4 id="443-flesh-asset-dataflow-그래프-구성">4.4.3 Flesh Asset Dataflow 그래프 구성 </h4>
-<p><strong>[그림 7] Flesh Asset Dataflow 그래프 및 사면체 볼륨 생성 결과</strong></p>
+<p>Chaos Flesh의 Dataflow 그래프는 역할에 따라 <strong>두 개로 분리</strong>하여 구성하였습니다. Geometry 생성은 비용이 크기 때문에 사전에 한 번만 수행하여 재사용하고, 바인딩은 캐릭터마다 별도로 적용하는 구조입니다.</p>
+<p><strong>[그림 7] Dataflow ① — Geometry 생성 및 전처리</strong></p>
 <blockquote>
-<p>(좌) Dataflow 노드 구성: SkeletalMeshToCollection → CreateTetrahedron → FleshAssetTerminal<br>
-(우) 파란색 사면체 볼륨이 캐릭터 손·팔 영역에 정상 생성됨을 확인하였습니다.</p>
+<p>SkeletalMesh를 사면체(Tetrahedron) 구조로 변환하고 버텍스 속성을 보존하는 파이프라인입니다.</p>
 </blockquote>
-<p><img src="./ChaosFlesh_%20(2).png" alt="ChaosFlesh Dataflow"></p>
+<img src="./ChaosFlesh_ (6).png" width="700">
+<table>
+<thead>
+<tr>
+<th>노드</th>
+<th>역할</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SkeletalMesh</code></td>
+<td>입력 원본 모델</td>
+</tr>
+<tr>
+<td><code>SkeletalMeshToCollection</code></td>
+<td>SKM을 Chaos가 이해하는 Geometry Collection 포맷으로 변환</td>
+</tr>
+<tr>
+<td><code>CreateTetrahedron</code></td>
+<td>표면 메시 내부를 사면체로 분할하여 물리 시뮬레이션 가능한 볼륨 생성. 위쪽 입력은 구조 생성용, 아래쪽은 원본 속성 보존용으로 역할 분리</td>
+</tr>
+<tr>
+<td><code>TransferVertexAttribute</code></td>
+<td>사면체 생성 후 소실된 색상·UV 등 속성을 원본에서 복사하여 복원</td>
+</tr>
+<tr>
+<td><code>FleshAssetTerminal</code></td>
+<td>최종 Flesh Asset으로 저장 (재사용 가능한 결과물)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>[그림 8] Dataflow ② — 시뮬레이션 제어 및 바인딩</strong></p>
+<blockquote>
+<p>Flesh Asset에 물성을 설정하고 뼈·표면과의 바인딩을 구성하는 파이프라인입니다.</p>
+</blockquote>
+<img src="./ChaosFlesh_ (7).png" width="700">
+<table>
+<thead>
+<tr>
+<th>노드</th>
+<th>역할</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GetFleshAsset</code></td>
+<td>소프트바디 데이터 컨테이너(작업 대상) 로드</td>
+</tr>
+<tr>
+<td><code>SetFleshDefaultProperties</code></td>
+<td>탄성·댐핑·질량 등 물성 초기값 설정</td>
+</tr>
+<tr>
+<td><code>SetFleshBonePositionTargetBinding</code></td>
+<td>특정 버텍스가 뼈를 따라가도록 리깅과 Flesh를 연결</td>
+</tr>
+<tr>
+<td><code>SetVertexTrianglePositionTargetBinding</code></td>
+<td>렌더용 표면 메시와 Flesh 내부를 삼각형 기준으로 연결하여 형상 보존</td>
+</tr>
+<tr>
+<td><code>VisualizeKinematicFaces</code> / <code>VisualizePositionTargets</code></td>
+<td>디버그용 — Kinematic 고정 영역 및 바인딩 타겟 시각화</td>
+</tr>
+<tr>
+<td><code>FleshAssetTerminal</code></td>
+<td>DataFlow 결과를 엔진 Asset에 최종 적용</td>
+</tr>
+</tbody>
+</table>
 <p>주요 설계 결정 사항은 다음과 같습니다.</p>
 <table>
 <thead>
@@ -607,6 +676,10 @@ flowchart LR
 <td>표면 메시 스킨 웨이트를 사면체 버텍스에 전달</td>
 <td>미전달 시 시뮬레이션 볼륨이 뼈 움직임을 추적하지 못해 Flesh가 분리됨</td>
 </tr>
+<tr>
+<td>Dataflow를 두 그래프로 분리</td>
+<td>Geometry 생성(고비용)은 사전 1회 수행 후 재사용, 바인딩은 캐릭터별 독립 적용으로 성능 및 캐싱 효율 확보</td>
+</tr>
 </tbody>
 </table>
 <h4 id="444-flesh-시뮬레이션-결과-에디터-프리뷰">4.4.4 Flesh 시뮬레이션 결과 (에디터 프리뷰) </h4>
@@ -614,14 +687,14 @@ flowchart LR
 <p><img src="./ChaosFlesh_%20(1).png" alt="ChaosFlesh 기본 상태"></p>
 <p><strong>[그림 9] 손가락 굴곡 — Flesh 변형 전 (LBS 단독)</strong></p>
 <blockquote>
-<p>굴곡 시 관절 부위에서 LBS 아티팩트(뭉개짐)가 관찰됩니다.</p>
+<p>low poly로 구현한 뒤 주름 표현 및 굴곡 시 살이 섞이며 관절 부위에서 LBS 아티팩트(뭉개짐)가 관찰됩니다.</p>
 </blockquote>
-<p><img src="./ChaosFlesh_%20(3).png" alt="ChaosFlesh 굴곡 전"></p>
+<p><img src="./ChaosFlesh_%20(5).png" alt="ChaosFlesh 굴곡 전"></p>
 <p><strong>[그림 10] 손가락 굴곡 — Flesh 변형 적용 후</strong></p>
 <blockquote>
 <p>Chaos Flesh 적용 시 피부 볼륨이 보존되며 보다 자연스러운 변형이 관찰됩니다.</p>
 </blockquote>
-<p><img src="./ChaosFlesh_%20(5).png" alt="ChaosFlesh 굴곡 후"></p>
+<p><img src="./ChaosFlesh_%20(3).png" alt="ChaosFlesh 굴곡 후"></p>
 <blockquote>
 <p><strong>[영상]</strong> 메시-스켈레톤 바인딩 테스트: <a href="../Mesh_Skeleton_Binding_Test(7%EC%A3%BC%EC%B0%A8).mp4"><code>Mesh_Skeleton_Binding_Test(7주차).mp4</code></a></p>
 </blockquote>
