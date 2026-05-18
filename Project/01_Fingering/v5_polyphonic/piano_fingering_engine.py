@@ -57,26 +57,62 @@ class NoteEvent:
         }
 
 # --- 1. MIDI Parser with Voice Tagging ---
+def _detect_hand_from_track_name(name: str):
+    """트랙 이름에서 왼손/오른손 힌트 추출. 0=Left, 1=Right, None=불명확"""
+    import re
+    words = set(re.split(r'[_\s\-]', name.lower()))
+    if words & {'left', 'lh', 'l', 'bass', 'lower'}:
+        return 0
+    if words & {'right', 'rh', 'r', 'treble', 'upper', 'melody', 'lead'}:
+        return 1
+    return None
+
+def _find_split_pitch(all_notes):
+    """전체 음표 피치 분포에서 밀도가 가장 낮은 지점을 손 분리 기준으로 반환."""
+    if not all_notes:
+        return 55
+    from collections import Counter
+    hist = Counter(n.pitch // 1 for n in all_notes)
+    # 피아노 연주 범위(40~80)에서 탐색
+    min_density, best_pitch = float('inf'), 55
+    for p in range(40, 80):
+        density = sum(hist.get(q, 0) for q in range(p - 2, p + 3))
+        if density < min_density:
+            min_density, best_pitch = density, p
+    return best_pitch
+
 def parse_midi_to_hand_chords(file_path):
     mid = mido.MidiFile(file_path)
     all_notes = []
-    active_notes = {}
-    t_ms = 0.0
     tempo = 500000
 
-    for msg in mido.merge_tracks(mid.tracks):
-        t_ms += mido.tick2second(msg.time, mid.ticks_per_beat, tempo) * 1000
-        if msg.type == 'set_tempo':
-            tempo = msg.tempo
-        elif msg.type == 'note_on' and msg.velocity > 0:
-            active_notes[msg.note] = (t_ms, msg.velocity)
-        elif (msg.type == 'note_off') or (msg.type == 'note_on' and msg.velocity == 0):
-            if msg.note in active_notes:
-                start_time, vel = active_notes.pop(msg.note)
-                hand = 1 if msg.note >= 55 else 0
-                all_notes.append(NoteEvent(msg.note, vel, start_time, t_ms - start_time, hand))
+    # 트랙별로 처리하여 트랙 이름 힌트 활용
+    track_time = [0.0] * len(mid.tracks)
+    for t_idx, track in enumerate(mid.tracks):
+        hand_hint = _detect_hand_from_track_name(track.name)
+        active_notes = {}
+        t_ms = 0.0
+        for msg in track:
+            t_ms += mido.tick2second(msg.time, mid.ticks_per_beat, tempo) * 1000
+            if msg.type == 'set_tempo':
+                tempo = msg.tempo
+            elif msg.type == 'note_on' and msg.velocity > 0:
+                active_notes[msg.note] = (t_ms, msg.velocity, hand_hint)
+            elif (msg.type == 'note_off') or (msg.type == 'note_on' and msg.velocity == 0):
+                if msg.note in active_notes:
+                    start_time, vel, hint = active_notes.pop(msg.note)
+                    # 트랙 힌트가 없으면 일단 None으로 보관 (후처리에서 pitch 기반 결정)
+                    all_notes.append(NoteEvent(msg.note, vel, start_time, t_ms - start_time, hint if hint is not None else -1))
 
     all_notes.sort(key=lambda x: x.start_ms)
+
+    # 트랙 힌트가 없는 음표(-1)는 피치 기반 동적 분리
+    unassigned = [n for n in all_notes if n.hand == -1]
+    if unassigned:
+        split_pitch = _find_split_pitch(all_notes)
+        for n in unassigned:
+            n.hand = 1 if n.pitch >= split_pitch else 0
+
     hand_chords = {0: [], 1: []}
     for h in [0, 1]:
         h_notes = [n for n in all_notes if n.hand == h]
@@ -111,7 +147,21 @@ def split_wide_chords_between_hands(hand_chords, max_span=17):
     changed = True
     while changed:
         changed = False
+
+        # merge: 매 반복마다 30ms 이내 화음 합치기 (split 후 생긴 조각 포함)
         for h in [0, 1]:
+            hand_chords[h].sort(key=lambda c: c[0].start_ms)
+            merged = []
+            for chord in hand_chords[h]:
+                if merged and chord[0].start_ms - merged[-1][0].start_ms < 30:
+                    merged[-1] = sorted(merged[-1] + chord, key=lambda n: n.pitch)
+                else:
+                    merged.append(chord)
+            hand_chords[h] = merged
+
+        # split: span 초과 화음을 반대 손으로 분리
+        for h in [0, 1]:
+            other = 1 - h
             new_chords = []
             for chord in hand_chords[h]:
                 if len(chord) < 2 or chord[-1].pitch - chord[0].pitch <= max_span:
@@ -121,31 +171,43 @@ def split_wide_chords_between_hands(hand_chords, max_span=17):
                 gaps = [chord[i+1].pitch - chord[i].pitch for i in range(len(chord)-1)]
                 split_idx = gaps.index(max(gaps))
                 lower, upper = chord[:split_idx+1], chord[split_idx+1:]
-                if h == 0:
-                    new_chords.append(lower)
-                    for n in upper: n.hand = 1
-                    hand_chords[1].append(upper)
+                keep, move = (lower, upper) if h == 0 else (upper, lower)
+                new_chords.append(keep)
+
+                # 반대 손에 같은 시간대 화음이 있으면 합쳤을 때 span 미리 체크
+                move_time = move[0].start_ms
+                existing = next((c for c in hand_chords[other]
+                                 if abs(c[0].start_ms - move_time) < 30), None)
+                if existing is None:
+                    for n in move: n.hand = other
+                    hand_chords[other].append(move)
                 else:
-                    new_chords.append(upper)
-                    for n in lower: n.hand = 0
-                    hand_chords[0].append(lower)
+                    combined = sorted(existing + move, key=lambda n: n.pitch)
+                    if combined[-1].pitch - combined[0].pitch <= max_span:
+                        for n in move: n.hand = other
+                        hand_chords[other].append(move)
+                    # span 초과 시 drop: 물리적으로 연주 불가능한 음표 제거
+
             hand_chords[h] = sorted(new_chords, key=lambda c: c[0].start_ms)
 
-    for h in [0, 1]:
-        hand_chords[h].sort(key=lambda c: c[0].start_ms)
-        merged = []
-        for chord in hand_chords[h]:
-            if merged and chord[0].start_ms - merged[-1][0].start_ms < 30:
-                merged[-1] = sorted(merged[-1] + chord, key=lambda n: n.pitch)
-            else: merged.append(chord)
-        hand_chords[h] = merged
     return hand_chords
 
 # --- 2. Polyphonic DP Solver ---
+def _trim_chord(chord, hand_id):
+    """화음이 5음 초과일 때 중요 성부(MELODY/BASS) 우선으로 5개만 남김."""
+    if len(chord) <= 5:
+        return chord
+    priority = {"MELODY": 0, "BASS": 1, "INNER": 2}
+    sorted_chord = sorted(chord, key=lambda n: (priority[n.role], n.pitch if hand_id == 0 else -n.pitch))
+    return sorted(sorted_chord[:5], key=lambda n: n.pitch)
+
 def solve_fingering_chord_dp(chord_sequence, hand_id):
     if not chord_sequence: return
-    
-    def get_combinations(k): 
+    chord_sequence = [_trim_chord(c, hand_id) for c in chord_sequence]
+
+    def get_combinations(k):
+        if k > 5:
+            k = 5
         combos = list(combinations(range(1, 6), k))
         if hand_id == 0: # Left Hand: Lowest pitch gets highest finger number (5 -> 1)
             return [tuple(reversed(c)) for c in combos]
@@ -176,26 +238,42 @@ def solve_fingering_chord_dp(chord_sequence, hand_id):
             if (curr_notes[i+1].pitch - curr_notes[i].pitch) > MAX_SPAN.get(f_pair, 12):
                 penalty += 5000
 
-        # 2. Role Affinity
+        # 2. Role Affinity (손마다 해부학적으로 다르게 적용)
         role_penalty = 0
         for i, f in enumerate(curr_f_tuple):
             note = curr_notes[i]
             if note.role == "MELODY":
-                if f in [4, 5]: role_penalty -= 15
-                if f == 1:     role_penalty += 20
+                # 오른손: 4번(약지) 선호, 5번은 소폭 선호, 1번은 기피
+                # 왼손: 1번(엄지=가장 높은 음) 선호
+                if hand_id == 1:
+                    if f == 4:      role_penalty -= 12
+                    elif f == 5:    role_penalty -= 6
+                    elif f == 1:    role_penalty += 20
+                else:
+                    if f == 1:      role_penalty -= 12
+                    elif f == 2:    role_penalty -= 6
+                    elif f == 5:    role_penalty += 15
             elif note.role == "BASS":
-                if f == 5:     role_penalty -= 15
+                # 오른손 베이스: 1번(엄지) 선호
+                # 왼손 베이스: 5번(새끼=가장 낮은 음) 선호
+                if hand_id == 1:
+                    if f == 1:      role_penalty -= 10
+                else:
+                    if f == 5:      role_penalty -= 12
             elif note.role == "INNER":
-                if f in [2, 3]: role_penalty -= 5
+                if f in [2, 3]:     role_penalty -= 5
 
         # 3. Melody Continuity
+        # step motion(반음~온음)에서 같은 손가락을 유지하면 레가토에 유리 → 보상
+        # 반대로 도약(3반음 이상)에서 같은 손가락을 고집하면 손목 이동이 큼 → 패널티
         prev_m_idx = next((i for i, n in enumerate(prev_notes) if n.role == "MELODY"), None)
         curr_m_idx = next((i for i, n in enumerate(curr_notes) if n.role == "MELODY"), None)
         if prev_m_idx is not None and curr_m_idx is not None:
             pm_note, cm_note = prev_notes[prev_m_idx], curr_notes[curr_m_idx]
             pm_f, cm_f = prev_f_tuple[prev_m_idx], curr_f_tuple[curr_m_idx]
-            p_dist = cm_note.pitch - pm_note.pitch
-            if 0 < abs(p_dist) <= 2 and pm_f == cm_f: penalty += 40
+            p_dist = abs(cm_note.pitch - pm_note.pitch)
+            if 0 < p_dist <= 2 and pm_f == cm_f: penalty -= 20  # step motion + 같은 손가락 → 보상
+            if p_dist >= 3 and pm_f == cm_f:     penalty += 30  # 도약 + 같은 손가락 → 패널티
 
         # 4. Wrist & Crossing (Standard V4 logic updated for LH)
         p_diff = curr_notes[0].pitch - prev_notes[-1].pitch
