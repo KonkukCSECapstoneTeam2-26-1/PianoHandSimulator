@@ -1,0 +1,74 @@
+[
+    {
+        "pitch": 60,
+        "start_ms": 0.0,
+        "duration_ms": 250.0,
+        "hand": "Right",
+        "finger": 2,
+        "is_black": false
+    },
+    {
+        "pitch": 62,
+        "start_ms": 250.0,
+        "duration_ms": 250.0,
+        "hand": "Right",
+        "finger": 1,
+        "is_black": false
+    },
+    {
+        "pitch": 64,
+        "start_ms": 500.0,
+        "duration_ms": 250.0,
+        "hand": "Right",
+        "finger": 2,
+        "is_black": false
+    },
+    {
+        "pitch": 65,
+        "start_ms": 750.0,
+        "duration_ms": 250.0,
+        "hand": "Right",
+        "finger": 1,
+        "is_black": false
+    },
+    {
+        "pitch": 67,
+        "start_ms": 1000.0,
+        "duration_ms": 250.0,
+        "hand": "Right",
+        "finger": 2,
+        "is_black": false
+    },
+    {
+        "pitch": 69,
+        "start_ms": 1250.0,
+        "duration_ms": 250.0,
+        "hand": "Right",
+        "finger": 1,
+        "is_black": false
+    },
+    {
+        "pitch": 71,
+        "start_ms": 1500.0,
+        "duration_ms": 250.0,
+        "hand": "Right",
+        "finger": 2,
+        "is_black": false
+    },
+    {
+        "pitch": 72,
+        "start_ms": 1750.0,
+        "duration_ms": 250.0,
+        "hand": "Right",
+        "finger": 1,
+        "is_black": false
+    },
+    {
+        "pitch": 61,
+        "start_ms": 2104.17,
+        "duration_ms": 250.0,
+        "hand": "Right",
+        "finger": 2,
+        "is_black": true
+    }
+]
