@@ -1,0 +1,125 @@
+// PianoHand custom skinning - per-vertex tension (edge strain) kernels (Phase 2)
+//
+// Runs after CustomSkinningDeformer.usf inside the same RDG graph.
+//
+//  AccumulateCS : one thread per triangle of a render section. For each of the 3 edges it
+//                 compares the skinned edge length with the rest edge length and atomically
+//                 accumulates the strain (fixed point) + a contribution count on both endpoints.
+//                 No CPU adjacency data is needed - only the LOD index buffer SRV.
+//  ResolveCS    : one thread per LOD vertex. Averages the accumulated strain and writes it to the
+//                 passthrough vertex factory colour buffer:
+//                   R = saturate( strain * TensionScale)   stretch   (0..1)
+//                   G = saturate(-strain * TensionScale)   compression (0..1)
+//                   B = 0.5 + 0.5 * clamp(strain * TensionScale, -1, 1)   signed, 0.5 = rest
+//                   A = 1
+//                 Materials read this through the VertexColor node.
+//
+// strain = |p_i - p_j| / |r_i - r_j| - 1   (0 = rest length, >0 stretched, <0 compressed)
+
+#include "/Engine/Private/Common.ush"
+#include "/Engine/Private/GpuSkinCommon.ush"
+
+#ifndef THREADGROUP_SIZE
+#define THREADGROUP_SIZE 64
+#endif
+
+// Fixed point scale for the atomic accumulation. Strain is clamped to [-8, 8] before packing,
+// so a vertex with up to ~4000 incident edges cannot overflow int32.
+#define TENSION_FIXED_SCALE 65536.0f
+
+// ---------------------------------------------------------------------------
+// Accumulate (per triangle)
+// ---------------------------------------------------------------------------
+
+uint NumTriangles;         // triangles in this section
+uint BaseIndex;            // first index of this section inside the LOD index buffer
+
+Buffer<uint>  IndexBuffer;             // LOD index buffer (16 or 32 bit typed SRV, both read as uint)
+Buffer<float> RestPositionBuffer;      // 3 floats per vertex (engine position vertex buffer)
+Buffer<float> SkinnedPositionBuffer;   // 3 floats per vertex (output of DeformCS)
+
+RWStructuredBuffer<int>  StrainAccum;  // fixed point strain sum per LOD vertex
+RWStructuredBuffer<uint> StrainCount;  // number of edge contributions per LOD vertex
+
+float3 LoadPos(Buffer<float> Buf, uint VertexIndex)
+{
+	return float3(Buf[VertexIndex * 3 + 0], Buf[VertexIndex * 3 + 1], Buf[VertexIndex * 3 + 2]);
+}
+
+void AccumulateEdge(uint A, uint B, float3 RestA, float3 RestB, float3 SkinA, float3 SkinB)
+{
+	const float RestLen = length(RestB - RestA);
+	const float SkinLen = length(SkinB - SkinA);
+	// Degenerate rest edge (duplicated vertices) contributes nothing.
+	if (RestLen < 1e-5f)
+	{
+		return;
+	}
+	const float Strain = clamp(SkinLen / RestLen - 1.0f, -8.0f, 8.0f);
+	const int Packed = (int)round(Strain * TENSION_FIXED_SCALE);
+
+	InterlockedAdd(StrainAccum[A], Packed);
+	InterlockedAdd(StrainAccum[B], Packed);
+	InterlockedAdd(StrainCount[A], 1u);
+	InterlockedAdd(StrainCount[B], 1u);
+}
+
+[numthreads(THREADGROUP_SIZE, 1, 1)]
+void AccumulateCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	const uint Tri = DispatchThreadId.x;
+	if (Tri >= NumTriangles)
+	{
+		return;
+	}
+	const uint I = BaseIndex + Tri * 3;
+	const uint V0 = IndexBuffer[I + 0];
+	const uint V1 = IndexBuffer[I + 1];
+	const uint V2 = IndexBuffer[I + 2];
+
+	const float3 R0 = LoadPos(RestPositionBuffer, V0);
+	const float3 R1 = LoadPos(RestPositionBuffer, V1);
+	const float3 R2 = LoadPos(RestPositionBuffer, V2);
+	const float3 P0 = LoadPos(SkinnedPositionBuffer, V0);
+	const float3 P1 = LoadPos(SkinnedPositionBuffer, V1);
+	const float3 P2 = LoadPos(SkinnedPositionBuffer, V2);
+
+	AccumulateEdge(V0, V1, R0, R1, P0, P1);
+	AccumulateEdge(V1, V2, R1, R2, P1, P2);
+	AccumulateEdge(V2, V0, R2, R0, P2, P0);
+}
+
+// ---------------------------------------------------------------------------
+// Resolve (per vertex)
+// ---------------------------------------------------------------------------
+
+uint  NumVertices;         // vertices in the LOD
+float TensionScale;        // strain -> 0..1 mapping (e.g. 4 => 25% stretch saturates)
+
+StructuredBuffer<int>  StrainAccumIn;
+StructuredBuffer<uint> StrainCountIn;
+RWBuffer<UNORM float4> ColorBufferUAV;   // passthrough vertex factory colour buffer (RGBA8)
+RWStructuredBuffer<float> VertexStrainOut;  // raw averaged strain, consumed by CustomSkinningDetail.usf
+
+[numthreads(THREADGROUP_SIZE, 1, 1)]
+void ResolveCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	const uint V = DispatchThreadId.x;
+	if (V >= NumVertices)
+	{
+		return;
+	}
+	const uint Count = StrainCountIn[V];
+	float Strain = 0.0f;
+	if (Count > 0u)
+	{
+		Strain = ((float)StrainAccumIn[V] / TENSION_FIXED_SCALE) / (float)Count;
+	}
+	VertexStrainOut[V] = Strain;
+
+	const float T = Strain * TensionScale;
+
+	const float4 Color = float4(saturate(T), saturate(-T), 0.5f + 0.5f * clamp(T, -1.0f, 1.0f), 1.0f);
+	// Same swizzle the engine's own deformer writer uses so the vertex factory reads RGBA back correctly.
+	ColorBufferUAV[V] = Color FMANUALFETCH_COLOR_COMPONENT_SWIZZLE;
+}

@@ -1,0 +1,92 @@
+// PianoHand custom skinning - shared HLSL types and math
+#pragma once
+
+// One bone transform, stored as 3 rows of an affine matrix (row-major, p' = M * [p,1]).
+// Row0 = (m00, m01, m02, tx), Row1 = (m10, m11, m12, ty), Row2 = (m20, m21, m22, tz)
+struct FBoneTransform
+{
+	float4 Row0;
+	float4 Row1;
+	float4 Row2;
+};
+
+float3 TransformPosition(FBoneTransform T, float3 P)
+{
+	float4 P4 = float4(P, 1.0f);
+	return float3(dot(T.Row0, P4), dot(T.Row1, P4), dot(T.Row2, P4));
+}
+
+float3 TransformVector(FBoneTransform T, float3 V)
+{
+	return float3(dot(T.Row0.xyz, V), dot(T.Row1.xyz, V), dot(T.Row2.xyz, V));
+}
+
+// ---------------- Dual quaternion helpers (xyzw quaternions) ----------------
+
+float4 QuatMul(float4 A, float4 B)
+{
+	return float4(
+		A.w * B.xyz + B.w * A.xyz + cross(A.xyz, B.xyz),
+		A.w * B.w - dot(A.xyz, B.xyz));
+}
+
+// Rotation matrix (rows R0,R1,R2 ; p' = R p) -> unit quaternion
+float4 QuatFromRows(float3 R0, float3 R1, float3 R2)
+{
+	float Trace = R0.x + R1.y + R2.z;
+	float4 Q;
+	if (Trace > 0.0f)
+	{
+		float S = sqrt(Trace + 1.0f) * 2.0f;
+		Q = float4((R2.y - R1.z) / S, (R0.z - R2.x) / S, (R1.x - R0.y) / S, 0.25f * S);
+	}
+	else if (R0.x > R1.y && R0.x > R2.z)
+	{
+		float S = sqrt(1.0f + R0.x - R1.y - R2.z) * 2.0f;
+		Q = float4(0.25f * S, (R0.y + R1.x) / S, (R0.z + R2.x) / S, (R2.y - R1.z) / S);
+	}
+	else if (R1.y > R2.z)
+	{
+		float S = sqrt(1.0f + R1.y - R0.x - R2.z) * 2.0f;
+		Q = float4((R0.y + R1.x) / S, 0.25f * S, (R1.z + R2.y) / S, (R0.z - R2.x) / S);
+	}
+	else
+	{
+		float S = sqrt(1.0f + R2.z - R0.x - R1.y) * 2.0f;
+		Q = float4((R0.z + R2.x) / S, (R1.z + R2.y) / S, 0.25f * S, (R1.x - R0.y) / S);
+	}
+	return normalize(Q);
+}
+
+struct FDualQuat
+{
+	float4 Real;
+	float4 Dual;
+};
+
+FDualQuat DualQuatFromTransform(FBoneTransform T)
+{
+	FDualQuat DQ;
+	DQ.Real = QuatFromRows(T.Row0.xyz, T.Row1.xyz, T.Row2.xyz);
+	float3 Translation = float3(T.Row0.w, T.Row1.w, T.Row2.w);
+	DQ.Dual = 0.5f * QuatMul(float4(Translation, 0.0f), DQ.Real);
+	return DQ;
+}
+
+float3 DualQuatTransformPosition(FDualQuat DQ, float3 P)
+{
+	float3 R = DQ.Real.xyz;
+	float  W = DQ.Real.w;
+	float3 D = DQ.Dual.xyz;
+	float  Dw = DQ.Dual.w;
+	float3 Rotated = P + 2.0f * cross(R, cross(R, P) + W * P);
+	float3 Trans = 2.0f * (W * D - Dw * R + cross(R, D));
+	return Rotated + Trans;
+}
+
+float3 DualQuatTransformVector(FDualQuat DQ, float3 V)
+{
+	float3 R = DQ.Real.xyz;
+	float  W = DQ.Real.w;
+	return V + 2.0f * cross(R, cross(R, V) + W * V);
+}

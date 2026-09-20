@@ -1,0 +1,46 @@
+# ===================== Unreal Engine (06_Project/*, 02_Implementation/03_Skinning) =====================
+# Generated / build output
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+06_Project/**/Build/
+Plugins/**/Binaries/
+Plugins/**/Intermediate/
+
+# Simulation / cache data
+Caches/
+SimCache/
+*_BuiltData.uasset
+
+# Generated project files (regenerate via right-click .uproject > Generate Visual Studio project files)
+*.sln
+*.suo
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.opendb
+*.xcodeproj
+*.xcworkspace
+.vs/
+.idea/
+*.code-workspace
+
+# Logs / crash dumps
+*.log
+*.dmp
+
+# ===================== Python (02_Implementation/01_Fingering) =====================
+__pycache__/
+*.pyc
+
+# ===================== OS =====================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Claude Code personal settings
+.claude/settings.local.json
+
+# Claude 세션 스크래치
+Claude outputs/

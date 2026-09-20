@@ -1,0 +1,47 @@
+=== Processes before cleanup 
+
+이미지 이름                    PID 세션 이름              세션#  메모리 사용
+========================= ======== ================ =========== ============
+UnrealEditor.exe             39688 Console                    1  4,728,940 K
+
+이미지 이름                    PID 세션 이름              세션#  메모리 사용
+========================= ======== ================ =========== ============
+LiveCodingConsole.exe        36736 Console                    1    148,844 K
+
+이미지 이름                    PID 세션 이름              세션#  메모리 사용
+========================= ======== ================ =========== ============
+CrashReportClientEditor.e    20532 Console                    1     58,376 K
+=== Killing stale helpers 
+성공: 프로세스 "LiveCodingConsole.exe"(PID 36736)이(가) 종료되었습니다.
+성공: 프로세스 "CrashReportClientEditor.exe"(PID 20532)이(가) 종료되었습니다.
+성공: 프로세스 "UnrealEditor.exe"(PID 39688)이(가) 종료되었습니다.
+=== Building 
+Using bundled DotNet SDK version: 8.0.300 win-x64
+Running UnrealBuildTool: dotnet "..\..\Engine\Binaries\DotNET\UnrealBuildTool\UnrealBuildTool.dll" pianohand_simulatorEditor Win64 Development -Project="C:\Git\PianoHandSimulator\06_Project\pianohand_simulator\Scripts\..\pianohand_simulator.uproject" -WaitMutex -FromMsBuild
+Log file: C:\Users\leeso\AppData\Local\UnrealBuildTool\Log.txt
+Parsing headers for pianohand_simulatorEditor
+  Running Internal UnrealHeaderTool C:\Git\PianoHandSimulator\06_Project\pianohand_simulator\pianohand_simulator.uproject C:\Git\PianoHandSimulator\06_Project\pianohand_simulator\Intermediate\Build\Win64\pianohand_simulatorEditor\Development\pianohand_simulatorEditor.uhtmanifest -WarningsAsErrors -installed
+Total of 3 written
+Reflection code generated for pianohand_simulatorEditor in 6.0024284 seconds
+Building pianohand_simulatorEditor...
+Using Visual Studio 2022 14.38.33145 toolchain (C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.38.33130) and Windows 10.0.22621.0 SDK (C:\Program Files (x86)\Windows Kits\10).
+Determining max actions to execute in parallel (14 physical cores, 20 logical cores)
+  Executing up to 14 processes, one per physical core
+  Requested 1.5 GB memory per action, 15.78 GB available: limiting max parallel actions to 10
+Using Unreal Build Accelerator local executor to run 5 action(s)
+  Storage capacity 40Gb
+---- Starting trace: 260920_141442 ----
+UbaSessionServer - Disable remote execution (remote sessions will finish current processes)
+------ Building 5 action(s) started ------
+[1/5] Compile [x64] Module.pianohand_simulator.gen.cpp
+[2/5] Compile [x64] PianoHandSkinDeformer.cpp
+[3/5] Link [x64] UnrealEditor-pianohand_simulator.lib
+   C:/Git/PianoHandSimulator/06_Project/pianohand_simulator/Intermediate/Build/Win64/x64/UnrealEditor/Development/pianohand_simulator/UnrealEditor-pianohand_simulator.lib 라이브러리 및 C:/Git/PianoHandSimulator/06_Project/pianohand_simulator/Intermediate/Build/Win64/x64/UnrealEditor/Development/pianohand_simulator/UnrealEditor-pianohand_simulator.exp 개체를 생성하고 있습니다.
+[4/5] Link [x64] UnrealEditor-pianohand_simulator.dll
+[5/5] WriteMetadata pianohand_simulatorEditor.target (UBA disabled)
+Trace written to file C:/Users/leeso/AppData/Local/UnrealBuildTool/Log.uba with size 3.8kb
+Total time in Unreal Build Accelerator local executor: 5.22 seconds
+
+Result: Succeeded
+Total execution time: 12.00 seconds
+BUILD OK 

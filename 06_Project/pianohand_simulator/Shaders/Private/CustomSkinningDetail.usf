@@ -1,0 +1,243 @@
+// PianoHand detail displacement - volume preservation + joint creases (Phase 3)
+//
+// Runs after CustomSkinningDeformer.usf (skinning) and CustomSkinningTension.usf (per-vertex strain),
+// inside the same RDG graph. Everything here is derived from data the GPU already has - the skin
+// weight stream, the rest pose and the per-vertex strain - so no painted tension / wrinkle / vein
+// maps are needed and the effect works on any skeletal mesh.
+//
+//  DisplaceCS         : one thread per section vertex. Moves the skinned position along its normal by
+//                         d = d_volume + d_crease + d_wrinkle
+//                       and writes it back into the passthrough vertex factory position buffer.
+//  NormalAccumulateCS : one thread per triangle. Atomically accumulates face normals of the *displaced*
+//                       surface onto its 3 vertices (fixed point), so the new folds actually shade.
+//  NormalResolveCS    : one thread per LOD vertex. Normalises that sum, re-orthogonalises the stored
+//                       tangent against it, and writes both back to the tangent buffer.
+//
+// ---------------------------------------------------------------------------------------------
+// d_volume  - volume preservation
+//     lambda = 1 + strain is the local in-plane stretch factor. An incompressible solid that is
+//     squashed in plane has to grow along its normal; for an isotropic in-plane factor lambda the
+//     thickness factor is 1/lambda^2. So compression (lambda < 1) pushes the surface out and stretch
+//     pulls it in. This is what makes a bent knuckle bulge instead of collapsing the way raw LBS does.
+//
+// d_crease  - the permanent joint creases
+//     A vertex sitting on a joint is, by construction, a vertex the skinning blends between two bones.
+//     Taking the two largest influence weights w0 >= w1, the quantity 4*w0*w1 is 0 on rigid parts and
+//     exactly 1 on the 50/50 blend line that runs along the joint - a joint band that costs nothing to
+//     compute and needs no authored mask. Grooving along that band gives the creases that are visible
+//     on every knuckle even with the finger held straight, and the groove deepens under compression.
+//
+// d_wrinkle - the extra folds that only appear when bending
+//     Ripples along the bone's own axis inside the joint band, scaled by compression only, so they
+//     vanish on a straight finger. Their density is limited by vertex density - for fine skin folds
+//     on a low-poly mesh this term wants Nanite tessellation underneath it.
+// ---------------------------------------------------------------------------------------------
+
+#include "/Engine/Private/Common.ush"
+#include "/Engine/Private/GpuSkinCommon.ush"
+#include "/PianoHand/Public/SkinningCommon.ush"
+
+#ifndef THREADGROUP_SIZE
+#define THREADGROUP_SIZE 64
+#endif
+
+// Fixed point scale for the atomic normal accumulation. Contributions are unit vectors, so a vertex
+// would need > 500k incident triangles to overflow int32.
+#define NORMAL_FIXED_SCALE 4096.0f
+
+// ---------------------------------------------------------------------------
+// Displace (per section vertex)
+// ---------------------------------------------------------------------------
+
+uint  NumVertices;           // vertices in this section
+uint  BaseVertexIndex;       // first vertex of this section inside the LOD buffers
+uint  NumBoneInfluences;     // max influences per vertex (constant-stride weight layout)
+uint  InputWeightStride;     // bytes per vertex in the weight stream
+uint  NumSectionBones;       // entries in RefPoseInverses (section BoneMap order)
+
+float VolumeBulge;           // cm of outward motion at ~lambda 0.8; 0 disables volume preservation
+float CreaseDepth;           // cm, groove depth on the joint band at rest
+float CreaseSharpness;       // exponent narrowing the joint band (1 = wide, 8 = tight)
+float CreaseCompressionGain; // how much extra depth compression adds
+float WrinkleAmplitude;      // cm, bending-only ripples inside the joint band
+float WrinkleFrequency;      // radians per cm along the bone axis
+
+Buffer<float>                    RestPositionBuffer;   // 3 floats per vertex, rest pose
+Buffer<uint>                     InputWeightStream;    // FSkinWeightVertexBuffer data
+StructuredBuffer<FBoneTransform> RefPoseInverses;      // RefBasesInvMatrix in section BoneMap order
+StructuredBuffer<float>          VertexStrain;         // per LOD vertex, from CustomSkinningTension.usf
+
+RWBuffer<float>                   PositionBufferUAV;   // read + write (displaced in place)
+RWBuffer<TANGENT_RWBUFFER_FORMAT> TangentBufferUAV;    // read only in this pass
+
+float3 LoadPosition(Buffer<float> Buf, uint VertexIndex)
+{
+	return float3(Buf[VertexIndex * 3 + 0], Buf[VertexIndex * 3 + 1], Buf[VertexIndex * 3 + 2]);
+}
+
+[numthreads(THREADGROUP_SIZE, 1, 1)]
+void DisplaceCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	const uint LocalIndex = DispatchThreadId.x;
+	if (LocalIndex >= NumVertices)
+	{
+		return;
+	}
+	const uint VertexIndex = BaseVertexIndex + LocalIndex;
+
+	const float3 SkinnedP = float3(
+		PositionBufferUAV[VertexIndex * 3 + 0],
+		PositionBufferUAV[VertexIndex * 3 + 1],
+		PositionBufferUAV[VertexIndex * 3 + 2]);
+
+	const float4 PackedTZ = TangentBias_SkinCache(TangentBufferUAV[VertexIndex * 2 + GPUSKIN_RWBUFFER_OFFSET_TANGENT_Z]);
+	const float3 Normal = normalize(PackedTZ.xyz + float3(0.0f, 0.0f, 1e-6f));
+
+	// ---- volume preservation -------------------------------------------------
+	const float Strain = VertexStrain[VertexIndex];
+	const float Lambda = max(1.0f + Strain, 0.2f);
+	const float VolumeTerm = VolumeBulge * clamp(1.0f / (Lambda * Lambda) - 1.0f, -2.0f, 2.0f);
+
+	// ---- joint band from the skin weights -----------------------------------
+	const uint StreamOffset = VertexIndex * (InputWeightStride / 4);
+	const uint NumGroups = (NumBoneInfluences + 3) / 4;
+
+	float LargestWeight = 0.0f;
+	float SecondWeight = 0.0f;
+	uint  DominantBone = 0;
+
+	for (uint g = 0; g < NumGroups; ++g)
+	{
+		const int4   Idx = GetBlendIndices(InputWeightStream, StreamOffset, g);
+		const float4 W   = GetBlendWeights(InputWeightStream, StreamOffset, g, NumBoneInfluences);
+		UNROLL
+		for (uint i = 0; i < 4; ++i)
+		{
+			const float Weight = W[i];
+			if (Weight > LargestWeight)
+			{
+				SecondWeight = LargestWeight;
+				LargestWeight = Weight;
+				DominantBone = (uint)Idx[i];
+			}
+			else if (Weight > SecondWeight)
+			{
+				SecondWeight = Weight;
+			}
+		}
+	}
+
+	// 0 on rigidly bound skin, 1 exactly on the 50/50 blend line that runs along the joint.
+	const float JointBlend = saturate(4.0f * LargestWeight * SecondWeight);
+	const float JointBand = pow(max(JointBlend, 0.0f), max(CreaseSharpness, 1.0f));
+
+	const float Compression = max(-Strain, 0.0f);
+
+	// ---- resting crease, deepened by compression ----------------------------
+	const float CreaseTerm = -CreaseDepth * JointBand * (1.0f + CreaseCompressionGain * Compression * 10.0f);
+
+	// ---- bending-only ripples along the bone axis ---------------------------
+	const float3 RestP = LoadPosition(RestPositionBuffer, VertexIndex);
+	const FBoneTransform RefInv = RefPoseInverses[min(DominantBone, NumSectionBones - 1)];
+	const float3 BoneLocal = TransformPosition(RefInv, RestP);
+	const float WrinkleTerm = WrinkleAmplitude * JointBand * Compression * sin(WrinkleFrequency * BoneLocal.x);
+
+	const float Displacement = VolumeTerm + CreaseTerm + WrinkleTerm;
+	const float3 OutP = SkinnedP + Normal * Displacement;
+
+	PositionBufferUAV[VertexIndex * 3 + 0] = OutP.x;
+	PositionBufferUAV[VertexIndex * 3 + 1] = OutP.y;
+	PositionBufferUAV[VertexIndex * 3 + 2] = OutP.z;
+}
+
+// ---------------------------------------------------------------------------
+// Normal recomputation - accumulate (per triangle)
+// ---------------------------------------------------------------------------
+
+uint NumTriangles;
+uint BaseIndex;
+
+Buffer<uint>  IndexBuffer;
+Buffer<float> DisplacedPositionBuffer;     // SRV view of the buffer DisplaceCS wrote
+
+RWStructuredBuffer<int> NormalAccum;       // 3 ints per LOD vertex
+
+void AccumulateNormal(uint VertexIndex, float3 FaceNormal)
+{
+	const int3 Packed = (int3)round(FaceNormal * NORMAL_FIXED_SCALE);
+	InterlockedAdd(NormalAccum[VertexIndex * 3 + 0], Packed.x);
+	InterlockedAdd(NormalAccum[VertexIndex * 3 + 1], Packed.y);
+	InterlockedAdd(NormalAccum[VertexIndex * 3 + 2], Packed.z);
+}
+
+[numthreads(THREADGROUP_SIZE, 1, 1)]
+void NormalAccumulateCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	const uint Tri = DispatchThreadId.x;
+	if (Tri >= NumTriangles)
+	{
+		return;
+	}
+	const uint I = BaseIndex + Tri * 3;
+	const uint V0 = IndexBuffer[I + 0];
+	const uint V1 = IndexBuffer[I + 1];
+	const uint V2 = IndexBuffer[I + 2];
+
+	const float3 P0 = LoadPosition(DisplacedPositionBuffer, V0);
+	const float3 P1 = LoadPosition(DisplacedPositionBuffer, V1);
+	const float3 P2 = LoadPosition(DisplacedPositionBuffer, V2);
+
+	const float3 Face = cross(P2 - P0, P1 - P0);
+	const float FaceLen = length(Face);
+	if (FaceLen < 1e-12f)
+	{
+		return;
+	}
+	// Unit face normals: equal weighting keeps the fixed point accumulation bounded.
+	const float3 FaceNormal = Face / FaceLen;
+
+	AccumulateNormal(V0, FaceNormal);
+	AccumulateNormal(V1, FaceNormal);
+	AccumulateNormal(V2, FaceNormal);
+}
+
+// ---------------------------------------------------------------------------
+// Normal recomputation - resolve (per LOD vertex)
+// ---------------------------------------------------------------------------
+
+uint NumLodVertices;
+
+StructuredBuffer<int> NormalAccumIn;
+
+[numthreads(THREADGROUP_SIZE, 1, 1)]
+void NormalResolveCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	const uint V = DispatchThreadId.x;
+	if (V >= NumLodVertices)
+	{
+		return;
+	}
+
+	const float3 Sum = float3(
+		(float)NormalAccumIn[V * 3 + 0],
+		(float)NormalAccumIn[V * 3 + 1],
+		(float)NormalAccumIn[V * 3 + 2]) / NORMAL_FIXED_SCALE;
+
+	const float SumLen = length(Sum);
+	if (SumLen < 1e-6f)
+	{
+		return;   // isolated / degenerate vertex: keep whatever skinning produced
+	}
+	const float3 NewNormal = Sum / SumLen;
+
+	const float4 OldTX = TangentBias_SkinCache(TangentBufferUAV[V * 2 + GPUSKIN_RWBUFFER_OFFSET_TANGENT_X]);
+	const float4 OldTZ = TangentBias_SkinCache(TangentBufferUAV[V * 2 + GPUSKIN_RWBUFFER_OFFSET_TANGENT_Z]);
+
+	// Gram-Schmidt the existing tangent against the new normal so UV-space stays consistent.
+	float3 NewTangent = OldTX.xyz - NewNormal * dot(NewNormal, OldTX.xyz);
+	const float TangentLen = length(NewTangent);
+	NewTangent = (TangentLen > 1e-6f) ? (NewTangent / TangentLen) : OldTX.xyz;
+
+	TangentBufferUAV[V * 2 + GPUSKIN_RWBUFFER_OFFSET_TANGENT_X] = TangentUnbias_SkinCache(float4(NewTangent, OldTX.w));
+	TangentBufferUAV[V * 2 + GPUSKIN_RWBUFFER_OFFSET_TANGENT_Z] = TangentUnbias_SkinCache(float4(NewNormal, OldTZ.w));
+}

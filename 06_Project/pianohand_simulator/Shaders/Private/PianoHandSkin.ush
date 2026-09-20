@@ -1,0 +1,201 @@
+// PianoHand skin surface shading - HLSL, included by M_PianoHandSkin's Custom nodes
+// (virtual path: /PianoHand/Private/PianoHandSkin.ush)
+//
+// This is ordinary material HLSL, not a global shader: the material's Custom node lists this file
+// in IncludeFilePaths and its body is a single call. The graph is wiring only; the code lives here,
+// where it can be diffed and edited without opening the material editor. Edit this file, then
+// `RecompileShaders changed` in the console. UE has no GLSL path - material shaders are authored in
+// HLSL and cross-compiled per platform - so HLSL is both the only option and the right one.
+//
+// Three layers:
+//   detail  T_PH_SkinDetail_N   tiling tangent-space normal, always on
+//   crease  procedural lines whose POSITION AND DIRECTION come from the baked wrinkle map
+//   veins   T_PH_Vein_N         tiling ridges, gated by STRETCH (the opposite of creases)
+//
+// T_PH_WrinkleMask, baked from the rig by Tools/bake_skin_maps.py (mesh UV space, not tiling):
+//   R = weighted joint band   0 on rigid parts, 1 on a joint's 50/50 skin-weight blend line,
+//                             scaled by the per-finger weights chosen at bake time
+//   G = 0.5 + 0.5 * s / CreaseRange, s = signed distance ALONG the bone from the joint pivot (cm)
+//   B = raw joint band, unweighted
+//
+// Why G stores a coordinate and not a direction: the obvious encoding is the crease angle, with the
+// shader rotating UV space to match. That shatters. Rotating a global coordinate by a per-pixel
+// angle multiplies the angle's variation by the distance to the UV origin, so the line field turns
+// into noise wherever the angle moves at all. Storing the along-bone coordinate instead reduces the
+// whole problem to sin(s * frequency): the iso-lines of s are perpendicular to the bone already, so
+// creases run across the finger by construction, and s is smooth, so nothing shatters. s is signed
+// about the joint pivot, so it stays continuous through the joint and the creases mirror around it.
+//
+// Tension arrives as vertex colour from CustomSkinningTension.usf:
+//   R = stretch (0..1)   G = compression (0..1)   B = signed strain (0.5 = rest)
+
+#ifndef PIANOHAND_SKIN_USH
+#define PIANOHAND_SKIN_USH
+
+#define PH_TWO_PI 6.28318530718f
+
+// ---------------------------------------------------------------------------------------------
+// small helpers
+// ---------------------------------------------------------------------------------------------
+
+// Z is RECONSTRUCTED, never read from the blue channel. T_PH_SkinDetail_N is TC_Normalmap, i.e.
+// BC5, which stores only two channels and samples back as (x, y, 0, 1) - taking z from that gives
+// z = 0*2-1 = -1, the normal collapses into the tangent plane, and every texel comes out at maximum
+// slope. That is what turns skin into camouflage. sqrt(1 - x^2 - y^2) is correct for BC5 and for an
+// uncompressed RGB normal map alike.
+float3 PH_UnpackNormal(float3 Packed)
+{
+	float2 XY = Packed.xy * 2.0f - 1.0f;
+	float Z = sqrt(saturate(1.0f - dot(XY, XY)));
+	return normalize(float3(XY, max(Z, 1e-3f)));
+}
+
+// Whiteout blend: keeps both layers' slopes instead of letting the stronger one win outright.
+float3 PH_BlendNormals(float3 A, float3 B)
+{
+	return normalize(float3(A.xy + B.xy, A.z * B.z));
+}
+
+// Scale a tangent-space normal's slope.
+float3 PH_ScaleNormal(float3 N, float Scale)
+{
+	return normalize(float3(N.xy * Scale, N.z));
+}
+
+float PH_Hash21(float2 P)
+{
+	return frac(sin(dot(P, float2(127.1f, 311.7f))) * 43758.5453123f);
+}
+
+float PH_ValueNoise(float2 P)
+{
+	float2 I = floor(P);
+	float2 F = frac(P);
+	F = F * F * (3.0f - 2.0f * F);
+	float A = PH_Hash21(I);
+	float B = PH_Hash21(I + float2(1, 0));
+	float C = PH_Hash21(I + float2(0, 1));
+	float D = PH_Hash21(I + float2(1, 1));
+	return lerp(lerp(A, B, F.x), lerp(C, D, F.x), F.y);
+}
+
+float PH_Fbm(float2 P)
+{
+	float Acc = 0.0f;
+	float Amp = 0.5f;
+	[unroll] for (int I = 0; I < 3; ++I)
+	{
+		Acc += PH_ValueNoise(P) * Amp;
+		P *= 2.07f;
+		Amp *= 0.5f;
+	}
+	return Acc - 0.4375f;   // fbm mean with amps 0.5 + 0.25 + 0.125
+}
+
+// ---------------------------------------------------------------------------------------------
+// crease height at one UV, from one tap of the baked mask
+// ---------------------------------------------------------------------------------------------
+
+float PH_Band(float MaskR, float MaskGain, float MaskSharpness)
+{
+	// The raw 4*w0*w1 band is broad - it covers most of a finger segment, not just the knuckle.
+	// The power tightens it around the joint; the gain sets how far out it still reaches.
+	return pow(saturate(MaskR * MaskGain), max(MaskSharpness, 0.1f));
+}
+
+float PH_CreaseHeightAt(
+	float2 UV, float4 M, float Compress,
+	float CreaseFrequency, float CreaseSharpness, float CreaseWarp, float CreaseRange,
+	float WrinkleBase, float CompressGain, float MaskGain, float MaskSharpness)
+{
+	float Band = PH_Band(M.r, MaskGain, MaskSharpness);
+	// s in cm along the bone; the warp is added in the SAME units, so it just nudges each line
+	// sideways instead of rotating anything.
+	float S = (M.g * 2.0f - 1.0f) * CreaseRange + PH_Fbm(UV * 90.0f) * CreaseWarp;
+	float Line = sin(S * CreaseFrequency * PH_TWO_PI);
+	// negative => a groove, not a welt; the power narrows it into a crease
+	float Profile = -pow(saturate(1.0f - abs(Line)), max(CreaseSharpness, 1.0f));
+	// Vary depth from line to line, as a smooth function of s only - real knuckle creases are not
+	// a uniform corrugation. Noise in s stays smooth in screen space, so this costs no stability.
+	Profile *= saturate(0.55f + PH_Fbm(float2(S * 2.5f, 3.1f)) * 1.8f);
+	float Gate = saturate(WrinkleBase + Compress * CompressGain);
+	return Profile * Band * Gate;
+}
+
+// ---------------------------------------------------------------------------------------------
+// entry point: the full skin normal
+// ---------------------------------------------------------------------------------------------
+
+float3 PH_SkinNormal(
+	float2 UV,
+	float3 Tension,          // vertex colour arrives as float3 (RGB) from the VertexColor node
+	Texture2D MaskTex,   SamplerState MaskSmp,
+	Texture2D DetailTex, SamplerState DetailSmp,
+	Texture2D VeinTex,   SamplerState VeinSmp,
+	float DetailTiling, float DetailStrength,
+	float CreaseFrequency, float CreaseSharpness, float CreaseWarp, float CreaseDepth, float CreaseRange,
+	float VeinTiling, float VeinStrength,
+	float WrinkleBase, float CompressGain, float MaskGain, float MaskSharpness, float Eps)
+{
+	float Stretch  = saturate(Tension.r);
+	float Compress = saturate(Tension.g);
+
+	// Three taps of the mask: one for the value, two for the finite difference. Eps is in UV and
+	// wants to be a few texels of T_PH_WrinkleMask - smaller than that and the difference is noise.
+	// Texture2DSample rather than Tex.Sample: implicit derivatives are undefined inside non-uniform
+	// flow control and outright illegal in a ray-tracing hit shader, which every UE material also
+	// gets compiled into. Common.ush's macro falls back to SampleLevel on exactly those stages.
+	float4 M0 = Texture2DSample(MaskTex, MaskSmp, UV);
+	float4 MX = Texture2DSample(MaskTex, MaskSmp, UV + float2(Eps, 0));
+	float4 MY = Texture2DSample(MaskTex, MaskSmp, UV + float2(0, Eps));
+
+	float Band = PH_Band(M0.r, MaskGain, MaskSharpness);
+
+	// --- creases
+	float H0 = PH_CreaseHeightAt(UV, M0, Compress, CreaseFrequency, CreaseSharpness, CreaseWarp,
+								 CreaseRange, WrinkleBase, CompressGain, MaskGain, MaskSharpness);
+	float HX = PH_CreaseHeightAt(UV + float2(Eps, 0), MX, Compress, CreaseFrequency, CreaseSharpness,
+								 CreaseWarp, CreaseRange, WrinkleBase, CompressGain, MaskGain, MaskSharpness);
+	float HY = PH_CreaseHeightAt(UV + float2(0, Eps), MY, Compress, CreaseFrequency, CreaseSharpness,
+								 CreaseWarp, CreaseRange, WrinkleBase, CompressGain, MaskGain, MaskSharpness);
+	float2 G = float2(HX - H0, HY - H0) / max(Eps, 1e-6f) * CreaseDepth;
+	G = clamp(G, -8.0f, 8.0f);
+	float3 Crease = normalize(float3(-G.x, -G.y, 1.0f));
+
+	// --- detail: plain tiling relief, no rotation. Skin micro-texture is isotropic, and rotating
+	// it per pixel would reintroduce exactly the shattering the mask layout exists to avoid.
+	float3 Detail = PH_UnpackNormal(Texture2DSample(DetailTex, DetailSmp, UV * DetailTiling).rgb);
+	Detail = PH_ScaleNormal(Detail, DetailStrength);
+
+	// --- veins: ride on stretch, and stay off the joint bands where the creases live
+	float VeinAmount = Stretch * VeinStrength * (1.0f - 0.7f * Band);
+	float3 Vein = PH_ScaleNormal(PH_UnpackNormal(Texture2DSample(VeinTex, VeinSmp, UV * VeinTiling).rgb), VeinAmount);
+
+	return PH_BlendNormals(PH_BlendNormals(Detail, Crease), Vein);
+}
+
+// Vein coverage, for tinting base colour. Same gating as the normal so the two agree.
+float PH_VeinMask(
+	float2 UV, float3 Tension,
+	Texture2D MaskTex, SamplerState MaskSmp,
+	Texture2D VeinTex, SamplerState VeinSmp,
+	float VeinTiling, float MaskGain, float MaskSharpness)
+{
+	float Band = PH_Band(Texture2DSample(MaskTex, MaskSmp, UV).r, MaskGain, MaskSharpness);
+	return Texture2DSample(VeinTex, VeinSmp, UV * VeinTiling).a * saturate(Tension.r) * (1.0f - 0.7f * Band);
+}
+
+// Crease coverage, for darkening base colour inside the folds.
+float PH_CreaseMask(
+	float2 UV, float3 Tension,
+	Texture2D MaskTex, SamplerState MaskSmp,
+	float CreaseFrequency, float CreaseSharpness, float CreaseWarp, float CreaseRange,
+	float WrinkleBase, float CompressGain, float MaskGain, float MaskSharpness)
+{
+	float4 M = Texture2DSample(MaskTex, MaskSmp, UV);
+	return saturate(-PH_CreaseHeightAt(UV, M, saturate(Tension.g), CreaseFrequency, CreaseSharpness,
+									   CreaseWarp, CreaseRange, WrinkleBase, CompressGain,
+									   MaskGain, MaskSharpness));
+}
+
+#endif // PIANOHAND_SKIN_USH

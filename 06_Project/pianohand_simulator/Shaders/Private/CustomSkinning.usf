@@ -1,0 +1,97 @@
+// PianoHand custom skinning compute kernel
+//
+// SKIN_MODE 0 : Linear Blend Skinning (LBS)
+// SKIN_MODE 1 : Dual Quaternion Skinning (DQS)
+//
+// Inputs are in the rest (bind) space of the mesh. BoneTransforms are already
+// (RefPoseInverse * CurrentPose) so the kernel only does the blend.
+
+#include "/Engine/Public/Platform.ush"
+#include "/PianoHand/Public/SkinningCommon.ush"
+
+#ifndef THREADGROUP_SIZE
+#define THREADGROUP_SIZE 64
+#endif
+
+#ifndef SKIN_MODE
+#define SKIN_MODE 0
+#endif
+
+uint NumVertices;
+uint NumBones;
+
+StructuredBuffer<float3>          RestPositions;
+StructuredBuffer<float3>          RestNormals;
+StructuredBuffer<uint4>           BoneIndices;   // 4 influences per vertex
+StructuredBuffer<float4>          BoneWeights;   // sum == 1
+StructuredBuffer<FBoneTransform>  BoneTransforms;
+
+RWStructuredBuffer<float3>        OutPositions;
+RWStructuredBuffer<float3>        OutNormals;
+
+[numthreads(THREADGROUP_SIZE, 1, 1)]
+void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	const uint VertexIndex = DispatchThreadId.x;
+	if (VertexIndex >= NumVertices)
+	{
+		return;
+	}
+
+	const float3 RestP = RestPositions[VertexIndex];
+	const float3 RestN = RestNormals[VertexIndex];
+	const uint4  Idx   = min(BoneIndices[VertexIndex], NumBones - 1);
+	const float4 W     = BoneWeights[VertexIndex];
+
+	float3 SkinnedP = 0;
+	float3 SkinnedN = 0;
+
+#if SKIN_MODE == 0
+	// ---------------- LBS ----------------
+	UNROLL
+	for (uint i = 0; i < 4; ++i)
+	{
+		const float Weight = W[i];
+		if (Weight > 0.0f)
+		{
+			const FBoneTransform T = BoneTransforms[Idx[i]];
+			SkinnedP += Weight * TransformPosition(T, RestP);
+			SkinnedN += Weight * TransformVector(T, RestN);
+		}
+	}
+#else
+	// ---------------- DQS ----------------
+	FDualQuat Blend;
+	Blend.Real = 0;
+	Blend.Dual = 0;
+	float4 PivotReal = 0;
+
+	UNROLL
+	for (uint i = 0; i < 4; ++i)
+	{
+		const float Weight = W[i];
+		if (Weight > 0.0f)
+		{
+			FDualQuat DQ = DualQuatFromTransform(BoneTransforms[Idx[i]]);
+			if (i == 0)
+			{
+				PivotReal = DQ.Real;
+			}
+			// Antipodality: keep every quaternion in the same hemisphere as the first influence
+			const float Sign = (dot(DQ.Real, PivotReal) < 0.0f) ? -1.0f : 1.0f;
+			Blend.Real += Weight * Sign * DQ.Real;
+			Blend.Dual += Weight * Sign * DQ.Dual;
+		}
+	}
+
+	const float Len = max(length(Blend.Real), 1e-8f);
+	Blend.Real /= Len;
+	Blend.Dual /= Len;
+
+	SkinnedP = DualQuatTransformPosition(Blend, RestP);
+	SkinnedN = DualQuatTransformVector(Blend, RestN);
+#endif
+
+	OutPositions[VertexIndex] = SkinnedP;
+	OutNormals[VertexIndex]   = normalize(SkinnedN);
+}
