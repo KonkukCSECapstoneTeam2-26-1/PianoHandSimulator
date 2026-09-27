@@ -17,6 +17,12 @@
 //                             scaled by the per-finger weights chosen at bake time
 //   G = 0.5 + 0.5 * s / CreaseRange, s = signed distance ALONG the bone from the joint pivot (cm)
 //   B = raw joint band, unweighted
+//   A = 0.5 + 0.5 * dorsality - which SIDE of the joint this texel is on. +1 is the side that
+//       STRETCHES when the joint flexes (the back of the hand), -1 the side that COMPRESSES (the
+//       palm). The band from skin weights wraps all the way AROUND a joint, so without a side
+//       signal one gate has to serve both, and it can only ever be right on one of them. Skin is
+//       not symmetric here: the palm folds as the hand closes, while the loose skin over a knuckle
+//       gathers as the hand OPENS and pulls taut as it closes. Two gates, blended by A.
 //
 // Why G stores a coordinate and not a direction: the obvious encoding is the crease angle, with the
 // shader rotating UV space to match. That shatters. Rotating a global coordinate by a per-pixel
@@ -107,10 +113,45 @@ float PH_Band(float MaskR, float MaskGain, float MaskSharpness)
 	return pow(saturate(MaskR * MaskGain), max(MaskSharpness, 0.1f));
 }
 
+// 0 on the palm side, 1 on the back-of-hand side. SideSharpness squeezes the transition; at 1 it
+// is the raw cosine, higher values make the two regimes meet over a narrower band around the
+// sides of the finger. SideFlip is there because "which way does this rig curl" is a convention,
+// not a fact - if a rig flexes the other way round, set it to -1 instead of re-baking.
+float PH_DorsalSide(float MaskA, float SideSharpness, float SideFlip)
+{
+	float D = (MaskA * 2.0f - 1.0f) * SideFlip;
+	return saturate(D * SideSharpness * 0.5f + 0.5f);
+}
+
+// The two regimes, kept apart so each can be tuned on its own:
+//
+//   palm     at rest a few standing creases (PalmarBase); closing the hand compresses the skin and
+//            the folds deepen (PalmarCompress); opening it irons them out (PalmarIron).
+//
+//   knuckle  the reverse. The skin over the back of a joint carries slack, so at rest it is
+//            GATHERED (DorsalBase); flexing spends that slack and the surface goes taut
+//            (DorsalIron). This is the case a single compression-driven gate gets backwards.
+//
+// Both sides get a relax term: slack is stretch that has just been RELEASED and has not settled
+// yet, so it outlives the strain that produced it and briefly deepens the folds. On the back of a
+// knuckle that IS the effect you see when a fist opens, which is why DorsalRelax is the larger of
+// the two by default.
+float PH_CreaseGate(
+	float Dorsal, float Compress, float Stretch, float Relax,
+	float PalmarBase, float PalmarCompress, float PalmarIron, float PalmarRelax,
+	float DorsalBase, float DorsalIron, float DorsalRelax)
+{
+	float Palm = PalmarBase + Compress * PalmarCompress + Relax * PalmarRelax - Stretch * PalmarIron;
+	float Back = DorsalBase + Relax * DorsalRelax - Stretch * DorsalIron;
+	return saturate(lerp(Palm, Back, Dorsal));
+}
+
 float PH_CreaseHeightAt(
 	float2 UV, float4 M, float Compress, float Stretch, float Relax,
 	float CreaseFrequency, float CreaseSharpness, float CreaseWarp, float CreaseRange,
-	float WrinkleBase, float CompressGain, float StretchSmooth, float RelaxGain,
+	float PalmarBase, float PalmarCompress, float PalmarIron, float PalmarRelax,
+	float DorsalBase, float DorsalIron, float DorsalRelax,
+	float SideSharpness, float SideFlip,
 	float MaskGain, float MaskSharpness)
 {
 	float Band = PH_Band(M.r, MaskGain, MaskSharpness);
@@ -123,11 +164,9 @@ float PH_CreaseHeightAt(
 	// Vary depth from line to line, as a smooth function of s only - real knuckle creases are not
 	// a uniform corrugation. Noise in s stays smooth in screen space, so this costs no stability.
 	Profile *= saturate(0.55f + PH_Fbm(float2(S * 2.5f, 3.1f)) * 1.8f);
-	// Compression deepens, stretch irons flat, released slack brings folds back for a moment.
-	// These are three separate terms, not one signed strain: skin does not respond symmetrically
-	// about rest, and the slack term has to outlive the strain that produced it.
-	float Gate = saturate(WrinkleBase + Compress * CompressGain + Relax * RelaxGain
-	                      - Stretch * StretchSmooth);
+	float Gate = PH_CreaseGate(PH_DorsalSide(M.a, SideSharpness, SideFlip), Compress, Stretch, Relax,
+							   PalmarBase, PalmarCompress, PalmarIron, PalmarRelax,
+							   DorsalBase, DorsalIron, DorsalRelax);
 	return Profile * Band * Gate;
 }
 
@@ -145,7 +184,9 @@ float3 PH_SkinNormal(
 	float DetailTiling, float DetailStrength,
 	float CreaseFrequency, float CreaseSharpness, float CreaseWarp, float CreaseDepth, float CreaseRange,
 	float VeinTiling, float VeinStrength,
-	float WrinkleBase, float CompressGain, float StretchSmooth, float RelaxGain,
+	float PalmarBase, float PalmarCompress, float PalmarIron, float PalmarRelax,
+	float DorsalBase, float DorsalIron, float DorsalRelax,
+	float SideSharpness, float SideFlip,
 	float MaskGain, float MaskSharpness, float Eps)
 {
 	float Stretch  = saturate(Tension.r);
@@ -165,14 +206,17 @@ float3 PH_SkinNormal(
 
 	// --- creases
 	float H0 = PH_CreaseHeightAt(UV, M0, Compress, Stretch, Slack, CreaseFrequency, CreaseSharpness,
-								 CreaseWarp, CreaseRange, WrinkleBase, CompressGain, StretchSmooth,
-								 RelaxGain, MaskGain, MaskSharpness);
+								 CreaseWarp, CreaseRange, PalmarBase, PalmarCompress, PalmarIron, PalmarRelax,
+								 DorsalBase, DorsalIron, DorsalRelax, SideSharpness, SideFlip,
+								 MaskGain, MaskSharpness);
 	float HX = PH_CreaseHeightAt(UV + float2(Eps, 0), MX, Compress, Stretch, Slack, CreaseFrequency,
-								 CreaseSharpness, CreaseWarp, CreaseRange, WrinkleBase, CompressGain,
-								 StretchSmooth, RelaxGain, MaskGain, MaskSharpness);
+								 CreaseSharpness, CreaseWarp, CreaseRange, PalmarBase, PalmarCompress, PalmarIron, PalmarRelax,
+								 DorsalBase, DorsalIron, DorsalRelax, SideSharpness, SideFlip,
+								 MaskGain, MaskSharpness);
 	float HY = PH_CreaseHeightAt(UV + float2(0, Eps), MY, Compress, Stretch, Slack, CreaseFrequency,
-								 CreaseSharpness, CreaseWarp, CreaseRange, WrinkleBase, CompressGain,
-								 StretchSmooth, RelaxGain, MaskGain, MaskSharpness);
+								 CreaseSharpness, CreaseWarp, CreaseRange, PalmarBase, PalmarCompress, PalmarIron, PalmarRelax,
+								 DorsalBase, DorsalIron, DorsalRelax, SideSharpness, SideFlip,
+								 MaskGain, MaskSharpness);
 	float2 G = float2(HX - H0, HY - H0) / max(Eps, 1e-6f) * CreaseDepth;
 	G = clamp(G, -8.0f, 8.0f);
 	float3 Crease = normalize(float3(-G.x, -G.y, 1.0f));
@@ -182,8 +226,10 @@ float3 PH_SkinNormal(
 	float3 Detail = PH_UnpackNormal(Texture2DSample(DetailTex, DetailSmp, UV * DetailTiling).rgb);
 	Detail = PH_ScaleNormal(Detail, DetailStrength);
 
-	// --- veins: ride on stretch, and stay off the joint bands where the creases live
-	float VeinAmount = Stretch * VeinStrength * (1.0f - 0.7f * Band);
+	// --- veins: ride on stretch, stay off the joint bands where the creases live, and stay on the
+	// back of the hand - palms do not show veins, and before the side channel existed they did.
+	float DorsalSide = PH_DorsalSide(M0.a, SideSharpness, SideFlip);
+	float VeinAmount = Stretch * VeinStrength * (1.0f - 0.7f * Band) * lerp(0.1f, 1.0f, DorsalSide);
 	float3 Vein = PH_ScaleNormal(PH_UnpackNormal(Texture2DSample(VeinTex, VeinSmp, UV * VeinTiling).rgb), VeinAmount);
 
 	return PH_BlendNormals(PH_BlendNormals(Detail, Crease), Vein);
@@ -194,10 +240,13 @@ float PH_VeinMask(
 	float2 UV, float3 Tension,
 	Texture2D MaskTex, SamplerState MaskSmp,
 	Texture2D VeinTex, SamplerState VeinSmp,
-	float VeinTiling, float MaskGain, float MaskSharpness)
+	float VeinTiling, float SideSharpness, float SideFlip, float MaskGain, float MaskSharpness)
 {
-	float Band = PH_Band(Texture2DSample(MaskTex, MaskSmp, UV).r, MaskGain, MaskSharpness);
-	return Texture2DSample(VeinTex, VeinSmp, UV * VeinTiling).a * saturate(Tension.r) * (1.0f - 0.7f * Band);
+	float4 M = Texture2DSample(MaskTex, MaskSmp, UV);
+	float Band = PH_Band(M.r, MaskGain, MaskSharpness);
+	float Side = lerp(0.1f, 1.0f, PH_DorsalSide(M.a, SideSharpness, SideFlip));
+	return Texture2DSample(VeinTex, VeinSmp, UV * VeinTiling).a * saturate(Tension.r)
+		 * (1.0f - 0.7f * Band) * Side;
 }
 
 // Crease coverage, for darkening base colour inside the folds.
@@ -205,14 +254,17 @@ float PH_CreaseMask(
 	float2 UV, float3 Tension, float Relax,
 	Texture2D MaskTex, SamplerState MaskSmp,
 	float CreaseFrequency, float CreaseSharpness, float CreaseWarp, float CreaseRange,
-	float WrinkleBase, float CompressGain, float StretchSmooth, float RelaxGain,
+	float PalmarBase, float PalmarCompress, float PalmarIron, float PalmarRelax,
+	float DorsalBase, float DorsalIron, float DorsalRelax,
+	float SideSharpness, float SideFlip,
 	float MaskGain, float MaskSharpness)
 {
 	float4 M = Texture2DSample(MaskTex, MaskSmp, UV);
 	return saturate(-PH_CreaseHeightAt(UV, M, saturate(Tension.g), saturate(Tension.r), saturate(Relax),
 									   CreaseFrequency, CreaseSharpness, CreaseWarp, CreaseRange,
-									   WrinkleBase, CompressGain, StretchSmooth, RelaxGain,
-									   MaskGain, MaskSharpness));
+									   PalmarBase, PalmarCompress, PalmarIron, PalmarRelax,
+								 DorsalBase, DorsalIron, DorsalRelax, SideSharpness, SideFlip,
+								 MaskGain, MaskSharpness));
 }
 
 #endif // PIANOHAND_SKIN_USH

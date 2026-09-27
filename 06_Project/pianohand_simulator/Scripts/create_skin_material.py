@@ -28,6 +28,7 @@ Maps
       R = weighted joint band (per-finger weights applied at bake time)
       G = signed distance along the bone from the joint pivot, +-CreaseRange cm
       B = raw joint band
+      A = which side of the joint - +1 stretches on flexion (back of hand), -1 compresses (palm)
   Vertex colour A carries the relax slack (released stretch, decaying) from the tension pass.
     CreaseRange here MUST match S_RANGE in the baker, or the crease spacing comes out wrong.
   Tension vertex colour from CustomSkinningTension.usf: R stretch, G compression, B signed.
@@ -112,27 +113,40 @@ PARAMS = [
     # T_SkinMicroNormal is authored at MetaHuman body texel density; the hand's UVs are repacked
     # to fill 0..1, so it needs many more repeats than our own 1k tile did (that one was 4.0).
     ('DetailTiling',    14.0),   # skin micro-relief repeats per UV unit
-    ('DetailStrength',   1.0),
-    ('CreaseFrequency',  1.5),   # creases per CENTIMETRE along the bone (the map is in cm)
-    ('CreaseSharpness',  2.6),   # higher = narrower grooves
+    ('DetailStrength',   0.8),
+    ('CreaseFrequency', 1.15),   # creases per CENTIMETRE along the bone (the map is in cm)
+    ('CreaseSharpness',  3.2),   # higher = narrower grooves
     ('CreaseWarp',      0.25),   # fbm meander in cm, so the lines are not parallel rulings
-    ('CreaseDepth',     0.055),
+    ('CreaseDepth',    0.042),
     ('CreaseRange',      3.0),   # MUST match S_RANGE in Tools/bake_skin_maps.py
     ('VeinTiling',       4.0),
-    ('VeinStrength',     1.0),
-    ('WrinkleBase',      0.35),  # crease amount kept at rest - extended fingers still show knuckles
-    ('CompressGain',     2.2),   # how fast creases deepen under compression
-    ('StretchSmooth',    1.2),   # how fast stretch irons them flat again (asymmetric on purpose)
-    ('RelaxGain',        1.8),   # how strongly released-stretch slack brings folds back
-    ('MaskGain',         1.6),   # widens/narrows the baked concentration band
-    ('MaskSharpness',    3.0),   # tightens the band around the joint (1 = the raw baked band)
+    ('VeinStrength',     0.6),
+    # Two crease regimes, because the joint band wraps all the way around a joint and the two
+    # sides of it do OPPOSITE things. Mask alpha says which side a texel is on.
+    #   palm    rest creases deepen as the hand CLOSES
+    ('PalmarBase',      0.30),   # standing creases on an open palm
+    ('PalmarCompress',   2.6),   # how fast they deepen under compression
+    ('PalmarIron',       1.2),   # how fast stretch irons them flat
+    ('PalmarRelax',      0.8),   # released-stretch slack, palm side
+    #   knuckle the skin over the back of a joint carries slack, so it is gathered at REST and
+    #           pulls taut as the hand closes - the reverse of the palm
+    ('DorsalBase',      0.40),   # folds standing over an extended knuckle
+    ('DorsalIron',       5.0),   # how fast flexion spends that slack and the surface goes taut
+    ('DorsalRelax',      4.0),   # the folds that come back just after a fist opens
+    ('SideSharpness',    2.0),   # how narrow the palm/back transition is around the sides
+    ('SideFlip',         1.0),   # -1 if a rig curls the other way; avoids a re-bake
+    ('MaskGain',         1.0),   # widens/narrows the baked concentration band
+    ('MaskSharpness',    4.5),   # tightens the band around the joint (1 = the raw baked band)
     ('Eps',            0.0020),  # finite-difference step in UV; a few texels of the 2k mask
 ]
 p = {n: scalar(n, v, -1700, 400 + i * 80) for i, (n, v) in enumerate(PARAMS)}
 
-NORMAL_ARGS = ['DetailTiling', 'DetailStrength', 'CreaseFrequency', 'CreaseSharpness', 'CreaseWarp',
-               'CreaseDepth', 'CreaseRange', 'VeinTiling', 'VeinStrength', 'WrinkleBase',
-               'CompressGain', 'StretchSmooth', 'RelaxGain', 'MaskGain', 'MaskSharpness', 'Eps']
+SIDE_ARGS = ['PalmarBase', 'PalmarCompress', 'PalmarIron', 'PalmarRelax',
+             'DorsalBase', 'DorsalIron', 'DorsalRelax', 'SideSharpness', 'SideFlip']
+
+NORMAL_ARGS = (['DetailTiling', 'DetailStrength', 'CreaseFrequency', 'CreaseSharpness', 'CreaseWarp',
+                'CreaseDepth', 'CreaseRange', 'VeinTiling', 'VeinStrength']
+               + SIDE_ARGS + ['MaskGain', 'MaskSharpness', 'Eps'])
 
 NORMAL_BODY = """return PH_SkinNormal(
     UV, Tension, Relax,
@@ -142,22 +156,26 @@ NORMAL_BODY = """return PH_SkinNormal(
     DetailTiling, DetailStrength,
     CreaseFrequency, CreaseSharpness, CreaseWarp, CreaseDepth, CreaseRange,
     VeinTiling, VeinStrength,
-    WrinkleBase, CompressGain, StretchSmooth, RelaxGain, MaskGain, MaskSharpness, Eps);"""
+    PalmarBase, PalmarCompress, PalmarIron, PalmarRelax,
+    DorsalBase, DorsalIron, DorsalRelax, SideSharpness, SideFlip,
+    MaskGain, MaskSharpness, Eps);"""
 
 nrm_inputs = ['UV', 'Tension', 'Relax', 'WrinkleMaskTex', 'SkinDetailTex', 'VeinTex'] + NORMAL_ARGS
 nrm = custom('PH_SkinNormal', NORMAL_BODY, unreal.CustomMaterialOutputType.CMOT_FLOAT3, nrm_inputs, -1000, -300)
 
 VEIN_BODY = """return PH_VeinMask(UV, Tension, WrinkleMaskTex, WrinkleMaskTexSampler,
-    VeinTex, VeinTexSampler, VeinTiling, MaskGain, MaskSharpness);"""
-vein_inputs = ['UV', 'Tension', 'WrinkleMaskTex', 'VeinTex', 'VeinTiling', 'MaskGain', 'MaskSharpness']
+    VeinTex, VeinTexSampler, VeinTiling, SideSharpness, SideFlip, MaskGain, MaskSharpness);"""
+vein_inputs = ['UV', 'Tension', 'WrinkleMaskTex', 'VeinTex', 'VeinTiling', 'SideSharpness',
+               'SideFlip', 'MaskGain', 'MaskSharpness']
 vein = custom('PH_VeinMask', VEIN_BODY, unreal.CustomMaterialOutputType.CMOT_FLOAT1, vein_inputs, -1000, 300)
 
 CREASE_BODY = """return PH_CreaseMask(UV, Tension, Relax, WrinkleMaskTex, WrinkleMaskTexSampler,
-    CreaseFrequency, CreaseSharpness, CreaseWarp, CreaseRange, WrinkleBase, CompressGain,
-    StretchSmooth, RelaxGain, MaskGain, MaskSharpness);"""
-crease_inputs = ['UV', 'Tension', 'Relax', 'WrinkleMaskTex', 'CreaseFrequency', 'CreaseSharpness',
-                 'CreaseWarp', 'CreaseRange', 'WrinkleBase', 'CompressGain', 'StretchSmooth',
-                 'RelaxGain', 'MaskGain', 'MaskSharpness']
+    CreaseFrequency, CreaseSharpness, CreaseWarp, CreaseRange,
+    PalmarBase, PalmarCompress, PalmarIron, PalmarRelax,
+    DorsalBase, DorsalIron, DorsalRelax, SideSharpness, SideFlip,
+    MaskGain, MaskSharpness);"""
+crease_inputs = (['UV', 'Tension', 'Relax', 'WrinkleMaskTex', 'CreaseFrequency', 'CreaseSharpness',
+                  'CreaseWarp', 'CreaseRange'] + SIDE_ARGS + ['MaskGain', 'MaskSharpness'])
 crease = custom('PH_CreaseMask', CREASE_BODY, unreal.CustomMaterialOutputType.CMOT_FLOAT1, crease_inputs, -1000, 560)
 
 

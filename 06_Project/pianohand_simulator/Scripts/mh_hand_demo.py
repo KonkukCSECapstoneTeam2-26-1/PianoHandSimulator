@@ -17,9 +17,10 @@ Helpers left in the global namespace:
     mark('released')             # set_t by name: idle | closing | grasp | released | settled
     use_material('skin'|'tension'|'clay')
     set_detail(crease_depth=0.06, relax_gain=8.0, ...)
-    set_skin(DetailTiling=14, CreaseDepth=0.05, ...)
+    set_skin(DorsalBase=0.65, DorsalIron=6.0, ...)
     skin_params()
-    look_at_hand(18)
+    view('dorsal', 16)           # repeatable camera, derived from the rig's own flexion axis
+    shot('name')                 # HighResShot; must be its own call, after the pose settles
 """
 import unreal
 
@@ -49,8 +50,10 @@ DETAIL = dict(
     wrinkle_amplitude       = 0.035,
     wrinkle_frequency       = 6.0,
     volume_bulge            = 0.15,
-    relax_gain              = 8.0,
-    relax_tau               = 0.45,
+    # 0.45s is closer to real skin, but the fold it leaves is then gone before a
+    # screenshot round-trip can catch it; 0.9s reads in motion and still stills.
+    relax_gain              = 12.0,
+    relax_tau               = 0.9,
     relax_crease_gain       = 0.06,
 )
 
@@ -130,6 +133,40 @@ def look_at_hand(dist=18.0, height=4.0, pitch=-8.0, side=3.0):
     p = hand_comp.get_socket_transform('middle_01_r', unreal.RelativeTransformSpace.RTS_WORLD).translation
     ELL.set_level_viewport_camera_info(p + unreal.Vector(-dist, side, height),
                                        unreal.Rotator(roll=0.0, pitch=pitch, yaw=0.0))
+
+
+def view(side='dorsal', dist=17.0, lift=0.0):
+    """Frame the hand from the back or the palm, derived from the rig rather than eyeballed.
+
+    Flexion is a negative rotation about the bone's local +Z, and a point offset along
+    cross(flexAxis, boneDir) stretches when the joint bends - so that direction IS the back of the
+    hand. Bones run down local -X, so it works out to the bone's -Y. Same derivation the wrinkle
+    mask's alpha channel is baked from, which is what makes these views line up with it.
+
+    The direction comes from hand_r and nothing else. Take it from a finger bone instead and the
+    camera swings with the curl, so a 'dorsal' view set while the fist is closed lands on the palm
+    once the hand opens. hand_r is never animated here, so it is the stable frame.
+    """
+    ML = unreal.MathLibrary
+    wrist = hand_comp.get_socket_transform('hand_r', unreal.RelativeTransformSpace.RTS_WORLD)
+    knuck = hand_comp.get_socket_transform('middle_02_r', unreal.RelativeTransformSpace.RTS_WORLD)
+    target = (wrist.translation + knuck.translation) * 0.5 + unreal.Vector(0, 0, lift)
+    rot = wrist.rotation.rotator()
+    dorsal = ML.multiply_vector_float(ML.get_right_vector(rot), -1.0)     # -Y
+    d = dorsal if side == 'dorsal' else (
+        ML.multiply_vector_float(dorsal, -1.0) if side == 'palmar' else ML.get_up_vector(rot))
+    eye = target + ML.multiply_vector_float(d, dist)
+    ELL.set_level_viewport_camera_info(eye, ML.find_look_at_rotation(eye, target))
+    print('view -> %s, %.0fcm' % (side, dist))
+
+
+def shot(name, width=1920, height=1080):
+    """One HighResShot. It only fires when the editor TICKS, and a blocking python call is not a
+    tick, so this has to be its own call - and the call that changed the pose has to be an earlier
+    one, or the previous pose is what lands in the file."""
+    unreal.SystemLibrary.execute_console_command(
+        ELL.get_editor_world(), 'HighResShot %dx%d filename="%s"' % (width, height, name))
+    print('shot ->', name)
 
 
 use_material(START_MAT)

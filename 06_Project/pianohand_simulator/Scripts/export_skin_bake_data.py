@@ -4,7 +4,11 @@ Run inside the editor:
     exec(open(r'C:/Git/PianoHandSimulator/06_Project/pianohand_simulator/Scripts/export_skin_bake_data.py').read())
 
 Writes Scripts/skin_bake_data.json:
-    bones      [{name, parent, pos}]         ref-pose component-space bone origins
+    bones      [{name, parent, pos, fwd, flex}]
+               ref-pose component-space bone origin, the direction the bone POINTS (MetaHuman
+               bones run down local -X), and its flexion axis (local +Z - a finger curl is a
+               negative yaw, which is a negative rotation about local Z). The baker needs both to
+               work out which side of each joint is the back of the hand.
     uvs        [[u,v] x 3] per triangle      UV set 0
     tris       [[i0,i1,i2]]                  vertex ids
     pos        [[x,y,z]]                     ref-pose vertex positions
@@ -39,13 +43,20 @@ print('tris=%d verts=%d' % (num_tri, num_vtx))
 # --- bones -------------------------------------------------------------------------------------
 dyn, bones_info = BW.get_all_bones_info(dyn)
 bones = []
+ML = unreal.MathLibrary
 for b in bones_info:
     # world_transform is already component space in the ref pose - no parent accumulation needed
     t = b.get_editor_property('world_transform')
     p = t.translation
+    rot = t.rotation.rotator()
+    fwd = ML.get_forward_vector(rot)      # local +X
+    up = ML.get_up_vector(rot)            # local +Z, the curl axis
     bones.append({'name': str(b.get_editor_property('name')),
                   'parent': int(b.get_editor_property('parent_index')),
-                  'pos': [float(p.x), float(p.y), float(p.z)]})
+                  'pos': [float(p.x), float(p.y), float(p.z)],
+                  # bones run down local -X, so the direction the bone points is -forward
+                  'fwd': [-float(fwd.x), -float(fwd.y), -float(fwd.z)],
+                  'flex': [float(up.x), float(up.y), float(up.z)]})
 
 # --- geometry ----------------------------------------------------------------------------------
 dyn, tri_list, _ = Q.get_all_triangle_indices(dyn, True)

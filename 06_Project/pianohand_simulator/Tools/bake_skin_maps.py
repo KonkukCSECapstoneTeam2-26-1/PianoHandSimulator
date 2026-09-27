@@ -9,7 +9,17 @@ Produces three PNGs that Scripts/import_skin_textures.py then imports as UE text
      G = 0.5 + 0.5 * clamp(s / S_RANGE, -1, 1), where s is the signed distance ALONG the joint's
          bone axis, measured from the joint pivot (cm)
      B = raw joint band (4*w0*w1), unweighted
-     A = 1
+     A = 0.5 + 0.5 * dorsality - which SIDE of the joint a texel is on. +1 is the side that
+         STRETCHES when the joint flexes (the back of the hand), -1 the side that COMPRESSES
+         (the palm). Without this the shader has one crease gate for a band that wraps all the
+         way around the joint, so it cannot do what skin actually does: the palm folds as you
+         close, while the loose skin over a knuckle gathers as you OPEN and pulls taut as you
+         close. Derivation: with flexion a negative rotation of angle theta about the bone's
+         local +Z, a point at perpendicular offset h along u = cross(flexAxis, boneDir) changes
+         its distance to the proximal segment by about -h*theta, so h > 0 stretches. u is
+         therefore the dorsal direction, and dorsality is the cosine of the vertex's
+         perpendicular offset against it, averaged over the vertex's influences so it stays
+         continuous where the dominant bone changes.
 
      The band comes straight off the skin weights: with the two largest influences w0,w1,
      4*w0*w1 is 0 on rigid parts and 1 exactly on a joint's 50/50 blend line.
@@ -133,14 +143,30 @@ def bake_wrinkle_mask(data, size):
     bone_pos = np.array([b['pos'] for b in bones], dtype=np.float64)
     bone_parent = [b['parent'] for b in bones]
     bone_name = [b['name'] for b in bones]
+    bone_dorsal = _dorsal_axes(bones)
 
     n_vtx = len(pos)
     band = np.zeros(n_vtx)
     band_w = np.zeros(n_vtx)
     along = np.zeros(n_vtx)
+    dorsal = np.zeros(n_vtx)
 
     for v, w in enumerate(weights):
         w = [e for e in w if e[1] > 0.0]
+        if not w:
+            continue
+        # Which side of the joint, averaged over every influence so the value stays continuous
+        # where the dominant bone hands over. Each influence votes in ITS OWN bone frame.
+        acc = tot = 0.0
+        for bi, bw in w:
+            u, fwd = bone_dorsal[bi]
+            r = pos[v] - bone_pos[bi]
+            perp = r - fwd * float(r @ fwd)
+            n = np.linalg.norm(perp)
+            if n > 1e-6:
+                acc += bw * float(perp @ u) / n
+                tot += bw
+        dorsal[v] = acc / tot if tot > 1e-9 else 0.0
         if len(w) < 2:
             continue
         (b0, w0), (b1, w1) = w[0], w[1]
@@ -167,7 +193,7 @@ def bake_wrinkle_mask(data, size):
         if uv is None:
             continue
         pts = [np.array(x, dtype=np.float64) for x in uv]
-        vals = [(band_w[vi], along[vi], band[vi], 1.0) for vi in (i0, i1, i2)]
+        vals = [(band_w[vi], along[vi], band[vi], dorsal[vi]) for vi in (i0, i1, i2)]
         _raster(acc, cov, size, pts, vals)
 
     mask = np.zeros((size, size, 4), dtype=np.float32)
@@ -179,8 +205,23 @@ def bake_wrinkle_mask(data, size):
     out[..., 0] = np.clip(mask[..., 0], 0, 1) * 255
     out[..., 1] = np.clip(mask[..., 1] / S_RANGE * 0.5 + 0.5, 0, 1) * 255
     out[..., 2] = np.clip(mask[..., 2], 0, 1) * 255
-    out[..., 3] = 255
+    out[..., 3] = np.clip(mask[..., 3] * 0.5 + 0.5, 0, 1) * 255
     return out, float(hit.mean())
+
+
+def _dorsal_axes(bones):
+    """Per bone: (dorsal direction, bone direction), both unit, in component space."""
+    out = []
+    for b in bones:
+        fwd = np.array(b.get('fwd', [1.0, 0.0, 0.0]), dtype=np.float64)
+        flex = np.array(b.get('flex', [0.0, 0.0, 1.0]), dtype=np.float64)
+        nf = np.linalg.norm(fwd)
+        fwd = fwd / nf if nf > 1e-9 else np.array([1.0, 0.0, 0.0])
+        u = np.cross(flex, fwd)
+        nu = np.linalg.norm(u)
+        u = u / nu if nu > 1e-9 else np.array([0.0, 0.0, 1.0])
+        out.append((u, fwd))
+    return out
 
 
 def _depth(parents, b):
@@ -307,7 +348,7 @@ def main():
 
     mask, coverage = bake_wrinkle_mask(data, MASK_SIZE)
     Image.fromarray(mask, 'RGBA').save(out_dir + '/T_PH_WrinkleMask.png')
-    print('T_PH_WrinkleMask  %dx%d  UV coverage %.1f%%  (G range +-%.1fcm)'
+    print('T_PH_WrinkleMask  %dx%d  UV coverage %.1f%%  (G range +-%.1fcm, A = dorsal side)'
           % (MASK_SIZE, MASK_SIZE, coverage * 100, S_RANGE))
 
     Image.fromarray(bake_skin_detail(TILE_SIZE), 'RGB').save(out_dir + '/T_PH_SkinDetail_N.png')
