@@ -290,6 +290,7 @@ namespace PianoHandSkinDeformer
 		// Phase 2: per-vertex tension (edge strain vs rest pose) -> vertex colour
 		// -------------------------------------------------------------------
 		FRDGBufferRef VertexStrainBuffer = nullptr;
+		FRDGBufferRef RelaxStateBuffer = nullptr;
 		FRDGBufferSRVRef SkinnedPositionSRV = nullptr;
 		const uint32 NumLodVertices = Lod.GetNumVertices();
 
@@ -335,6 +336,37 @@ namespace PianoHandSkinDeformer
 			// Raw averaged strain, kept for the Phase 3 detail pass.
 			VertexStrainBuffer = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateStructuredDesc(sizeof(float), FMath::Max(NumLodVertices, 1u)), TEXT("PianoHandVertexStrain"));
 
+			// ---- relax state: the one thing here that has to survive the frame -------------
+			// Skin that has been pulled taut does not come back flat. Detecting that needs last
+			// frame's strain, so this buffer is extracted out of the graph and registered back in
+			// next frame. A LOD change or a first frame resets it - stale slack from a different
+			// vertex count would otherwise bleed folds onto the wrong places.
+			const bool bRelaxReset =
+				!State.RelaxStateBuffer.IsValid() ||
+				State.RelaxStateNumVertices != NumLodVertices ||
+				bInvalidatePreviousPosition;
+
+			if (bRelaxReset)
+			{
+				RelaxStateBuffer = GraphBuilder.CreateBuffer(
+					FRDGBufferDesc::CreateStructuredDesc(sizeof(float) * 2, FMath::Max(NumLodVertices, 1u)),
+					TEXT("PianoHandRelaxState"));
+				AddClearUAVPass(GraphBuilder, GraphBuilder.CreateUAV(RelaxStateBuffer), 0u);
+				State.RelaxStateNumVertices = NumLodVertices;
+			}
+			else
+			{
+				RelaxStateBuffer = GraphBuilder.RegisterExternalBuffer(State.RelaxStateBuffer, TEXT("PianoHandRelaxState"));
+			}
+
+			// Wall-clock delta, clamped: a hitch or a paused editor must not dump the whole decay
+			// in one step, and a zero delta would freeze the slack instead of letting it settle.
+			const double NowSeconds = FPlatformTime::Seconds();
+			const float RelaxDeltaTime = (State.RelaxLastTimeSeconds > 0.0)
+				? FMath::Clamp((float)(NowSeconds - State.RelaxLastTimeSeconds), 0.0f, 0.1f)
+				: 0.0f;
+			State.RelaxLastTimeSeconds = NowSeconds;
+
 			FRDGBufferUAVRef ColorUAV = GraphBuilder.CreateUAV(ColorBuffer, PF_R8G8B8A8);
 			TShaderMapRef<FPianoHandTensionResolveCS> ResolveShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
 			FPianoHandTensionResolveCS::FParameters* ResParams = GraphBuilder.AllocParameters<FPianoHandTensionResolveCS::FParameters>();
@@ -344,6 +376,11 @@ namespace PianoHandSkinDeformer
 			ResParams->StrainCountIn = GraphBuilder.CreateSRV(StrainCount);
 			ResParams->ColorBufferUAV = ColorUAV;
 			ResParams->VertexStrainOut = GraphBuilder.CreateUAV(VertexStrainBuffer);
+			ResParams->DeltaTime = RelaxDeltaTime;
+			ResParams->RelaxGain = Params.RelaxGain;
+			ResParams->RelaxTau = Params.RelaxTau;
+			ResParams->bResetRelax = bRelaxReset ? 1u : 0u;
+			ResParams->RelaxState = GraphBuilder.CreateUAV(RelaxStateBuffer);
 
 			FComputeShaderUtils::AddPass(
 				GraphBuilder,
@@ -351,6 +388,8 @@ namespace PianoHandSkinDeformer
 				ResolveShader,
 				ResParams,
 				FComputeShaderUtils::GetGroupCount(NumLodVertices, FPianoHandTensionResolveCS::ThreadGroupSize));
+
+			GraphBuilder.QueueBufferExtraction(RelaxStateBuffer, &State.RelaxStateBuffer);
 		}
 
 		// -------------------------------------------------------------------
@@ -359,6 +398,7 @@ namespace PianoHandSkinDeformer
 		if (Params.bDetailDisplacement && VertexStrainBuffer != nullptr && SkinnedPositionSRV != nullptr)
 		{
 			FRDGBufferSRVRef VertexStrainSRV = GraphBuilder.CreateSRV(VertexStrainBuffer);
+			FRDGBufferSRVRef RelaxStateSRV = GraphBuilder.CreateSRV(RelaxStateBuffer);
 
 			FPianoHandDetailDisplaceCS::FPermutationDomain DisplacePermutation;
 			DisplacePermutation.Set<FPianoHandDetailDisplaceCS::FBoneIndex16Dim>(bIndex16);
@@ -401,10 +441,13 @@ namespace PianoHandSkinDeformer
 				DispParams->CreaseCompressionGain = Params.CreaseCompressionGain;
 				DispParams->WrinkleAmplitude = Params.WrinkleAmplitude;
 				DispParams->WrinkleFrequency = Params.WrinkleFrequency;
+				DispParams->CreaseStretchRelief = Params.CreaseStretchRelief;
+				DispParams->RelaxCreaseGain = Params.RelaxCreaseGain;
 				DispParams->RestPositionBuffer = PositionSRV;
 				DispParams->InputWeightStream = WeightSRV;
 				DispParams->RefPoseInverses = GraphBuilder.CreateSRV(RefInvBuffer);
 				DispParams->VertexStrain = VertexStrainSRV;
+				DispParams->RelaxStateIn = RelaxStateSRV;
 				DispParams->PositionBufferUAV = PositionUAV;
 				DispParams->TangentBufferUAV = TangentUAV;
 
@@ -573,6 +616,10 @@ void UPianoHandSkinDeformerInstance::EnqueueWork(FEnqueueWorkDesc const& InDesc)
 		FrameParams.CreaseCompressionGain = Source->CreaseCompressionGain;
 		FrameParams.WrinkleAmplitude = Source->WrinkleAmplitude;
 		FrameParams.WrinkleFrequency = Source->WrinkleFrequency;
+		FrameParams.CreaseStretchRelief = Source->CreaseStretchRelief;
+		FrameParams.RelaxGain = Source->RelaxGain;
+		FrameParams.RelaxTau = Source->RelaxTau;
+		FrameParams.RelaxCreaseGain = Source->RelaxCreaseGain;
 	}
 	else
 	{

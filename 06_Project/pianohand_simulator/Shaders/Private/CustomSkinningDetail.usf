@@ -27,7 +27,7 @@
 //     compute and needs no authored mask. Grooving along that band gives the creases that are visible
 //     on every knuckle even with the finger held straight, and the groove deepens under compression.
 //
-// d_wrinkle - the extra folds that only appear when bending
+// d_wrinkle - the extra folds that appear when bending, and again on the way back
 //     Ripples along the bone's own axis inside the joint band, scaled by compression only, so they
 //     vanish on a straight finger. Their density is limited by vertex density - for fine skin folds
 //     on a low-poly mesh this term wants Nanite tessellation underneath it.
@@ -61,11 +61,14 @@ float CreaseSharpness;       // exponent narrowing the joint band (1 = wide, 8 =
 float CreaseCompressionGain; // how much extra depth compression adds
 float WrinkleAmplitude;      // cm, bending-only ripples inside the joint band
 float WrinkleFrequency;      // radians per cm along the bone axis
+float CreaseStretchRelief;   // how strongly stretch irons the resting groove flat
+float RelaxCreaseGain;       // cm of extra groove at full relax slack
 
 Buffer<float>                    RestPositionBuffer;   // 3 floats per vertex, rest pose
 Buffer<uint>                     InputWeightStream;    // FSkinWeightVertexBuffer data
 StructuredBuffer<FBoneTransform> RefPoseInverses;      // RefBasesInvMatrix in section BoneMap order
 StructuredBuffer<float>          VertexStrain;         // per LOD vertex, from CustomSkinningTension.usf
+StructuredBuffer<float2>         RelaxStateIn;         // .y = relax slack, from CustomSkinningTension.usf
 
 RWBuffer<float>                   PositionBufferUAV;   // read + write (displaced in place)
 RWBuffer<TANGENT_RWBUFFER_FORMAT> TangentBufferUAV;    // read only in this pass
@@ -131,16 +134,28 @@ void DisplaceCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	const float JointBlend = saturate(4.0f * LargestWeight * SecondWeight);
 	const float JointBand = pow(max(JointBlend, 0.0f), max(CreaseSharpness, 1.0f));
 
+	// Compression and stretch are handled separately on purpose. Skin is not symmetric about rest:
+	// the inside of a bend folds hard, while the outside only smooths - one signed term cannot do both.
 	const float Compression = max(-Strain, 0.0f);
+	const float Stretch = max(Strain, 0.0f);
+	const float Slack = RelaxStateIn[VertexIndex].y;
 
-	// ---- resting crease, deepened by compression ----------------------------
-	const float CreaseTerm = -CreaseDepth * JointBand * (1.0f + CreaseCompressionGain * Compression * 10.0f);
+	// ---- resting crease: deepened by compression, ironed flat by stretch -----
+	// Clamped at zero so a hard stretch flattens the groove but never inverts it into a ridge.
+	const float CreaseScale = max(
+		1.0f + CreaseCompressionGain * Compression * 10.0f - CreaseStretchRelief * Stretch * 10.0f,
+		0.0f);
+	const float CreaseTerm = -CreaseDepth * JointBand * CreaseScale
+	                       - RelaxCreaseGain * JointBand * Slack;
 
-	// ---- bending-only ripples along the bone axis ---------------------------
+	// ---- ripples along the bone axis ----------------------------------------
+	// Driven by compression while bending, and by the released slack on the way back out - that
+	// second term is what puts folds on the back of a knuckle just after the finger straightens.
 	const float3 RestP = LoadPosition(RestPositionBuffer, VertexIndex);
 	const FBoneTransform RefInv = RefPoseInverses[min(DominantBone, NumSectionBones - 1)];
 	const float3 BoneLocal = TransformPosition(RefInv, RestP);
-	const float WrinkleTerm = WrinkleAmplitude * JointBand * Compression * sin(WrinkleFrequency * BoneLocal.x);
+	const float RippleDrive = Compression + Slack;
+	const float WrinkleTerm = WrinkleAmplitude * JointBand * RippleDrive * sin(WrinkleFrequency * BoneLocal.x);
 
 	const float Displacement = VolumeTerm + CreaseTerm + WrinkleTerm;
 	const float3 OutP = SkinnedP + Normal * Displacement;

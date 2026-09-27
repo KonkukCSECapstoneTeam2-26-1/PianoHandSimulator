@@ -10,12 +10,16 @@ Writes Scripts/skin_bake_data.json:
     pos        [[x,y,z]]                     ref-pose vertex positions
     weights    [[[boneIdx, w], ...]]         per vertex, sorted desc by weight
 
-The mesh here is the BASE mesh on purpose: the dense mesh shares its UV layout, so one bake serves
-both, and 3.2k verts rasterise in a second.
+The mesh here is the BASE (un-tessellated) hand on purpose: the dense mesh shares its UV layout,
+so one bake serves both, and 4.8k verts rasterise in a second.
+
+SKM_MH_Hand_R comes out of extract_metahuman_hand.py, which has already folded the MetaHuman helper
+bones into the primary joints - without that the two largest influences often sit on the same
+phalanx and the 4*w0*w1 joint band reads 1 across flat skin.
 """
 import unreal, json, os
 
-SRC = '/Game/Characters/MannequinsXR/Meshes/SKM_MannyXR_right'
+SRC = '/Game/Characters/MetaHumanHand/SKM_MH_Hand_R'
 OUT = r'C:/Git/PianoHandSimulator/06_Project/pianohand_simulator/Scripts/skin_bake_data.json'
 
 src = unreal.load_asset(SRC)

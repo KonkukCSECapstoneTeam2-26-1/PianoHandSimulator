@@ -52,13 +52,22 @@ START_MAT     = 'skin'
 # Deformer displacement tuning that reads well on the dense mesh. The C++ defaults were set for the
 # 5.8k-vert base mesh; at 92k verts the same crease depth over-shoots and tears the surface where
 # the fingers fold hardest, so the compression gain comes down and the depths come with it.
+# The relax terms need an actual pose TRANSITION to show - they are zero on a held pose.
 DETAIL = dict(
-    crease_depth            = 0.05,
+    crease_depth            = 0.055,
     crease_sharpness        = 3.0,
-    crease_compression_gain = 0.6,
+    crease_compression_gain = 0.9,
+    # Compression and stretch get separate gains. Skin folds hard on the inside of a bend and only
+    # smooths on the outside, so a single signed strain term cannot express both.
+    crease_stretch_relief   = 2.2,
     wrinkle_amplitude       = 0.035,
     wrinkle_frequency       = 6.0,
     volume_bulge            = 0.15,
+    # Released-stretch slack: skin that was pulled taut comes back with folds that settle over
+    # ~RelaxTau seconds. This is what wrinkles the back of a knuckle just AFTER it straightens.
+    relax_gain              = 8.0,
+    relax_tau               = 0.45,
+    relax_crease_gain       = 0.06,
 )
 
 ELL = unreal.EditorLevelLibrary

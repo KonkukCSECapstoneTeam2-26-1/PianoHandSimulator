@@ -15,7 +15,10 @@ GLSL is not an option in UE: material shaders are authored in HLSL and cross-com
 
 Layers
 ------
-  detail  T_PH_SkinDetail_N   tiling tangent-space normal, always on
+  detail  MetaHuman T_SkinMicroNormal, tiling tangent-space normal, always on. This is an authored
+          skin micro-relief map that ships with the MetaHumanCharacter plugin; it replaced the
+          procedurally baked T_PH_SkinDetail_N, which stays in the project as the fallback for
+          anyone without the plugin.
   crease  procedural lines, DIRECTION from the baked wrinkle map, amplitude from band x compression
   veins   T_PH_Vein_N         tiling ridges + mask in alpha, gated by stretch
 
@@ -25,6 +28,7 @@ Maps
       R = weighted joint band (per-finger weights applied at bake time)
       G = signed distance along the bone from the joint pivot, +-CreaseRange cm
       B = raw joint band
+  Vertex colour A carries the relax slack (released stretch, decaying) from the tension pass.
     CreaseRange here MUST match S_RANGE in the baker, or the crease spacing comes out wrong.
   Tension vertex colour from CustomSkinningTension.usf: R stretch, G compression, B signed.
 """
@@ -36,6 +40,9 @@ PATH = PACKAGE + '/' + NAME
 MI_PATH = PACKAGE + '/MI_' + NAME[2:]
 TEXDIR = PACKAGE + '/Textures'
 INCLUDE = '/PianoHand/Private/PianoHandSkin.ush'
+# authored skin micro-relief from the MetaHumanCharacter plugin; falls back to our procedural bake
+DETAIL_TEX = '/MetaHumanCharacter/Lookdev_UHM/Skin/Textures/T_SkinMicroNormal'
+DETAIL_TEX_FALLBACK = PACKAGE + '/Textures/T_PH_SkinDetail_N'
 
 mel = unreal.MaterialEditingLibrary
 eal = unreal.EditorAssetLibrary
@@ -94,12 +101,17 @@ vc = mel.create_material_expression(mat, unreal.MaterialExpressionVertexColor, -
 
 mask_tex = tex_object('WrinkleMaskTex', TEXDIR + '/T_PH_WrinkleMask', -1700, -20)
 
-detail_tex = tex_object('SkinDetailTex', TEXDIR + '/T_PH_SkinDetail_N', -1700, 120)
+_detail_path = DETAIL_TEX if unreal.load_asset(DETAIL_TEX) is not None else DETAIL_TEX_FALLBACK
+if _detail_path != DETAIL_TEX:
+    print('MetaHuman skin micro-normal not available, using', _detail_path)
+detail_tex = tex_object('SkinDetailTex', _detail_path, -1700, 120)
 detail_tex.set_editor_property('sampler_type', unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL)
 vein_tex = tex_object('VeinTex', TEXDIR + '/T_PH_Vein_N', -1700, 260)
 
 PARAMS = [
-    ('DetailTiling',     4.0),   # skin micro-relief repeats per UV unit
+    # T_SkinMicroNormal is authored at MetaHuman body texel density; the hand's UVs are repacked
+    # to fill 0..1, so it needs many more repeats than our own 1k tile did (that one was 4.0).
+    ('DetailTiling',    14.0),   # skin micro-relief repeats per UV unit
     ('DetailStrength',   1.0),
     ('CreaseFrequency',  1.5),   # creases per CENTIMETRE along the bone (the map is in cm)
     ('CreaseSharpness',  2.6),   # higher = narrower grooves
@@ -110,6 +122,8 @@ PARAMS = [
     ('VeinStrength',     1.0),
     ('WrinkleBase',      0.35),  # crease amount kept at rest - extended fingers still show knuckles
     ('CompressGain',     2.2),   # how fast creases deepen under compression
+    ('StretchSmooth',    1.2),   # how fast stretch irons them flat again (asymmetric on purpose)
+    ('RelaxGain',        1.8),   # how strongly released-stretch slack brings folds back
     ('MaskGain',         1.6),   # widens/narrows the baked concentration band
     ('MaskSharpness',    3.0),   # tightens the band around the joint (1 = the raw baked band)
     ('Eps',            0.0020),  # finite-difference step in UV; a few texels of the 2k mask
@@ -118,19 +132,19 @@ p = {n: scalar(n, v, -1700, 400 + i * 80) for i, (n, v) in enumerate(PARAMS)}
 
 NORMAL_ARGS = ['DetailTiling', 'DetailStrength', 'CreaseFrequency', 'CreaseSharpness', 'CreaseWarp',
                'CreaseDepth', 'CreaseRange', 'VeinTiling', 'VeinStrength', 'WrinkleBase',
-               'CompressGain', 'MaskGain', 'MaskSharpness', 'Eps']
+               'CompressGain', 'StretchSmooth', 'RelaxGain', 'MaskGain', 'MaskSharpness', 'Eps']
 
 NORMAL_BODY = """return PH_SkinNormal(
-    UV, Tension,
+    UV, Tension, Relax,
     WrinkleMaskTex, WrinkleMaskTexSampler,
     SkinDetailTex, SkinDetailTexSampler,
     VeinTex, VeinTexSampler,
     DetailTiling, DetailStrength,
     CreaseFrequency, CreaseSharpness, CreaseWarp, CreaseDepth, CreaseRange,
     VeinTiling, VeinStrength,
-    WrinkleBase, CompressGain, MaskGain, MaskSharpness, Eps);"""
+    WrinkleBase, CompressGain, StretchSmooth, RelaxGain, MaskGain, MaskSharpness, Eps);"""
 
-nrm_inputs = ['UV', 'Tension', 'WrinkleMaskTex', 'SkinDetailTex', 'VeinTex'] + NORMAL_ARGS
+nrm_inputs = ['UV', 'Tension', 'Relax', 'WrinkleMaskTex', 'SkinDetailTex', 'VeinTex'] + NORMAL_ARGS
 nrm = custom('PH_SkinNormal', NORMAL_BODY, unreal.CustomMaterialOutputType.CMOT_FLOAT3, nrm_inputs, -1000, -300)
 
 VEIN_BODY = """return PH_VeinMask(UV, Tension, WrinkleMaskTex, WrinkleMaskTexSampler,
@@ -138,11 +152,12 @@ VEIN_BODY = """return PH_VeinMask(UV, Tension, WrinkleMaskTex, WrinkleMaskTexSam
 vein_inputs = ['UV', 'Tension', 'WrinkleMaskTex', 'VeinTex', 'VeinTiling', 'MaskGain', 'MaskSharpness']
 vein = custom('PH_VeinMask', VEIN_BODY, unreal.CustomMaterialOutputType.CMOT_FLOAT1, vein_inputs, -1000, 300)
 
-CREASE_BODY = """return PH_CreaseMask(UV, Tension, WrinkleMaskTex, WrinkleMaskTexSampler,
+CREASE_BODY = """return PH_CreaseMask(UV, Tension, Relax, WrinkleMaskTex, WrinkleMaskTexSampler,
     CreaseFrequency, CreaseSharpness, CreaseWarp, CreaseRange, WrinkleBase, CompressGain,
-    MaskGain, MaskSharpness);"""
-crease_inputs = ['UV', 'Tension', 'WrinkleMaskTex', 'CreaseFrequency', 'CreaseSharpness', 'CreaseWarp',
-                 'CreaseRange', 'WrinkleBase', 'CompressGain', 'MaskGain', 'MaskSharpness']
+    StretchSmooth, RelaxGain, MaskGain, MaskSharpness);"""
+crease_inputs = ['UV', 'Tension', 'Relax', 'WrinkleMaskTex', 'CreaseFrequency', 'CreaseSharpness',
+                 'CreaseWarp', 'CreaseRange', 'WrinkleBase', 'CompressGain', 'StretchSmooth',
+                 'RelaxGain', 'MaskGain', 'MaskSharpness']
 crease = custom('PH_CreaseMask', CREASE_BODY, unreal.CustomMaterialOutputType.CMOT_FLOAT1, crease_inputs, -1000, 560)
 
 
@@ -152,6 +167,9 @@ def wire(node, names):
             mel.connect_material_expressions(uv, '', node, 'UV')
         elif n == 'Tension':
             mel.connect_material_expressions(vc, '', node, 'Tension')
+        elif n == 'Relax':
+            # the tension pass writes the relax slack into vertex-colour ALPHA
+            mel.connect_material_expressions(vc, 'A', node, 'Relax')
         elif n == 'WrinkleMaskTex':
             mel.connect_material_expressions(mask_tex, '', node, 'WrinkleMaskTex')
         elif n == 'SkinDetailTex':

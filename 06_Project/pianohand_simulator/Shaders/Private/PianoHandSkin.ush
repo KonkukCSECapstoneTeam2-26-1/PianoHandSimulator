@@ -28,6 +28,10 @@
 //
 // Tension arrives as vertex colour from CustomSkinningTension.usf:
 //   R = stretch (0..1)   G = compression (0..1)   B = signed strain (0.5 = rest)
+//   A = relax slack - stretch that has just been RELEASED, decaying over ~RelaxTau seconds.
+//       Strain alone is memoryless, so without this channel a finger that has just straightened
+//       looks exactly like one that was never bent. The knuckle folds you see right after a hand
+//       opens come from here.
 
 #ifndef PIANOHAND_SKIN_USH
 #define PIANOHAND_SKIN_USH
@@ -104,9 +108,10 @@ float PH_Band(float MaskR, float MaskGain, float MaskSharpness)
 }
 
 float PH_CreaseHeightAt(
-	float2 UV, float4 M, float Compress,
+	float2 UV, float4 M, float Compress, float Stretch, float Relax,
 	float CreaseFrequency, float CreaseSharpness, float CreaseWarp, float CreaseRange,
-	float WrinkleBase, float CompressGain, float MaskGain, float MaskSharpness)
+	float WrinkleBase, float CompressGain, float StretchSmooth, float RelaxGain,
+	float MaskGain, float MaskSharpness)
 {
 	float Band = PH_Band(M.r, MaskGain, MaskSharpness);
 	// s in cm along the bone; the warp is added in the SAME units, so it just nudges each line
@@ -118,7 +123,11 @@ float PH_CreaseHeightAt(
 	// Vary depth from line to line, as a smooth function of s only - real knuckle creases are not
 	// a uniform corrugation. Noise in s stays smooth in screen space, so this costs no stability.
 	Profile *= saturate(0.55f + PH_Fbm(float2(S * 2.5f, 3.1f)) * 1.8f);
-	float Gate = saturate(WrinkleBase + Compress * CompressGain);
+	// Compression deepens, stretch irons flat, released slack brings folds back for a moment.
+	// These are three separate terms, not one signed strain: skin does not respond symmetrically
+	// about rest, and the slack term has to outlive the strain that produced it.
+	float Gate = saturate(WrinkleBase + Compress * CompressGain + Relax * RelaxGain
+	                      - Stretch * StretchSmooth);
 	return Profile * Band * Gate;
 }
 
@@ -129,16 +138,19 @@ float PH_CreaseHeightAt(
 float3 PH_SkinNormal(
 	float2 UV,
 	float3 Tension,          // vertex colour arrives as float3 (RGB) from the VertexColor node
+	float Relax,             // vertex colour ALPHA - released-stretch slack from the tension pass
 	Texture2D MaskTex,   SamplerState MaskSmp,
 	Texture2D DetailTex, SamplerState DetailSmp,
 	Texture2D VeinTex,   SamplerState VeinSmp,
 	float DetailTiling, float DetailStrength,
 	float CreaseFrequency, float CreaseSharpness, float CreaseWarp, float CreaseDepth, float CreaseRange,
 	float VeinTiling, float VeinStrength,
-	float WrinkleBase, float CompressGain, float MaskGain, float MaskSharpness, float Eps)
+	float WrinkleBase, float CompressGain, float StretchSmooth, float RelaxGain,
+	float MaskGain, float MaskSharpness, float Eps)
 {
 	float Stretch  = saturate(Tension.r);
 	float Compress = saturate(Tension.g);
+	float Slack    = saturate(Relax);
 
 	// Three taps of the mask: one for the value, two for the finite difference. Eps is in UV and
 	// wants to be a few texels of T_PH_WrinkleMask - smaller than that and the difference is noise.
@@ -152,12 +164,15 @@ float3 PH_SkinNormal(
 	float Band = PH_Band(M0.r, MaskGain, MaskSharpness);
 
 	// --- creases
-	float H0 = PH_CreaseHeightAt(UV, M0, Compress, CreaseFrequency, CreaseSharpness, CreaseWarp,
-								 CreaseRange, WrinkleBase, CompressGain, MaskGain, MaskSharpness);
-	float HX = PH_CreaseHeightAt(UV + float2(Eps, 0), MX, Compress, CreaseFrequency, CreaseSharpness,
-								 CreaseWarp, CreaseRange, WrinkleBase, CompressGain, MaskGain, MaskSharpness);
-	float HY = PH_CreaseHeightAt(UV + float2(0, Eps), MY, Compress, CreaseFrequency, CreaseSharpness,
-								 CreaseWarp, CreaseRange, WrinkleBase, CompressGain, MaskGain, MaskSharpness);
+	float H0 = PH_CreaseHeightAt(UV, M0, Compress, Stretch, Slack, CreaseFrequency, CreaseSharpness,
+								 CreaseWarp, CreaseRange, WrinkleBase, CompressGain, StretchSmooth,
+								 RelaxGain, MaskGain, MaskSharpness);
+	float HX = PH_CreaseHeightAt(UV + float2(Eps, 0), MX, Compress, Stretch, Slack, CreaseFrequency,
+								 CreaseSharpness, CreaseWarp, CreaseRange, WrinkleBase, CompressGain,
+								 StretchSmooth, RelaxGain, MaskGain, MaskSharpness);
+	float HY = PH_CreaseHeightAt(UV + float2(0, Eps), MY, Compress, Stretch, Slack, CreaseFrequency,
+								 CreaseSharpness, CreaseWarp, CreaseRange, WrinkleBase, CompressGain,
+								 StretchSmooth, RelaxGain, MaskGain, MaskSharpness);
 	float2 G = float2(HX - H0, HY - H0) / max(Eps, 1e-6f) * CreaseDepth;
 	G = clamp(G, -8.0f, 8.0f);
 	float3 Crease = normalize(float3(-G.x, -G.y, 1.0f));
@@ -187,14 +202,16 @@ float PH_VeinMask(
 
 // Crease coverage, for darkening base colour inside the folds.
 float PH_CreaseMask(
-	float2 UV, float3 Tension,
+	float2 UV, float3 Tension, float Relax,
 	Texture2D MaskTex, SamplerState MaskSmp,
 	float CreaseFrequency, float CreaseSharpness, float CreaseWarp, float CreaseRange,
-	float WrinkleBase, float CompressGain, float MaskGain, float MaskSharpness)
+	float WrinkleBase, float CompressGain, float StretchSmooth, float RelaxGain,
+	float MaskGain, float MaskSharpness)
 {
 	float4 M = Texture2DSample(MaskTex, MaskSmp, UV);
-	return saturate(-PH_CreaseHeightAt(UV, M, saturate(Tension.g), CreaseFrequency, CreaseSharpness,
-									   CreaseWarp, CreaseRange, WrinkleBase, CompressGain,
+	return saturate(-PH_CreaseHeightAt(UV, M, saturate(Tension.g), saturate(Tension.r), saturate(Relax),
+									   CreaseFrequency, CreaseSharpness, CreaseWarp, CreaseRange,
+									   WrinkleBase, CompressGain, StretchSmooth, RelaxGain,
 									   MaskGain, MaskSharpness));
 }
 

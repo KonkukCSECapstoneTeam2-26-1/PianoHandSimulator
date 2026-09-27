@@ -99,8 +99,14 @@ public:
 		SHADER_PARAMETER(float, TensionScale)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<int>, StrainAccumIn)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, StrainCountIn)
+		SHADER_PARAMETER(float, DeltaTime)
+		SHADER_PARAMETER(float, RelaxGain)
+		SHADER_PARAMETER(float, RelaxTau)
+		SHADER_PARAMETER(uint32, bResetRelax)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<UNORM float4>, ColorBufferUAV)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<float>, VertexStrainOut)
+		/** Persistent across frames: .x = last frame's strain, .y = accumulated slack. */
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<float2>, RelaxState)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
@@ -132,10 +138,13 @@ public:
 		SHADER_PARAMETER(float, CreaseCompressionGain)
 		SHADER_PARAMETER(float, WrinkleAmplitude)
 		SHADER_PARAMETER(float, WrinkleFrequency)
+		SHADER_PARAMETER(float, CreaseStretchRelief)
+		SHADER_PARAMETER(float, RelaxCreaseGain)
 		SHADER_PARAMETER_SRV(Buffer<float>, RestPositionBuffer)
 		SHADER_PARAMETER_SRV(Buffer<uint>, InputWeightStream)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FBoneTransform>, RefPoseInverses)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float>, VertexStrain)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float2>, RelaxStateIn)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<float>, PositionBufferUAV)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<SNORM float4>, TangentBufferUAV)
 	END_SHADER_PARAMETER_STRUCT()
@@ -234,6 +243,30 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Detail", meta = (UIMin = "0", UIMax = "30"))
 	float WrinkleFrequency = 6.0f;
 
+	/**
+	 * How much stretch flattens the resting crease. Skin is not symmetric: the inside of a bend folds
+	 * far more than the outside smooths out, so compression and stretch get separate gains instead of
+	 * one signed strain term. 0 keeps the old symmetric behaviour.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Detail", meta = (UIMin = "0", UIMax = "4"))
+	float CreaseStretchRelief = 1.4f;
+
+	/**
+	 * Slack picked up per unit of released stretch. Skin that has been pulled taut does not snap back
+	 * flat - it comes back with folds that settle over a moment. This is what produces the creases on
+	 * the back of a knuckle just after the finger straightens.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Relax", meta = (UIMin = "0", UIMax = "20"))
+	float RelaxGain = 6.0f;
+
+	/** Seconds for that slack to decay to ~37%. Larger = the release wrinkles linger longer. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Relax", meta = (UIMin = "0.02", UIMax = "2"))
+	float RelaxTau = 0.28f;
+
+	/** cm of extra groove depth at full slack, on top of the resting crease. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Relax", meta = (UIMin = "0", UIMax = "0.3"))
+	float RelaxCreaseGain = 0.05f;
+
 	virtual UMeshDeformerInstanceSettings* CreateSettingsInstance(UMeshComponent* InMeshComponent) override;
 	virtual UMeshDeformerInstance* CreateInstance(UMeshComponent* InMeshComponent, UMeshDeformerInstanceSettings* InSettings) override;
 };
@@ -248,6 +281,15 @@ class UPianoHandSkinDeformerInstanceSettings : public UMeshDeformerInstanceSetti
 struct FPianoHandDeformerRenderState
 {
 	int32 LastLodIndex = INDEX_NONE;
+
+	/**
+	 * Survives between frames, which nothing else in this deformer does: two floats per LOD vertex,
+	 * .x = the strain seen last frame and .y = the slack accumulated since. Extracted out of the RDG
+	 * graph at the end of each frame and registered back in at the start of the next.
+	 */
+	TRefCountPtr<FRDGPooledBuffer> RelaxStateBuffer;
+	uint32 RelaxStateNumVertices = 0;
+	double RelaxLastTimeSeconds = 0.0;
 	bool bLoggedLayout = false;
 	bool bLoggedUnsupported = false;
 	bool bLoggedTensionUnavailable = false;
@@ -268,6 +310,10 @@ struct FPianoHandDeformerFrameParams
 	float CreaseCompressionGain = 2.0f;
 	float WrinkleAmplitude = 0.05f;
 	float WrinkleFrequency = 6.0f;
+	float CreaseStretchRelief = 1.4f;
+	float RelaxGain = 6.0f;
+	float RelaxTau = 0.28f;
+	float RelaxCreaseGain = 0.05f;
 };
 
 UCLASS()
