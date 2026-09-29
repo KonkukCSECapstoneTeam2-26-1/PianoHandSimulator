@@ -1,0 +1,1739 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>2학기_중간보고서.md</title>
+<meta http-equiv="Content-type" content="text/html;charset=UTF-8">
+
+<style>
+/* https://github.com/microsoft/vscode/blob/master/extensions/markdown-language-features/media/markdown.css */
+/*---------------------------------------------------------------------------------------------
+ *  Copyright (c) Microsoft Corporation. All rights reserved.
+ *  Licensed under the MIT License. See License.txt in the project root for license information.
+ *--------------------------------------------------------------------------------------------*/
+
+body {
+	font-family: var(--vscode-markdown-font-family, -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif);
+	font-size: var(--vscode-markdown-font-size, 14px);
+	padding: 0 26px;
+	line-height: var(--vscode-markdown-line-height, 22px);
+	word-wrap: break-word;
+}
+
+#code-csp-warning {
+	position: fixed;
+	top: 0;
+	right: 0;
+	color: white;
+	margin: 16px;
+	text-align: center;
+	font-size: 12px;
+	font-family: sans-serif;
+	background-color:#444444;
+	cursor: pointer;
+	padding: 6px;
+	box-shadow: 1px 1px 1px rgba(0,0,0,.25);
+}
+
+#code-csp-warning:hover {
+	text-decoration: none;
+	background-color:#007acc;
+	box-shadow: 2px 2px 2px rgba(0,0,0,.25);
+}
+
+body.scrollBeyondLastLine {
+	margin-bottom: calc(100vh - 22px);
+}
+
+body.showEditorSelection .code-line {
+	position: relative;
+}
+
+body.showEditorSelection .code-active-line:before,
+body.showEditorSelection .code-line:hover:before {
+	content: "";
+	display: block;
+	position: absolute;
+	top: 0;
+	left: -12px;
+	height: 100%;
+}
+
+body.showEditorSelection li.code-active-line:before,
+body.showEditorSelection li.code-line:hover:before {
+	left: -30px;
+}
+
+.vscode-light.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.15);
+}
+
+.vscode-light.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(0, 0, 0, 0.40);
+}
+
+.vscode-light.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-dark.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.4);
+}
+
+.vscode-dark.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 255, 255, 0.60);
+}
+
+.vscode-dark.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+.vscode-high-contrast.showEditorSelection .code-active-line:before {
+	border-left: 3px solid rgba(255, 160, 0, 0.7);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line:hover:before {
+	border-left: 3px solid rgba(255, 160, 0, 1);
+}
+
+.vscode-high-contrast.showEditorSelection .code-line .code-line:hover:before {
+	border-left: none;
+}
+
+img {
+	max-width: 100%;
+	max-height: 100%;
+}
+
+a {
+	text-decoration: none;
+}
+
+a:hover {
+	text-decoration: underline;
+}
+
+a:focus,
+input:focus,
+select:focus,
+textarea:focus {
+	outline: 1px solid -webkit-focus-ring-color;
+	outline-offset: -1px;
+}
+
+hr {
+	border: 0;
+	height: 2px;
+	border-bottom: 2px solid;
+}
+
+h1 {
+	padding-bottom: 0.3em;
+	line-height: 1.2;
+	border-bottom-width: 1px;
+	border-bottom-style: solid;
+}
+
+h1, h2, h3 {
+	font-weight: normal;
+}
+
+table {
+	border-collapse: collapse;
+}
+
+table > thead > tr > th {
+	text-align: left;
+	border-bottom: 1px solid;
+}
+
+table > thead > tr > th,
+table > thead > tr > td,
+table > tbody > tr > th,
+table > tbody > tr > td {
+	padding: 5px 10px;
+}
+
+table > tbody > tr + tr > td {
+	border-top: 1px solid;
+}
+
+blockquote {
+	margin: 0 7px 0 5px;
+	padding: 0 16px 0 10px;
+	border-left-width: 5px;
+	border-left-style: solid;
+}
+
+code {
+	font-family: Menlo, Monaco, Consolas, "Droid Sans Mono", "Courier New", monospace, "Droid Sans Fallback";
+	font-size: 1em;
+	line-height: 1.357em;
+}
+
+body.wordWrap pre {
+	white-space: pre-wrap;
+}
+
+pre:not(.hljs),
+pre.hljs code > div {
+	padding: 16px;
+	border-radius: 3px;
+	overflow: auto;
+}
+
+pre code {
+	color: var(--vscode-editor-foreground);
+	tab-size: 4;
+}
+
+/** Theming */
+
+.vscode-light pre {
+	background-color: rgba(220, 220, 220, 0.4);
+}
+
+.vscode-dark pre {
+	background-color: rgba(10, 10, 10, 0.4);
+}
+
+.vscode-high-contrast pre {
+	background-color: rgb(0, 0, 0);
+}
+
+.vscode-high-contrast h1 {
+	border-color: rgb(0, 0, 0);
+}
+
+.vscode-light table > thead > tr > th {
+	border-color: rgba(0, 0, 0, 0.69);
+}
+
+.vscode-dark table > thead > tr > th {
+	border-color: rgba(255, 255, 255, 0.69);
+}
+
+.vscode-light h1,
+.vscode-light hr,
+.vscode-light table > tbody > tr + tr > td {
+	border-color: rgba(0, 0, 0, 0.18);
+}
+
+.vscode-dark h1,
+.vscode-dark hr,
+.vscode-dark table > tbody > tr + tr > td {
+	border-color: rgba(255, 255, 255, 0.18);
+}
+
+</style>
+
+<style>
+/* Tomorrow Theme */
+/* http://jmblog.github.com/color-themes-for-google-code-highlightjs */
+/* Original theme - https://github.com/chriskempson/tomorrow-theme */
+
+/* Tomorrow Comment */
+.hljs-comment,
+.hljs-quote {
+	color: #8e908c;
+}
+
+/* Tomorrow Red */
+.hljs-variable,
+.hljs-template-variable,
+.hljs-tag,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-regexp,
+.hljs-deletion {
+	color: #c82829;
+}
+
+/* Tomorrow Orange */
+.hljs-number,
+.hljs-built_in,
+.hljs-builtin-name,
+.hljs-literal,
+.hljs-type,
+.hljs-params,
+.hljs-meta,
+.hljs-link {
+	color: #f5871f;
+}
+
+/* Tomorrow Yellow */
+.hljs-attribute {
+	color: #eab700;
+}
+
+/* Tomorrow Green */
+.hljs-string,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-addition {
+	color: #718c00;
+}
+
+/* Tomorrow Blue */
+.hljs-title,
+.hljs-section {
+	color: #4271ae;
+}
+
+/* Tomorrow Purple */
+.hljs-keyword,
+.hljs-selector-tag {
+	color: #8959a8;
+}
+
+.hljs {
+	display: block;
+	overflow-x: auto;
+	color: #4d4d4c;
+	padding: 0.5em;
+}
+
+.hljs-emphasis {
+	font-style: italic;
+}
+
+.hljs-strong {
+	font-weight: bold;
+}
+</style>
+
+<style>
+/*
+ * Markdown PDF CSS
+ */
+
+ body {
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif, "Meiryo";
+	padding: 0 12px;
+}
+
+pre {
+	background-color: #f8f8f8;
+	border: 1px solid #cccccc;
+	border-radius: 3px;
+	overflow-x: auto;
+	white-space: pre-wrap;
+	overflow-wrap: break-word;
+}
+
+pre:not(.hljs) {
+	padding: 23px;
+	line-height: 19px;
+}
+
+blockquote {
+	background: rgba(127, 127, 127, 0.1);
+	border-color: rgba(0, 122, 204, 0.5);
+}
+
+.emoji {
+	height: 1.4em;
+}
+
+code {
+	font-size: 14px;
+	line-height: 19px;
+}
+
+/* for inline code */
+:not(pre):not(.hljs) > code {
+	color: #C9AE75; /* Change the old color so it seems less like an error */
+	font-size: inherit;
+}
+
+/* Page Break : use <div class="page"/> to insert page break
+-------------------------------------------------------- */
+.page {
+	page-break-after: always;
+}
+
+</style>
+
+<script src="https://unpkg.com/mermaid/dist/mermaid.min.js"></script>
+</head>
+<body>
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: document.body.classList.contains('vscode-dark') || document.body.classList.contains('vscode-high-contrast')
+          ? 'dark'
+          : 'default'
+    });
+  </script>
+<h1 id="%ED%94%BC%EC%95%84%EB%85%B8-%EC%97%B0%EC%A3%BC-%EC%8B%9C%EB%AE%AC%EB%A0%88%EC%9D%B4%EC%85%98-%EB%B0%8F-%EA%B3%A0%EC%A0%95%EB%B0%80-%EB%A0%8C%EB%8D%94%EB%A7%81-%EC%8B%9C%EC%8A%A4%ED%85%9C">피아노 연주 시뮬레이션 및 고정밀 렌더링 시스템</h1>
+<h2 id="%EC%A1%B8%EC%97%85-%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8-2%ED%95%99%EA%B8%B0-%EC%A4%91%EA%B0%84-%EB%B3%B4%EA%B3%A0%EC%84%9C">졸업 프로젝트 2학기 중간 보고서</h2>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>내용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>과목</td>
+<td>졸업프로젝트 3201</td>
+</tr>
+<tr>
+<td>팀</td>
+<td>2팀</td>
+</tr>
+<tr>
+<td>제출일</td>
+<td>2026년 9월 29일</td>
+</tr>
+<tr>
+<td>팀원</td>
+<td>정근녕, 한승현, 이수민, 곽경민</td>
+</tr>
+<tr>
+<td>지도교수</td>
+<td>김형석 교수님</td>
+</tr>
+</tbody>
+</table>
+<h2 id="%EB%AA%A9%EC%B0%A8">목차</h2>
+<ol>
+<li>프로젝트 개요</li>
+<li>전체 시스템 아키텍처</li>
+<li>1학기 누적 성과 요약</li>
+<li>2학기 진행 현황 (W01 ~ W04)</li>
+<li>모듈별 상세 구현 현황
+<ul>
+<li>5.1 운지법 결정 엔진 (정근녕)</li>
+<li>5.2 IK 기반 모션 생성 (한승현)</li>
+<li>5.3 커스텀 GPU 스키닝 파이프라인 (이수민)</li>
+<li>5.4 Chaos Flesh PBD Skinning (곽경민)</li>
+</ul>
+</li>
+<li>주요 기술적 도전 및 해결</li>
+<li>결과물 분석</li>
+<li>현재 상태 및 향후 계획</li>
+<li>결론</li>
+</ol>
+<hr>
+<h1 id="1-%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8-%EA%B0%9C%EC%9A%94">1. 프로젝트 개요</h1>
+<h2 id="11-%EA%B8%B0%ED%9A%8D-%EB%B0%B0%EA%B2%BD">1.1 기획 배경</h2>
+<p>기존 게임 및 시뮬레이션 환경에서 손가락 움직임은 Linear Blend Skinning(LBS)에 의존하여, 피아노 연주와 같은 정교한 동작 시 관절 뭉개짐(Candy Wrapper Artifact), 주름 및 피하 조직의 비사실적 표현 문제가 발생합니다. 또한 MIDI 데이터만으로 실제 피아니스트 수준의 운지법을 자동 재현하고 영화적 품질의 렌더링을 생성하는 도구는 현재 존재하지 않습니다.</p>
+<p>본 프로젝트는 이러한 기술적 공백을 해소하기 위해, <strong>MIDI 입력 → 최적 운지법 계산 → IK 기반 모션 생성 → 고품질 피부 렌더링</strong>으로 이어지는 통합 파이프라인을 구축하는 것을 목표로 합니다.</p>
+<h2 id="12-%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8-%EB%AA%A9%ED%91%9C">1.2 프로젝트 목표</h2>
+<ul>
+<li><strong>MIDI-to-Motion</strong>: MIDI 파일을 파싱하여 해부학적으로 유효한 최적 운지법을 자동 계산하고 IK 애니메이션 데이터로 변환합니다.</li>
+<li><strong>High-Fidelity Rendering</strong>: PBD(Position Based Dynamics) 기반 조직 변형 및 Tension Map 기반 동적 노멀 맵을 활용한 주름·핏줄 렌더링을 구현합니다.</li>
+</ul>
+<h2 id="13-%ED%8C%80-%EA%B5%AC%EC%84%B1-%EB%B0%8F-%EC%97%AD%ED%95%A0-%EB%B6%84%EB%8B%B4">1.3 팀 구성 및 역할 분담</h2>
+<table>
+<thead>
+<tr>
+<th>팀원</th>
+<th>담당 모듈</th>
+<th>주요 역할</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>정근녕</td>
+<td>01_Fingering</td>
+<td>MIDI 파서 및 DP 기반 운지법 결정 알고리즘</td>
+</tr>
+<tr>
+<td>한승현</td>
+<td>02_IK</td>
+<td>Jacobian 기반 역운동학(IK) 모션 생성</td>
+</tr>
+<tr>
+<td>이수민</td>
+<td>03_Skinning (셰이더)</td>
+<td>UE5 커스텀 GPU 스키닝, Tension Map, 주름 렌더링</td>
+</tr>
+<tr>
+<td>곽경민</td>
+<td>03_Skinning (시뮬레이션)</td>
+<td>Chaos Flesh PBD 피부 시뮬레이션, 살 눌림·부피 보존</td>
+</tr>
+</tbody>
+</table>
+<h2 id="14-%EA%B8%B0%EC%88%A0-%EC%8A%A4%ED%83%9D">1.4 기술 스택</h2>
+<table>
+<thead>
+<tr>
+<th>분야</th>
+<th>기술</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>운지법 알고리즘</td>
+<td>Python 3.11, Dynamic Programming, Polyphonic Voice Leading</td>
+</tr>
+<tr>
+<td>IK 시스템</td>
+<td>C++, Jacobian IK (Damped Least Squares)</td>
+</tr>
+<tr>
+<td>렌더링 엔진</td>
+<td>Unreal Engine 5.5</td>
+</tr>
+<tr>
+<td>피부 시뮬레이션</td>
+<td>Chaos Flesh (FEM/PBD)</td>
+</tr>
+<tr>
+<td>셰이더</td>
+<td>HLSL, UMeshDeformer, RDG, Compute Shader</td>
+</tr>
+<tr>
+<td>데이터 포맷</td>
+<td>Standard MIDI File (Format 0/1), JSON, UE5 DataTable CSV</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h1 id="2-%EC%A0%84%EC%B2%B4-%EC%8B%9C%EC%8A%A4%ED%85%9C-%EC%95%84%ED%82%A4%ED%85%8D%EC%B2%98">2. 전체 시스템 아키텍처</h1>
+<p><img src="images/fig1_pipeline.png" alt="파이프라인 다이어그램"></p>
+<pre class="hljs"><code><div>MIDI 파일
+  → [01_Fingering | 정근녕]
+        MIDI 파서 → 양손 분리 → V5 Polyphonic DP Solver → JSON 출력
+        Interface A — NoteEvent JSON (pitch, finger, wrist_yaw, pressure ...)
+  → [02_IK | 한승현]
+        IK 목표 설정 → Weighted DLS IK → ROM 클램핑 → 베지어 손목 궤적 → Bone Transform
+        Interface B — Joint Transform (30 FPS)
+  → [03_Skinning | 이수민 · 곽경민]
+        Chaos Flesh (살 눌림·부피 보존)
+          → 커스텀 GPU 스키닝 (주름·핏줄·미세 노멀)
+          → UE5 최종 렌더링 출력
+</div></code></pre>
+<hr>
+<h1 id="3-1%ED%95%99%EA%B8%B0-%EB%88%84%EC%A0%81-%EC%84%B1%EA%B3%BC-%EC%9A%94%EC%95%BD">3. 1학기 누적 성과 요약</h1>
+<table>
+<thead>
+<tr>
+<th>모듈</th>
+<th>1학기 완료 항목</th>
+<th>상태</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>01_Fingering</td>
+<td>MIDI 파서(Format 0/1), V5 Polyphonic DP 엔진, Pygame 시뮬레이터</td>
+<td>완료</td>
+</tr>
+<tr>
+<td>02_IK</td>
+<td>DLS Jacobian IK 알고리즘, ROM 제약, 베지어 손목 궤적 (C++/Vulkan 검증)</td>
+<td>알고리즘 검증 완료</td>
+</tr>
+<tr>
+<td>03_Skinning (셰이더)</td>
+<td>SVE 기반 커스텀 패스 삽입, RDG 자원 관리, HLSL 분기, 스레드 동기화 사전 검증</td>
+<td>사전 검증 완료</td>
+</tr>
+<tr>
+<td>03_Skinning (Flesh)</td>
+<td>Chaos Flesh Dataflow 그래프, Capsule 콜리전 17개, 사면체 볼륨 생성 확인</td>
+<td>에셋 구성 완료</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h1 id="4-2%ED%95%99%EA%B8%B0-%EC%A7%84%ED%96%89-%ED%98%84%ED%99%A9-w01--w04">4. 2학기 진행 현황 (W01 ~ W04)</h1>
+<h2 id="w01--w02-831--913--%EC%9E%AC%EC%84%A4%EA%B3%84-%EB%B0%8F-%EB%AC%B8%EC%84%9C%ED%99%94">W01 ~ W02 (8/31 ~ 9/13) — 재설계 및 문서화</h2>
+<p>1학기 산출물 전체를 검토하고 파이프라인 구조를 재설계하였습니다.</p>
+<ul>
+<li>요구사항/설계 명세 재작성</li>
+<li>파트 간 인터페이스 정의 (<code>03_Interface_Design_Spec.md</code>)</li>
+<li>피아노 건반 좌표 변환 규칙 문서화</li>
+<li>03_Skinning(셰이더): SVE → UMeshDeformer 기반으로 후크 지점 전환 결정</li>
+</ul>
+<h2 id="w03-914--920--%EC%9D%B8%ED%84%B0%ED%8E%98%EC%9D%B4%EC%8A%A4-%ED%8C%8C%EB%9D%BC%EB%AF%B8%ED%84%B0-%ED%99%95%EC%A0%95">W03 (9/14 ~ 9/20) — 인터페이스 파라미터 확정</h2>
+<p>미확정 상태였던 IK 인터페이스 파라미터를 팀 전체가 합의하여 확정하였습니다.</p>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>이전</th>
+<th>확정값</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>흑건 상면 Y 오프셋 (<code>BLACK_KEY_Y_OFFSET_CM</code>)</td>
+<td>미정</td>
+<td><strong>3.0 cm</strong></td>
+</tr>
+<tr>
+<td>건반 최대 누름 깊이 (<code>MAX_KEY_TRAVEL_CM</code>)</td>
+<td>미정</td>
+<td><strong>1.0 cm</strong></td>
+</tr>
+<tr>
+<td>손가락-손목 오프셋 (오른손)</td>
+<td>미조정</td>
+<td>1:−4, 2:−2, 3:0, 4:+2, 5:+4 반음</td>
+</tr>
+<tr>
+<td>손가락-손목 오프셋 (왼손)</td>
+<td>미조정</td>
+<td>1:+4, 2:+2, 3:0, 4:−2, 5:−4 반음</td>
+</tr>
+</tbody>
+</table>
+<h2 id="w04-921--927--%EA%B3%B5%EC%9C%A0-%EC%83%81%EC%88%98-%EB%B6%84%EB%A6%AC-%EB%B0%8F-%EB%AA%A8%EB%93%88-%EB%8F%99%EA%B8%B0%ED%99%94">W04 (9/21 ~ 9/27) — 공유 상수 분리 및 모듈 동기화</h2>
+<p>운지법 엔진, IK 솔버, 스키닝 모듈이 공통으로 참조하는 <code>shared_constants.py</code>를 신규 작성하여 파트 간 상수 불일치 문제를 구조적으로 방지하였습니다.</p>
+<pre class="hljs"><code><div><span class="hljs-comment"># shared_constants.py (주요 항목)</span>
+BLACK_KEY_Y_OFFSET_CM = <span class="hljs-number">3.0</span>
+MAX_KEY_TRAVEL_CM     = <span class="hljs-number">1.0</span>
+IK_FRAME_RATE         = <span class="hljs-number">30</span>   <span class="hljs-comment"># fps</span>
+
+BONE_NAME_R = {
+    <span class="hljs-number">1</span>: <span class="hljs-string">"thumb_03_r"</span>,  <span class="hljs-number">2</span>: <span class="hljs-string">"index_03_r"</span>,  <span class="hljs-number">3</span>: <span class="hljs-string">"middle_03_r"</span>,
+    <span class="hljs-number">4</span>: <span class="hljs-string">"ring_03_r"</span>,   <span class="hljs-number">5</span>: <span class="hljs-string">"pinky_03_r"</span>
+}
+
+<span class="hljs-comment"># IK 타이밍 프로토콜</span>
+<span class="hljs-comment"># t = start_ms           : Fingertip → Target 도달 (건반 눌림)</span>
+<span class="hljs-comment"># t ~ start+duration     : 위치 유지</span>
+<span class="hljs-comment"># t = start+duration     : Z → 0 복귀</span>
+</div></code></pre>
+<hr>
+<h1 id="5-%EB%AA%A8%EB%93%88%EB%B3%84-%EC%83%81%EC%84%B8-%EA%B5%AC%ED%98%84-%ED%98%84%ED%99%A9">5. 모듈별 상세 구현 현황</h1>
+<h2 id="51-%EC%9A%B4%EC%A7%80%EB%B2%95-%EA%B2%B0%EC%A0%95-%EC%97%94%EC%A7%84--%EC%A0%95%EA%B7%BC%EB%85%95">5.1 운지법 결정 엔진 — 정근녕</h2>
+<h3 id="511-%EC%9A%B4%EC%A7%80%EB%B2%95-%ED%8C%8C%EC%9D%B4%ED%94%84%EB%9D%BC%EC%9D%B8-%EA%B5%AC%EC%84%B1">5.1.1 운지법 파이프라인 구성</h3>
+<p>1~2학기 결과물을 통합하고 확장한 운지법 파이프라인을 구성하였습니다.</p>
+<pre class="hljs"><code><div>코드_운지법파이프라인/
+├── shared_constants.py   ← W03/W04 공유 상수 (신규)
+├── fingering_engine.py   ← V5 엔진 + CLI 인수 + shared_constants 연동
+├── simulator.py          ← V5 시뮬레이터 + CLI 인수 + shared_constants 연동
+├── ue5_exporter.py       ← JSON → UE5 DataTable CSV 변환기 (신규)
+└── run_batch.py          ← 전체 MIDI 일괄 처리 (신규)
+</div></code></pre>
+<h3 id="512-v5-polyphonic-dp-%EC%97%94%EC%A7%84-1%ED%95%99%EA%B8%B0-%EC%99%84%EC%84%B1-2%ED%95%99%EA%B8%B0-%EC%9C%A0%EC%A7%80">5.1.2 V5 Polyphonic DP 엔진 (1학기 완성, 2학기 유지)</h3>
+<p>4개 모듈이 순차적으로 동작하는 파이프라인입니다.</p>
+<pre class="hljs"><code><div>MIDI 파일
+    ↓ parse_midi_to_hand_chords()
+MIDI 파서 ──→ 손/화음 분리, MELODY/BASS/INNER 태깅
+    ↓ split_wide_chords_between_hands()
+손 분리기 ──→ 스팬 17반음 초과 화음 → 반대 손 이관
+    ↓ solve_fingering_chord_dp()
+DP 솔버  ──→ 9종 비용 함수 기반 최적 운지 경로 탐색
+    ↓ calculate_wrist_rotation_rom()
+손목 물리 ──→ Yaw(±35°) / Roll(±20°) 계산
+    ↓
+JSON 출력 ──→ Interface A (02_IK 입력)
+</div></code></pre>
+<p><strong>DP 비용 함수 (9종):</strong></p>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>조건</th>
+<th>비용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SpanPenalty</td>
+<td>손가락 쌍 최대 스팬 초과</td>
+<td>+5,000</td>
+</tr>
+<tr>
+<td>SimultaneousConflict</td>
+<td>눌린 손가락 재사용</td>
+<td>+2,500</td>
+</tr>
+<tr>
+<td>CrossingPenalty</td>
+<td>엄지 제외 교차</td>
+<td>+2,000</td>
+</tr>
+<tr>
+<td>ArpeggioRolling</td>
+<td>피치/손가락 방향 불일치</td>
+<td>+35~60</td>
+</tr>
+<tr>
+<td>FingerDifficulty</td>
+<td>약지(4번)</td>
+<td>+6</td>
+</tr>
+<tr>
+<td>BlackKeyPenalty</td>
+<td>엄지로 흑건</td>
+<td>+25</td>
+</tr>
+<tr>
+<td>MelodyContinuity</td>
+<td>Step motion + 같은 손가락</td>
+<td>−20 (보상)</td>
+</tr>
+<tr>
+<td>RoleAffinity</td>
+<td>MELODY → 오른손 4번</td>
+<td>−12 (보상)</td>
+</tr>
+<tr>
+<td>WristMove</td>
+<td>손목 이동 거리</td>
+<td>×2.0</td>
+</tr>
+</tbody>
+</table>
+<h3 id="513-interface-a-%EC%B6%9C%EB%A0%A5-json-%EC%8A%A4%ED%82%A4%EB%A7%88">5.1.3 Interface A 출력 JSON 스키마</h3>
+<pre class="hljs"><code><div>{
+  <span class="hljs-attr">"pitch"</span>:                <span class="hljs-number">60</span>,
+  <span class="hljs-attr">"start_ms"</span>:             <span class="hljs-number">0.0</span>,
+  <span class="hljs-attr">"duration_ms"</span>:          <span class="hljs-number">1200.0</span>,
+  <span class="hljs-attr">"hand"</span>:                 <span class="hljs-string">"Right"</span>,
+  <span class="hljs-attr">"role"</span>:                 <span class="hljs-string">"MELODY"</span>,
+  <span class="hljs-attr">"finger"</span>:               <span class="hljs-number">3</span>,
+  <span class="hljs-attr">"pressure"</span>:             <span class="hljs-number">0.622</span>,
+  <span class="hljs-attr">"key_depth"</span>:            <span class="hljs-number">0.622</span>,
+  <span class="hljs-attr">"is_black"</span>:             <span class="hljs-literal">false</span>,
+  <span class="hljs-attr">"wrist_pos_normalized"</span>: <span class="hljs-number">0.449</span>,
+  <span class="hljs-attr">"wrist_yaw_deg"</span>:        <span class="hljs-number">-5.0</span>,
+  <span class="hljs-attr">"wrist_roll_deg"</span>:       <span class="hljs-number">0.0</span>
+}
+</div></code></pre>
+<h3 id="514-ue5-datatable-csv-%EC%B6%9C%EB%A0%A5-2%ED%95%99%EA%B8%B0-%EC%8B%A0%EA%B7%9C">5.1.4 UE5 DataTable CSV 출력 (2학기 신규)</h3>
+<p><code>ue5_exporter.py</code>가 JSON을 UE5 DataTable 형식 CSV로 변환합니다.</p>
+<pre class="hljs"><code><div>---,Pitch,StartMs,DurationMs,Hand,Role,Finger,Pressure,KeyDepth,bIsBlack,...
+Note_000000,60,0.0,1200.0,Right,MELODY,3,0.622,0.622,False,...
+</div></code></pre>
+<p>UE5 Content Browser → Import → DataTable Row Type: <code>FFingeringNoteData</code>로 즉시 사용 가능합니다.</p>
+<h3 id="515-pygame-%EC%8B%9C%EB%AE%AC%EB%A0%88%EC%9D%B4%ED%84%B0">5.1.5 Pygame 시뮬레이터</h3>
+<p><img src="images/fig_simulator_both.png" alt="시뮬레이터 — 양손"></p>
+<p><img src="images/fig_simulator_right.png" alt="시뮬레이터 — 오른손"></p>
+<ul>
+<li>MELODY(빨강) / BASS(파랑) / INNER(노랑) 성부별 색상 구분</li>
+<li>손가락 번호(1~5번)별 색상 이중 채색</li>
+<li>MIDI 오디오 동기 재생, 타임라인 탐색 슬라이더</li>
+</ul>
+<hr>
+<h2 id="52-ik-%EA%B8%B0%EB%B0%98-%EB%AA%A8%EC%85%98-%EC%83%9D%EC%84%B1--%ED%95%9C%EC%8A%B9%ED%98%84">5.2 IK 기반 모션 생성 — 한승현</h2>
+<h3 id="521-%EC%84%A4%EA%B3%84-%EB%B0%A9%ED%96%A5">5.2.1 설계 방향</h3>
+<p>IK 계산은 실시간이 아닌 <strong>오프라인 사전 계산</strong> 단계에서 수행됩니다. 수렴 속도보다 정확도와 제약 처리 유연성을 우선하여 <strong>Weighted DLS(Damped Least Squares) 방식의 Jacobian 기반 IK</strong>를 채택하였습니다. 알고리즘 검증은 Vulkan 기반 테스트베드에서 MIDI 노트 시퀀스를 재생하며 수행하고, 최종 오프라인 계산 결과를 UE5로 전달하는 구조입니다.</p>
+<h3 id="522-%EC%86%90-%EB%AA%A8%EB%8D%B8-%EA%B3%84%EC%B8%B5-%EA%B5%AC%EC%A1%B0-%EB%B0%8F-rom-%EC%84%A4%EC%A0%95">5.2.2 손 모델 계층 구조 및 ROM 설정</h3>
+<p>관절 계층: <strong>Wrist → Metacarpal → MCP → PIP → DIP → Fingertip</strong></p>
+<table>
+<thead>
+<tr>
+<th>관절</th>
+<th>굴곡 범위</th>
+<th>신전 범위</th>
+<th>내외전</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>MCP</td>
+<td>0° ~ 90°</td>
+<td>0° ~ 20°</td>
+<td><strong>±35°</strong></td>
+</tr>
+<tr>
+<td>PIP</td>
+<td>0° ~ 110°</td>
+<td>0° ~ 20°</td>
+<td>—</td>
+</tr>
+<tr>
+<td>DIP</td>
+<td>0° ~ 32°</td>
+<td>0° ~ 15°</td>
+<td>—</td>
+</tr>
+<tr>
+<td>엄지 CMC</td>
+<td>0° ~ 50°</td>
+<td>0° ~ 50°</td>
+<td>±40° (축회전 0°~15°)</td>
+</tr>
+<tr>
+<td>엄지 MCP</td>
+<td>0° ~ 110°</td>
+<td>0° ~ 15°</td>
+<td>—</td>
+</tr>
+<tr>
+<td>엄지 IP</td>
+<td>0° ~ 32°</td>
+<td>0° ~ 15°</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<p>모든 관절 각도는 <code>std::clamp</code>로 ROM 범위 내로 강제 제한하여 생리적으로 불가능한 동작을 원천 차단합니다.</p>
+<h3 id="523-weighted-dls-ik-%EC%97%B0%EC%82%B0">5.2.3 Weighted DLS IK 연산</h3>
+<p>중간보고의 DLS IK를 관절 한계를 반영하는 <strong>Weighted DLS</strong>로 확장하였습니다. 손가락당 최대 40회 반복, 허용 오차 0.01입니다.</p>
+<ol>
+<li>각 타임스텝마다 모든 관절 각도를 <strong>0°(일자 자세)로 초기화</strong>합니다. 이전 타임스텝 결과에 의존하지 않고 매번 같은 조건에서 풀 수 있습니다.</li>
+<li><code>computeFK</code>로 각 관절의 전역 변환을 갱신합니다.</li>
+<li>오차 벡터 $e = target - p_{end}$ 를 계산하고, $|e| &lt; 0.01$ 이면 반복을 종료합니다.</li>
+<li>각 관절 $i$의 회전축 $a$와 끝점까지의 벡터를 외적하여 $3 \times 9$ Jacobian을 생성합니다: $J_{col} = a \times (p_{end} - p_i)$</li>
+<li><strong>관절 한계 가중치</strong>를 계산합니다. 각도를 가동 범위 안에서 $[-1, 1]$로 정규화한 뒤 한계에 가까울수록 비용이 급증합니다.
+<ul>
+<li>$\hat{q} = (q - q_{mid}) / q_{range}$</li>
+<li>$w = 1 + 100 \cdot |\hat{q}|^6$</li>
+<li>$W^{-1} = 1 / w$ (가동 범위가 0인 자유도는 $W^{-1} = 0$)</li>
+</ul>
+</li>
+<li>Weighted DLS 역행렬로 보정 오차를 구합니다 ($\lambda = 0.05$): $e^* = (J W^{-1} J^T + \lambda^2 I)^{-1} e$</li>
+<li>관절 변화량을 계산합니다: $\Delta\theta = W^{-1} J^T e^*$</li>
+<li><strong>9개 자유도 전체 스텝 길이</strong>가 0.1 rad을 넘으면 방향을 유지하고 길이만 줄입니다.</li>
+<li>각도를 갱신하고 <code>std::clamp</code>로 최종 제한합니다.</li>
+</ol>
+<p>한계각에 가까운 관절은 $W^{-1}$이 0에 가까워져 거의 움직이지 않고, 나머지 관절이 움직임을 분담합니다. 하드 클램프에 의존하지 않고도 자연스럽게 관절 한계를 피하게 됩니다.</p>
+<h3 id="524-midi-%EB%85%B8%ED%8A%B8-%EC%97%B0%EB%8F%99">5.2.4 MIDI 노트 연동</h3>
+<p>IK 입력으로 운지법 엔진과 같은 <code>NoteEvent</code> 자료구조를 사용합니다.</p>
+<pre class="hljs"><code><div><span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">NoteEvent</span> {</span> <span class="hljs-keyword">float</span> time_ms; <span class="hljs-keyword">int</span> pitch; <span class="hljs-keyword">int</span> velocity; <span class="hljs-keyword">float</span> duration_ms; <span class="hljs-keyword">int</span> hand; <span class="hljs-keyword">int</span> finger; };
+</div></code></pre>
+<p>현재는 운지법 엔진과 연동하기 전 단계로, 모의 MIDI 데이터(<code>initMockMidiData</code>)로 검증하고 있습니다.</p>
+<table>
+<thead>
+<tr>
+<th>구간</th>
+<th>시간</th>
+<th>왼손</th>
+<th>오른손</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>파트 1: 반음계 상행</td>
+<td>0 ~ 6.0초 (500ms 간격)</td>
+<td>C3~B3 12음, 손가락 5→1 순환</td>
+<td>C4~B4 12음, 손가락 1→5 순환</td>
+</tr>
+<tr>
+<td>파트 2: C장조 화음</td>
+<td>6.0 ~ 7.5초</td>
+<td>C3·E3·G3 (5·3·1번)</td>
+<td>C4·E4·G4 (1·3·5번)</td>
+</tr>
+</tbody>
+</table>
+<p>각 음의 지속 시간은 450ms로, 다음 음까지 50ms 동안 손가락을 떼는 동작이 나오도록 하였습니다.</p>
+<h3 id="525-%ED%94%BC%EC%95%84%EB%85%B8-%EA%B1%B4%EB%B0%98-%EB%AA%A8%EB%8D%B8">5.2.5 피아노 건반 모델</h3>
+<p>12개 반음을 균등하게 놓지 않고, 실제 피아노처럼 <strong>흰 건반 폭을 기준으로</strong> 배치하였습니다(옥타브당 흰 건반 7개). 흰 건반 폭은 손가락 전체 길이(1.75)에 비례하도록 <strong>0.45</strong>로 정하였습니다.</p>
+<ul>
+<li>흰 건반: $z = 옥타브 \times 7 \times w + 흰건반순서 \times w$</li>
+<li>검은 건반: 왼쪽 흰 건반 위치 $+ ; w \times (0.5 + bias)$</li>
+<li>검은 건반 편향(bias): C#·F# −0.15, D#·A# +0.15, G# 0</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>구분</th>
+<th>누르는 지점 X (앞뒤)</th>
+<th>누르는 지점 Y (높이)</th>
+<th>폭</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>흰 건반</td>
+<td>0.8</td>
+<td>−0.5</td>
+<td>0.45 − 간격 0.04</td>
+</tr>
+<tr>
+<td>검은 건반</td>
+<td>1.3</td>
+<td>−0.35</td>
+<td>흰 건반의 50%</td>
+</tr>
+</tbody>
+</table>
+<p>검은 건반은 흰 건반보다 짧고 높으며 안쪽에 있습니다. 건반 메시와 IK 타겟이 <code>kWhiteKeyWidth</code> 상수를 공유하므로 위치가 어긋나지 않습니다.</p>
+<h3 id="526-%EC%86%90%EB%AA%A9-%ED%8A%B8%EB%9E%98%ED%82%B9-%EB%B0%8F-%EC%95%84%EC%B9%98%ED%98%95-%EA%B6%A4%EC%A0%81">5.2.6 손목 트래킹 및 아치형 궤적</h3>
+<p>중간보고의 베지어 기반 C↔F 전환은 정해진 두 자세 사이를 오가는 데는 적합했으나, 임의의 MIDI 시퀀스에서는 목표 위치가 수시로 바뀌므로 <strong>목표 추적 + 지수 감쇠 보간</strong> 방식으로 전환하였습니다.</p>
+<p><strong>① 목표 위치 (손별, 활성 노트 기준)</strong></p>
+<ul>
+<li><strong>Z (좌우):</strong> 손목을 누르는 손가락의 뿌리가 건반 바로 위에 오는 위치에 둡니다.
+<ul>
+<li>$wrist_z = \text{평균}(key_z - rootOffset_z)$</li>
+</ul>
+</li>
+<li><strong>X (앞뒤):</strong> 흰 건반 기준 위치에서 검은 건반까지 차이의 30%만 손목이 따라가고, 나머지는 손가락이 뻗어서 처리합니다.
+<ul>
+<li>$wrist_x = 0.8 + (\overline{key_x} - 0.8) \times 0.3 - 0.8$</li>
+</ul>
+</li>
+<li><strong>검은 건반 높이 보정:</strong> 누르는 건반의 평균 높이가 높은 만큼 그 30%를 손목 높이에 더합니다.</li>
+</ul>
+<p><strong>② 아치형 높이</strong></p>
+<p>이동할 거리가 많이 남을수록 손목을 위로 들어올립니다. XZ 평면 거리를 사용합니다.</p>
+<p>$$target_y = 0.1 + |target_{xz} - current_{xz}| \times 0.2 + bias$$</p>
+<p><strong>③ 타임스텝 독립 보간</strong></p>
+<p>$$\alpha = 1 - e^{-k \cdot dt}$$</p>
+<p>k값: 수평 이동 7.7, 높이 9.75. 계산 간격(dt)이 바뀌어도 손목 궤적이 같게 나와 오프라인 연산에서 출력 프레임레이트를 바꿔도 결과가 일관됩니다.</p>
+<h3 id="527-%EC%86%90%EA%B0%80%EB%9D%BD-%ED%83%80%EA%B2%9F-%EC%84%A4%EC%A0%95-%EB%B0%8F-%ED%83%80%EA%B1%B4-%EB%AA%A8%EC%85%98">5.2.7 손가락 타겟 설정 및 타건 모션</h3>
+<ol>
+<li><strong>대기 자세:</strong> 노트가 없는 손가락은 $wrist + rootOffset + (0.9, -0.35, 0)$ 을 목표로 합니다. 자연스럽게 아래로 굽은 이완 자세입니다.</li>
+<li><strong>타건:</strong> 노트가 배정된 손가락은 <code>getKeyPosition(pitch)</code>로 목표를 덮어씁니다.</li>
+<li><strong>보간:</strong> 타겟을 스텝마다 0.25 비율로 목표에 가깝게 옮깁니다. 이때 남은 거리 × 0.08만큼 Y를 올려서, 손가락이 살짝 들렸다가 건반을 내려치는 궤적을 만듭니다.</li>
+</ol>
+<h3 id="528-%EA%B2%80%EC%A6%9D%EC%9A%A9-%ED%85%8C%EC%8A%A4%ED%8A%B8%EB%B2%A0%EB%93%9C-vulkan">5.2.8 검증용 테스트베드 (Vulkan)</h3>
+<p>IK 결과를 눈으로 확인하기 위해 Vulkan으로 손가락 골격과 건반을 렌더링하는 테스트베드를 구현하였습니다.</p>
+<table>
+<thead>
+<tr>
+<th>정점 범위</th>
+<th>내용</th>
+<th>파이프라인</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0 ~ 39</td>
+<td>손가락 10개 × 관절 4개 골격</td>
+<td>선(Line)</td>
+</tr>
+<tr>
+<td>40 ~ 79</td>
+<td>타겟 십자선 10개</td>
+<td>선(Line)</td>
+</tr>
+<tr>
+<td>80 ~</td>
+<td>건반 사각형</td>
+<td>Triangle List, 컬링 없음</td>
+</tr>
+</tbody>
+</table>
+<p>색상: 엄지 초록, 왼손 주황, 오른손 파랑, 타겟 빨간 십자선. 흰 건반을 먼저 그리고 검은 건반을 위에 그리며 깊이 테스트(<code>LESS</code>)로 겹침을 처리합니다.</p>
+<p><strong>[그림] 양손 Weighted DLS IK 타건 결과 — Vulkan 테스트베드</strong></p>
+<p><img src="images/fig_ik_melody.png" alt="IK 시각화 — 멜로디 라인 (백건 타건)"></p>
+<p><img src="images/fig_ik_chord.png" alt="IK 시각화 — 화음 타건"></p>
+<p>왼손(주황)·오른손(파랑)·엄지(초록) 골격과 타겟 십자선(빨강). 각 손가락이 배정된 건반의 누름 지점으로 수렴하고, 노트가 없는 손가락은 이완된 대기 자세를 유지합니다.</p>
+<h3 id="529-w03-%ED%99%95%EC%A0%95-%ED%8C%8C%EB%9D%BC%EB%AF%B8%ED%84%B0">5.2.9 W03 확정 파라미터</h3>
+<table>
+<thead>
+<tr>
+<th>항목</th>
+<th>값</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>흑건 상면 Y 오프셋</td>
+<td>3.0 cm</td>
+</tr>
+<tr>
+<td>건반 최대 누름 깊이</td>
+<td>1.0 cm</td>
+</tr>
+<tr>
+<td>IK 출력 프레임레이트</td>
+<td>30 FPS</td>
+</tr>
+<tr>
+<td>손가락-손목 오프셋 (오른손 1~5번)</td>
+<td>−4, −2, 0, +2, +4 반음</td>
+</tr>
+</tbody>
+</table>
+<h3 id="5210-%ED%96%A5%ED%9B%84-%EC%97%B0%EB%8F%99-%EA%B3%84%ED%9A%8D">5.2.10 향후 연동 계획</h3>
+<ul>
+<li>운지법 엔진 JSON 연동 (<code>start_ms</code>→<code>time_ms</code>, <code>hand</code> 문자열→정수 매핑)</li>
+<li>운지법 엔진의 손목 회전(<code>wrist_yaw_deg</code>, <code>wrist_roll_deg</code>) 반영</li>
+<li>건반 관통 및 다중 손가락 충돌 방지 로직</li>
+<li>오프라인 계산 결과를 UE5 Animation 시스템(MetaHuman 손 모델)으로 전달하는 데이터 파이프라인 구축</li>
+</ul>
+<hr>
+<h2 id="53-%EC%BB%A4%EC%8A%A4%ED%85%80-gpu-%EC%8A%A4%ED%82%A4%EB%8B%9D-%ED%8C%8C%EC%9D%B4%ED%94%84%EB%9D%BC%EC%9D%B8--%EC%9D%B4%EC%88%98%EB%AF%BC">5.3 커스텀 GPU 스키닝 파이프라인 — 이수민</h2>
+<h3 id="531-%EB%AA%A9%ED%91%9C-%EB%B0%8F-1%ED%95%99%EA%B8%B0%E2%86%922%ED%95%99%EA%B8%B0-%EC%A0%84%ED%99%98">5.3.1 목표 및 1학기→2학기 전환</h3>
+<p>손가락이 굽혀질 때 피부 주름이 생기게 하는 것이 목표입니다. 엔진 기본 GPU 스키닝은 정점을 옮기기만 하며 표면 신장률을 계산하지 않으므로 주름이 생기지 않습니다.</p>
+<p>1학기에는 SVE(Scene View Extension)를 이용해 포스트프로세스 단계에 커스텀 패스를 삽입하는 방식을 검증하였습니다. 2학기에는 계획대로 <strong>후크 지점을 정점 처리 단계로 전환</strong>, UE5의 <code>UMeshDeformer</code>를 상속하여 엔진 스킨 캐시를 커스텀 컴퓨트 셰이더로 대체하였습니다.</p>
+<div align="center"><img src="images/skinning_pipeline/fig_skinning_01.png" width="470"/></div>
+<p align="center"><b>[그림 1]</b> 최종 결과. 손을 편 상태에서 마디마다 가로 주름이 보입니다.</p>
+<h3 id="532-6-pass-%EC%BB%B4%ED%93%A8%ED%8A%B8-%EC%85%B0%EC%9D%B4%EB%8D%94-%ED%8C%8C%EC%9D%B4%ED%94%84%EB%9D%BC%EC%9D%B8">5.3.2 6-Pass 컴퓨트 셰이더 파이프라인</h3>
+<p><code>UMeshDeformer</code>를 상속하여 컴퓨트 셰이더 6개를 글로벌 셰이더로 등록합니다.</p>
+<pre class="hljs"><code><div>IMPLEMENT_GLOBAL_SHADER(FPianoHandSkinDeformerCS,      <span class="hljs-string">"/PianoHand/Private/CustomSkinningDeformer.usf"</span>, <span class="hljs-string">"DeformCS"</span>,           SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FPianoHandTensionAccumulateCS, <span class="hljs-string">"/PianoHand/Private/CustomSkinningTension.usf"</span>,  <span class="hljs-string">"AccumulateCS"</span>,       SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FPianoHandTensionResolveCS,    <span class="hljs-string">"/PianoHand/Private/CustomSkinningTension.usf"</span>,  <span class="hljs-string">"ResolveCS"</span>,          SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FPianoHandDetailDisplaceCS,    <span class="hljs-string">"/PianoHand/Private/CustomSkinningDetail.usf"</span>,   <span class="hljs-string">"DisplaceCS"</span>,         SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FPianoHandNormalAccumulateCS,  <span class="hljs-string">"/PianoHand/Private/CustomSkinningDetail.usf"</span>,   <span class="hljs-string">"NormalAccumulateCS"</span>, SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FPianoHandNormalResolveCS,     <span class="hljs-string">"/PianoHand/Private/CustomSkinningDetail.usf"</span>,   <span class="hljs-string">"NormalResolveCS"</span>,    SF_Compute);
+</div></code></pre>
+<table>
+<thead>
+<tr>
+<th>순서</th>
+<th>패스</th>
+<th>스레드 단위</th>
+<th>역할</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>①</td>
+<td><code>DeformCS</code></td>
+<td>정점</td>
+<td>본 행렬로 위치·탄젠트 계산 (LBS / DQS)</td>
+</tr>
+<tr>
+<td>②</td>
+<td><code>AccumulateCS</code></td>
+<td>삼각형</td>
+<td>변 신장률을 계산해 정점에 누적</td>
+</tr>
+<tr>
+<td>③</td>
+<td><code>ResolveCS</code></td>
+<td>정점</td>
+<td>누적값 평균 → 정점 컬러 + strain 버퍼</td>
+</tr>
+<tr>
+<td>④</td>
+<td><code>DisplaceCS</code></td>
+<td>정점</td>
+<td>부피 보존 + 관절 주름 변위</td>
+</tr>
+<tr>
+<td>⑤</td>
+<td><code>NormalAccumulateCS</code></td>
+<td>삼각형</td>
+<td>변위 후 면 노멀 재계산</td>
+</tr>
+<tr>
+<td>⑥</td>
+<td><code>NormalResolveCS</code></td>
+<td>정점</td>
+<td>노멀 평균 + 탄젠트 재직교화</td>
+</tr>
+</tbody>
+</table>
+<p>결과는 GPU skin passthrough 정점 팩토리 버퍼에 직접 씁니다. 머티리얼·그림자·라이팅 경로는 그대로 사용합니다.</p>
+<pre class="hljs"><code><div>FRDGBufferRef PositionBuffer = FSkeletalMeshDeformerHelpers::AllocateVertexFactoryPositionBuffer(
+    GraphBuilder, ExternalAccessQueue, MeshObject, LodIndex, TEXT(<span class="hljs-string">"PianoHandSkinDeformerPosition"</span>));
+<span class="hljs-comment">// ... 6개 패스 디스패치 ...</span>
+FSkeletalMeshDeformerHelpers::UpdateVertexFactoryBufferOverrides(
+    GraphBuilder, MeshObject, LodIndex, bInvalidatePreviousPosition);
+</div></code></pre>
+<blockquote>
+<p><strong>Nanite를 쓰지 않은 이유:</strong> Nanite 메시는 passthrough 정점 팩토리를 우회합니다. 정점 밀도는 에셋 단계 PN 테셀레이션으로 올렸습니다. ⑤⑥ 노멀 재계산 패스가 빠지면 정점이 움직여도 주름이 화면에 전혀 보이지 않습니다 — 초기 구현에서 실제로 겪은 문제입니다.</p>
+</blockquote>
+<h3 id="533-%ED%85%90%EC%85%98strain-%EA%B3%84%EC%82%B0">5.3.3 텐션(Strain) 계산</h3>
+<p>기준 자세의 변 길이와 스키닝 후 변 길이를 비교합니다.</p>
+<pre class="hljs"><code><div>// CustomSkinningTension.usf — AccumulateCS
+void AccumulateEdge(uint A, uint B, float3 RestA, float3 RestB, float3 SkinA, float3 SkinB)
+{
+    const float RestLen = length(RestB - RestA);
+    const float SkinLen = length(SkinB - SkinA);
+    if (RestLen &lt; 1e-5f) return;                 // 중복 정점으로 생긴 0길이 변은 제외
+
+    const float Strain = clamp(SkinLen / RestLen - 1.0f, -8.0f, 8.0f);
+    const int   Packed = (int)round(Strain * TENSION_FIXED_SCALE);
+
+    InterlockedAdd(StrainAccum[A], Packed);      // 여러 삼각형이 같은 정점에 동시에 쓴다
+    InterlockedAdd(StrainAccum[B], Packed);
+    InterlockedAdd(StrainCount[A], 1u);
+    InterlockedAdd(StrainCount[B], 1u);
+}
+</div></code></pre>
+<ul>
+<li><strong>양수</strong>: 늘어남 (손등·손가락 바깥)</li>
+<li><strong>음수</strong>: 눌림 (손바닥·마디 안쪽)</li>
+<li>float atomic add는 GPU에서 사용 불가. <code>TENSION_FIXED_SCALE</code>(65536)을 곱해 int로 변환 후 atomic 누적. strain을 ±8로 clamp하면 정점에 변이 4,000개 붙어도 int32가 넘치지 않습니다.</li>
+</ul>
+<p><code>ResolveCS</code>에서 평균을 내고 정점 컬러로 출력합니다.</p>
+<div align="center"><img src="images/skinning_pipeline/fig_skinning_02.png" width="520"/></div>
+<p align="center"><b>[그림 2]</b> 텐션 디버깅. 왼쪽은 기준 자세로 변형이 없습니다. 오른쪽은 주먹을 쥔 상태입니다.<br/>빨강이 늘어난 곳(손등·손가락 바깥), 파랑이 눌린 곳(손바닥·마디 안쪽)입니다.</p>
+<h3 id="534-%EA%B4%80%EC%A0%88-%EC%9C%84%EC%B9%98-%ED%8C%90%EB%B3%84--%EC%8A%A4%ED%82%A8-%EC%9B%A8%EC%9D%B4%ED%8A%B8-%EA%B8%B0%EB%B0%98">5.3.4 관절 위치 판별 — 스킨 웨이트 기반</h3>
+<p>주름은 관절에만 생겨야 합니다. 별도 마스크를 쓰면 메시가 바뀔 때마다 다시 만들어야 합니다. 관절 위의 정점은 정의상 두 본이 섞이는 정점이므로, 스킨 웨이트에서 직접 뽑았습니다.</p>
+<pre class="hljs"><code><div>// CustomSkinningDetail.usf — DisplaceCS
+// 강체 부분에서 0, 관절의 50:50 블렌드 선에서 정확히 1
+const float JointBlend = saturate(4.0f * LargestWeight * SecondWeight);
+const float JointBand  = pow(max(JointBlend, 0.0f), max(CreaseSharpness, 1.0f));
+</div></code></pre>
+<p>별도 마스크 없이 어떤 스켈레탈 메시에도 적용됩니다.</p>
+<p><strong>부피 보존:</strong> 면 방향 신장률이 λ이면 비압축 가정에서 두께는 <code>1/λ²</code>배가 됩니다. 눌린 쪽이 법선 방향으로 부풀어 올라 LBS의 사탕포장지 변형을 방지합니다.</p>
+<pre class="hljs"><code><div>const float Lambda     = max(1.0f + Strain, 0.2f);
+const float VolumeTerm = VolumeBulge * clamp(1.0f / (Lambda * Lambda) - 1.0f, -2.0f, 2.0f);
+</div></code></pre>
+<h3 id="535-%EC%9D%B4%EB%A0%A5history--%ED%8F%88%EB%8B%A4-%EB%86%93%EC%9D%80-%EC%A7%81%ED%9B%84-%EB%82%A8%EB%8A%94-%EC%A3%BC%EB%A6%84">5.3.5 이력(History) — 폈다 놓은 직후 남는 주름</h3>
+<p>당겨졌던 피부는 바로 원래대로 돌아가지 않습니다. 잠시 주름이 남습니다. strain 하나로는 표현할 수 없습니다 — 쭉 펴고 있던 손가락과 방금 편 손가락의 strain이 같기 때문입니다. <strong>직전 프레임 상태를 기억해야 합니다.</strong></p>
+<pre class="hljs"><code><div>// CustomSkinningTension.usf — ResolveCS
+// RelaxState는 프레임 사이에 유지되는 버퍼 (.x = 직전 strain, .y = 남은 여유분)
+const float2 PrevState   = (bResetRelax != 0u) ? float2(Strain, 0.0f) : RelaxState[V];
+const float  PrevStretch = max(PrevState.x, 0.0f);
+const float  NowStretch  = max(Strain, 0.0f);
+
+float Slack = PrevState.y;
+Slack += max(PrevStretch - NowStretch, 0.0f) * RelaxGain;   // 신장이 풀리면 여유분이 생기고
+Slack -= max(NowStretch - PrevStretch, 0.0f) * RelaxGain;   // 다시 당기면 곧바로 사라진다
+Slack  = saturate(Slack) * exp(-DeltaTime / max(RelaxTau, 1e-3f));
+
+RelaxState[V] = float2(Strain, Slack);
+ColorBufferUAV[V] = float4(saturate(T), saturate(-T), 0.5f + 0.5f * clamp(T, -1, 1), Slack);
+</div></code></pre>
+<p>버퍼를 프레임 사이에 유지하는 것이 핵심입니다. RDG의 <code>QueueBufferExtraction</code>과 <code>RegisterExternalBuffer</code>로 왕복시켰습니다. <code>Slack</code>은 정점 컬러 <strong>알파 채널</strong>로 나가 머티리얼이 주름을 되살리는 데 사용합니다.</p>
+<div align="center"><img src="images/skinning_pipeline/fig_skinning_03.png" width="640"/></div>
+<p align="center"><b>[그림 3]</b> 굴곡 사이클. 편 상태 / 주먹 / 막 편 직후입니다.<br/>세 번째의 주름이 첫 번째보다 깊습니다. 이 차이가 이력(Slack) 버퍼의 효과입니다.</p>
+<h3 id="536-%EC%86%90-%EB%AA%A8%EB%8D%B8-%EA%B5%90%EC%B2%B4-metahuman">5.3.6 손 모델 교체 (MetaHuman)</h3>
+<p>기존 VR 템플릿 손은 관절이 단순한 2본 블렌드라 관절 밴드가 해부학과 어긋났습니다. MetaHumanCharacter 플러그인의 템플릿 바디에서 오른손만 잘라 교체했습니다.</p>
+<table>
+<thead>
+<tr>
+<th>단계</th>
+<th style="text-align:right">삼각형</th>
+<th style="text-align:right">정점</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>원본 바디 <code>SKM_Body</code></td>
+<td style="text-align:right">60,816</td>
+<td style="text-align:right">30,455</td>
+</tr>
+<tr>
+<td>오른손 추출</td>
+<td style="text-align:right">9,624</td>
+<td style="text-align:right">4,834</td>
+</tr>
+<tr>
+<td>PN 테셀레이션 (level 3)</td>
+<td style="text-align:right">154,624</td>
+<td style="text-align:right">77,314</td>
+</tr>
+</tbody>
+</table>
+<div align="center"><img src="images/skinning_pipeline/fig_skinning_04.png" width="330"/></div>
+<p align="center"><b>[그림 4]</b> 추출한 오른손. 손목 절단면은 삼각형 팬으로 막았습니다.</p>
+<p>두 가지 처리가 필요했습니다.</p>
+<ul>
+<li><strong>보조 본 정리</strong>: MetaHuman은 정점 하나에 평균 9.6개 본을 묶습니다. 대부분 한 마디 안쪽의 보조 본이라 상위 두 웨이트가 같은 마디에 앉습니다. 평평한 손가락에서도 <code>4·w₀·w₁</code>이 1로 읽히는 문제가 발생합니다. 보조 본을 주 관절로 합쳐 평균 3.5개로 줄였습니다.</li>
+<li><strong>UV 재패킹</strong>: 손 UV가 바디 아틀라스의 사선 조각이라 텍스처의 10%만 덮었습니다. 섬 회전을 포함해 재패킹해 47%로 올렸습니다.</li>
+</ul>
+<p>관절별로 주름이 몰리는 정도는 리그에서 미리 계산해 텍스처로 구웠습니다.</p>
+<table>
+<thead>
+<tr>
+<th>채널</th>
+<th>내용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>R</td>
+<td>가중치 적용 관절 밴드</td>
+</tr>
+<tr>
+<td>G</td>
+<td>관절 피벗 기준 뼈 축 방향 부호 거리 (±3 cm)</td>
+</tr>
+<tr>
+<td>B</td>
+<td>원본 관절 밴드</td>
+</tr>
+<tr>
+<td>A</td>
+<td>손등 / 손바닥 판별값</td>
+</tr>
+</tbody>
+</table>
+<div align="center"><img src="images/skinning_pipeline/fig_skinning_05.png" width="440"/></div>
+<p align="center"><b>[그림 5]</b> 구운 맵의 R 채널(좌)과 G 채널(우). 밴드가 각 마디에 앉아 있습니다.<br/>셰이더는 G에 <code>sin()</code>을 적용해 손가락을 가로지르는 주름선을 만듭니다.</p>
+<h3 id="537-%EC%86%90%EB%93%B1%EA%B3%BC-%EC%86%90%EB%B0%94%EB%8B%A5%EC%9D%80-%EB%B0%98%EB%8C%80%EB%A1%9C-%EB%8F%99%EC%9E%91%ED%95%9C%EB%8B%A4">5.3.7 손등과 손바닥은 반대로 동작한다</h3>
+<p>관절 밴드는 스킨 웨이트에서 나오므로 관절을 빙 둘러 깔립니다. 실제 피부는 두 면이 반대로 움직입니다.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>손 펼 때</th>
+<th>주먹 쥘 때</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>손바닥</td>
+<td>주름 적음</td>
+<td>주름 깊어짐</td>
+</tr>
+<tr>
+<td>손등 (마디 위)</td>
+<td>여유 피부가 뭉쳐 <strong>주름 생김</strong></td>
+<td>팽팽히 당겨져 <strong>주름 사라짐</strong></td>
+</tr>
+</tbody>
+</table>
+<p>베이크 단계에서 정점마다 &quot;굽힐 때 늘어나는 쪽인지&quot;를 계산해 마스크 알파에 넣었습니다. 굽힘은 본 로컬 +Z 축 기준 음수 회전 θ이며, 피벗에서 <code>u = cross(flexAxis, boneDir)</code> 방향으로 h만큼 떨어진 점은 <code>−h·θ</code>만큼 변합니다. <code>h &gt; 0</code>이면 늘어나므로 u가 손등 방향입니다. 부호는 기준 자세에 40° 굽힘을 직접 적용해 검증하였습니다.</p>
+<table>
+<thead>
+<tr>
+<th>검증 항목</th>
+<th style="text-align:right">값</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>상관계수 <code>corr(dorsality, strain)</code></td>
+<td style="text-align:right"><strong>+0.68</strong></td>
+</tr>
+<tr>
+<td>dorsality &gt; +0.5 평균 변형률</td>
+<td style="text-align:right"><strong>+6.9 %</strong> (늘어남)</td>
+</tr>
+<tr>
+<td>dorsality &lt; −0.5 평균 변형률</td>
+<td style="text-align:right"><strong>−9.4 %</strong> (눌림)</td>
+</tr>
+</tbody>
+</table>
+<div align="center"><img src="images/skinning_pipeline/fig_skinning_06.png" width="250"/></div>
+<p align="center"><b>[그림 6]</b> 구워낸 판별 채널. 빨강이 손등, 파랑이 손바닥입니다.</p>
+<p>셰이더 게이트를 손등/손바닥 둘로 나눕니다.</p>
+<pre class="hljs"><code><div>// PianoHandSkin.ush
+float PH_CreaseGate(
+    float Dorsal, float Compress, float Stretch, float Relax,
+    float PalmarBase, float PalmarCompress, float PalmarIron, float PalmarRelax,
+    float DorsalBase, float DorsalIron, float DorsalRelax)
+{
+    float Palm = PalmarBase + Compress * PalmarCompress + Relax * PalmarRelax - Stretch * PalmarIron;
+    float Back = DorsalBase                            + Relax * DorsalRelax - Stretch * DorsalIron;
+    return saturate(lerp(Palm, Back, Dorsal));
+}
+</div></code></pre>
+<p>손등 쪽 <code>Back</code>에는 <strong>압축 항이 없습니다</strong>. 기본 여유분 <code>DorsalBase</code>에서 시작해 신장이 그것을 깎아냅니다.</p>
+<table>
+<thead>
+<tr>
+<th>파라미터</th>
+<th>의미</th>
+<th style="text-align:right">값</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>PalmarBase</code></td>
+<td>편 손바닥에 남는 기본 주름</td>
+<td style="text-align:right">0.30</td>
+</tr>
+<tr>
+<td><code>PalmarCompress</code></td>
+<td>쥘 때 손바닥 주름이 깊어지는 속도</td>
+<td style="text-align:right">2.6</td>
+</tr>
+<tr>
+<td><code>PalmarIron</code></td>
+<td>펼 때 펴지는 속도</td>
+<td style="text-align:right">1.2</td>
+</tr>
+<tr>
+<td><code>DorsalBase</code></td>
+<td>편 상태에서 손등에 뭉치는 주름</td>
+<td style="text-align:right">0.40</td>
+</tr>
+<tr>
+<td><code>DorsalIron</code></td>
+<td>쥘 때 팽팽해지는 속도</td>
+<td style="text-align:right">5.0</td>
+</tr>
+<tr>
+<td><code>DorsalRelax</code></td>
+<td>막 편 직후 되살아나는 주름</td>
+<td style="text-align:right">4.0</td>
+</tr>
+<tr>
+<td><code>SideSharpness</code></td>
+<td>손등↔손바닥 전환 폭</td>
+<td style="text-align:right">2.0</td>
+</tr>
+</tbody>
+</table>
+<div align="center"><img src="images/skinning_pipeline/fig_skinning_07.png" width="450"/></div>
+<p align="center"><b>[그림 7]</b> 게이트 하나였을 때(위)와 둘로 나눈 뒤(아래). 왼쪽이 편 손, 오른쪽이 주먹입니다.<br/>수정 전에는 편 손이 매끈하고 주먹에서 주름이 보입니다. 수정 후에는 반대가 됩니다.</p>
+<div align="center"><img src="images/skinning_pipeline/fig_skinning_08.png" width="520"/></div>
+<p align="center"><b>[그림 8]</b> 손바닥. 같은 베이크 데이터로 반대로 동작합니다. 쥘수록 주름이 깊어집니다.</p>
+<h3 id="538-%ED%95%9C%EA%B3%84-%EB%B0%8F-%ED%96%A5%ED%9B%84-%EA%B3%84%ED%9A%8D">5.3.8 한계 및 향후 계획</h3>
+<ul>
+<li><strong>손바닥 접힘선</strong>(생명선 등)은 관절 밴드로 나오지 않습니다. 별도 채널이나 수작업 맵이 필요합니다.</li>
+<li><strong>성능 측정 미완료</strong>: 정점 77k에 컴퓨트 패스 6개의 프레임 비용을 측정해야 합니다.</li>
+<li><strong>이력 효과 감쇠 약 0.9초</strong>: 정지 화면으로는 확인이 어렵습니다. 시퀀서 렌더로 검증할 예정입니다.</li>
+<li><strong>손목 절단면</strong> 가장자리 노멀이 거칩니다. 커프를 씌우거나 경계를 평활할 계획입니다.</li>
+<li>4.1·4.2 모듈의 실제 연주 모션 위에서 동작 확인 예정입니다.</li>
+</ul>
+<hr>
+<h2 id="54-chaos-flesh-pbd-skinning--%EA%B3%BD%EA%B2%BD%EB%AF%BC">5.4 Chaos Flesh PBD Skinning — 곽경민</h2>
+<h3 id="541-%EB%AA%A9%ED%91%9C-%EB%B0%8F-%EC%97%AD%ED%95%A0-%EB%B6%84%EB%8B%B4">5.4.1 목표 및 역할 분담</h3>
+<p>손가락이 굽혀질 때 살이 실제 물리처럼 눌리고 밀리게 하는 것이 목표입니다. LBS는 정점을 본 행렬로 옮기기만 합니다. 관절 안쪽 살이 서로 파고들고, 부피가 줄어듭니다. Chaos Flesh는 손 내부를 사면체로 채워 뼈에 묶고 물리로 시뮬레이션합니다. 눌린 살은 부피를 유지하려고 옆으로 밀려납니다.</p>
+<p>이번 기간에는 통합 프로젝트에서 Flesh 에셋을 다시 만들고, 굴곡 애니메이션을 따라 Flesh가 변형되는 것까지 확인하였습니다.</p>
+<p><img src="images/flesh_pipeline/fig_flesh_follow_after.png" alt="그림 1a. Flesh 추종 — 주먹 쥐는 중간 단계"></p>
+<p><img src="images/flesh_pipeline/fig_flesh_follow_after2.png" alt="그림 1b. Flesh 추종 — 주먹 완전히 쥔 상태"></p>
+<p><em>그림 1. 주먹을 쥐는 애니메이션을 Flesh(파랑)가 따라갑니다.</em></p>
+<p>중간보고 이후 5.3의 커스텀 GPU 스키닝이 주름·핏줄까지 만들게 되었습니다. 두 모듈이 같은 일을 하지 않도록 역할을 나눴습니다.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>5.3 커스텀 GPU 스키닝</th>
+<th>5.4 Chaos Flesh</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>변형 계산 근거</td>
+<td>스킨 웨이트 (LBS/DQS) + 변 신장률</td>
+<td>사면체 볼륨의 물리 시뮬레이션</td>
+</tr>
+<tr>
+<td>표현 대상</td>
+<td>주름·핏줄·미세 노멀</td>
+<td>살 눌림·부피 보존</td>
+</tr>
+<tr>
+<td>스케일</td>
+<td>미시 디테일</td>
+<td>거시 변형</td>
+</tr>
+</tbody>
+</table>
+<p>5.3의 부피 보존 항은 <code>1/λ²</code>라는 가정으로 계산한 <strong>추정값</strong>입니다. Flesh는 사면체끼리 서로 밀어내며 <strong>실제로 계산</strong>합니다. 최종 구조: <strong>Flesh가 계산한 표면 위치 → 5.3 파이프라인 입력</strong>으로 연결하여, 물리 변형된 표면 위에 주름·핏줄이 올라가는 구조를 목표로 합니다.</p>
+<h3 id="542-%EC%86%90-%EB%AA%A8%EB%8D%B8">5.4.2 손 모델</h3>
+<p>5.3과 같은 메시를 씁니다. 나중에 결과를 합쳐야 하기 때문입니다. 5.3의 손 모델이 바뀔 때마다 따라갔습니다.</p>
+<table>
+<thead>
+<tr>
+<th>시기</th>
+<th>메시</th>
+<th style="text-align:right">정점</th>
+<th>비고</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1학기</td>
+<td><code>fbx_Clean</code></td>
+<td style="text-align:right">—</td>
+<td>전신 모델, Bone Filter로 손·팔만 사면체화</td>
+</tr>
+<tr>
+<td>2학기 초</td>
+<td><code>SKM_MannyXR_right</code></td>
+<td style="text-align:right">3,239</td>
+<td>UE 5.6 VR 템플릿 손</td>
+</tr>
+<tr>
+<td>현재</td>
+<td><code>SKM_MH_Hand_R</code></td>
+<td style="text-align:right">4,834</td>
+<td>MetaHuman 바디에서 오른손만 추출</td>
+</tr>
+</tbody>
+</table>
+<p>같은 메시가 필요한 이유는 5.4.6에 있습니다. Flesh는 <strong>메시 이름</strong>으로 애니메이션 뼈를 찾습니다. 시뮬레이션에는 PN 테셀레이션 전 원본 메시(<code>4,834 정점</code>)를 씁니다. 고밀도 메시(<code>77k 정점</code>)는 렌더링용입니다.</p>
+<h3 id="543-dataflow-%EA%B7%B8%EB%9E%98%ED%94%84">5.4.3 Dataflow 그래프</h3>
+<p>Flesh 에셋은 Dataflow 그래프로 만듭니다. 1학기에는 Geometry 생성과 바인딩을 그래프 두 개로 나눴습니다. 지금은 대상이 손 하나뿐이고 파라미터를 자주 바꿔야 해서 <strong>하나로 통합</strong>하였습니다.</p>
+<p><img src="images/flesh_pipeline/fig_flesh_graph.png" alt="그림 2. 현재 Dataflow 그래프"></p>
+<p><em>그림 2. SkeletalMesh → SkeletalMeshToCollection_0(Import Transform Only) + SkeletalMeshToCollection → CreateTetrahedron → SetFleshDefaultProperties → SetFleshBonePositionTargetBinding → FleshAssetTerminal</em></p>
+<table>
+<thead>
+<tr>
+<th>노드</th>
+<th>역할</th>
+<th>설정</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SkeletalMesh</code></td>
+<td>입력 모델</td>
+<td><code>SKM_MH_Hand_R</code></td>
+</tr>
+<tr>
+<td><code>SkeletalMeshToCollection_0</code> (위)</td>
+<td>뼈 계층만 변환</td>
+<td><strong>Import Transform Only ✔</strong></td>
+</tr>
+<tr>
+<td><code>SkeletalMeshToCollection</code> (아래)</td>
+<td>표면 형상 변환</td>
+<td>기본값</td>
+</tr>
+<tr>
+<td><code>CreateTetrahedron</code></td>
+<td>표면 내부를 사면체로 채움</td>
+<td>Method: <strong>TetWild</strong></td>
+</tr>
+<tr>
+<td><code>SetFleshDefaultProperties</code></td>
+<td>물성 초기값 설정</td>
+<td>아래 표</td>
+</tr>
+<tr>
+<td><code>SetFleshBonePositionTargetBinding</code></td>
+<td>사면체 정점 → 뼈 스프링</td>
+<td>Stiffness 10,000 / Search Radius 1.0</td>
+</tr>
+<tr>
+<td><code>FleshAssetTerminal</code></td>
+<td>Flesh 에셋으로 저장</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<p><code>CreateTetrahedron</code>의 두 입력은 역할이 다릅니다. 엔진 소스를 확인하였습니다.</p>
+<pre class="hljs"><code><div><span class="hljs-comment">// ChaosFleshCreateTetrahedronNode.cpp (UE 5.6, 발췌)</span>
+<span class="hljs-function">TUniquePtr&lt;FFleshCollection&gt; <span class="hljs-title">InCollectionVal</span><span class="hljs-params">(
+    GetValue&lt;DataType&gt;(Context, &amp;Collection).NewCopy&lt;FFleshCollection&gt;())</span></span>;
+<span class="hljs-function">TUniquePtr&lt;FFleshCollection&gt; <span class="hljs-title">InSourceCollectionVal</span><span class="hljs-params">(
+    GetValue&lt;DataType&gt;(Context, &amp;SourceCollection).NewCopy&lt;FFleshCollection&gt;())</span></span>;
+<span class="hljs-comment">// SourceCollection의 형상으로 사면체를 만들어 InCollectionVal에 덧붙인다</span>
+SetValue&lt;<span class="hljs-keyword">const</span> DataType&amp;&gt;(Context, *InCollectionVal, &amp;Collection);  <span class="hljs-comment">// 출력 = Collection 입력의 복사본 + 사면체</span>
+</div></code></pre>
+<p>출력은 <code>Collection</code> 입력을 <strong>그대로 복사한 것</strong>에 사면체를 붙인 것입니다. 뼈 정보는 반드시 <code>Collection</code> 포트로 들어가야 합니다. 형상까지 든 컬렉션을 넣으면 원래 표면 메시가 사면체와 함께 중복으로 들어갑니다. 그래서 <code>Collection</code> 쪽은 <strong>Import Transform Only</strong>로 뼈만 넣습니다.</p>
+<p><strong>물성 파라미터:</strong></p>
+<table>
+<thead>
+<tr>
+<th>파라미터</th>
+<th>의미</th>
+<th style="text-align:right">값</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Density</code></td>
+<td>밀도</td>
+<td style="text-align:right">1.0</td>
+</tr>
+<tr>
+<td><code>Vertex Stiffness</code></td>
+<td>형태 유지 강성</td>
+<td style="text-align:right">1,000,000</td>
+</tr>
+<tr>
+<td><code>Vertex Damping</code></td>
+<td>진동 감쇠</td>
+<td style="text-align:right">0.0</td>
+</tr>
+<tr>
+<td><code>Vertex Incompressibility</code></td>
+<td>부피 보존 강도</td>
+<td style="text-align:right">0.6</td>
+</tr>
+<tr>
+<td><code>Vertex Inflation</code></td>
+<td>내부 압력</td>
+<td style="text-align:right">0.5</td>
+</tr>
+</tbody>
+</table>
+<h3 id="544-%EC%82%AC%EB%A9%B4%EC%B2%B4-%EC%83%9D%EC%84%B1--isostuffing%EC%97%90%EC%84%9C-tetwild%EB%A1%9C">5.4.4 사면체 생성 — IsoStuffing에서 TetWild로</h3>
+<p>기본 방식은 IsoStuffing입니다. 바운딩 박스를 격자로 나누고 메시 안쪽에 있는 칸에 사면체를 채웁니다.</p>
+<p><strong>격자 해상도 문제:</strong> <code>Num Cells</code> 기본값 32에서 칸 크기는 약 0.6 cm(손 길이 약 19 cm 기준)입니다. 손가락 두께가 1.5~2 cm라 단면에 2~3칸밖에 안 들어갑니다. 48로 올려 칸을 약 0.4 cm로 줄였습니다. 3차원 격자라 칸 수는 <code>(48/32)³ ≈ 3.4</code>배가 됩니다.</p>
+<p><strong>MetaHuman 손에서 실패:</strong> 손 모델을 바꾸자 손바닥만 채워지고 손가락은 끝 조각만 남았습니다. IsoStuffing은 칸마다 &quot;메시 안쪽인가&quot;를 판정하므로 틈이 없는 닫힌 메시가 필요합니다. 이 메시는 전신 바디에서 잘라낸 것으로 표면에 틈이 남아 있어 안팎 판정이 실패한 것으로 분석됩니다.</p>
+<p><img src="images/flesh_pipeline/fig_flesh_isostuffing.png" alt="그림 3. IsoStuffing 실패 — 손바닥만 채워지고 손가락 볼륨 없음"></p>
+<p>틈이 있는 메시에도 안정적인 <strong>TetWild</strong>로 전환하였습니다.</p>
+<p><img src="images/flesh_pipeline/fig_flesh_tetwild.png" alt="그림 4. TetWild 결과 — 다섯 손가락 모두 볼륨이 채워짐"></p>
+<h3 id="545-%EB%BC%88-%EB%B0%94%EC%9D%B8%EB%94%A9">5.4.5 뼈 바인딩</h3>
+<p><code>SetFleshBonePositionTargetBinding</code>은 사면체 정점을 가까운 뼈에 스프링으로 묶습니다. <strong>Position Target</strong> 모드는 완전히 고정하지 않고 목표 위치로 당겨, 살이 약간 늦게 따라오는 효과가 납니다.</p>
+<p>처음에는 손가락 끝이 아래로 처지고 뭉개졌습니다. 손끝은 마지막 뼈(<code>_03</code>)보다 바깥에 있어, 탐색 반경이 0이면 손끝 정점이 바인딩 범위 밖에 남습니다. Search Radius를 1.0으로 올려 해결하였습니다.</p>
+<p>단, 이 조정은 뼈 정보가 빠진 상태(5.4.6)에서 한 것이므로 뼈 정보 복원 후 다시 검증해야 합니다.</p>
+<h3 id="546-%EC%95%A0%EB%8B%88%EB%A9%94%EC%9D%B4%EC%85%98-%EC%B6%94%EC%A2%85">5.4.6 애니메이션 추종</h3>
+<p>Flesh 에셋 에디터의 Preview Scene에서 굴곡 애니메이션(<code>A_MH_Hand_Cycle</code>, 4초 굴곡 사이클)을 재생하였습니다.</p>
+<table>
+<thead>
+<tr>
+<th>위치</th>
+<th>항목</th>
+<th>값</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Asset Details → Animation</td>
+<td>Skeletal Mesh</td>
+<td><code>SKM_MH_Hand_R</code></td>
+</tr>
+<tr>
+<td>Asset Details → Animation</td>
+<td>Skeleton</td>
+<td><code>metahuman_base_skel</code></td>
+</tr>
+<tr>
+<td>Preview Scene</td>
+<td>Animation Asset</td>
+<td><code>A_MH_Hand_Cycle</code></td>
+</tr>
+</tbody>
+</table>
+<p>처음에는 스켈레탈 메시만 주먹을 쥐고 Flesh는 기본 자세에 멈춰 있었습니다.</p>
+<p>에디터 로그에 손의 뼈 22개 전부에 대해 같은 에러가 있었습니다.</p>
+<pre class="hljs"><code><div>ChaosFleshSetFleshBonePositionTargetBindingNodeLog: Error: Collection does not contain bone[hand_r].
+ChaosFleshSetFleshBonePositionTargetBindingNodeLog: Error: Collection does not contain bone[index_01_r].
+...
+</div></code></pre>
+<p>바인딩 노드는 컬렉션 안에서 <strong>뼈 이름</strong>으로 뼈를 찾습니다. 런타임에도 동일하게 동작합니다.</p>
+<pre class="hljs"><code><div><span class="hljs-comment">// ChaosDeformableTetrahedralComponent.cpp (UE 5.6, 발췌)</span>
+TSet&lt;int32&gt; Roots = TransformSource.GetTransformSource(
+    Skeleton-&gt;GetName(), Skeleton-&gt;GetGuid().ToString(), SkeletalMesh-&gt;GetName());
+<span class="hljs-keyword">if</span> (!Roots.IsEmpty() &amp;&amp; ...)
+{
+    <span class="hljs-keyword">const</span> TArray&lt;FTransform&gt;&amp; ComponentTransforms = SkeletalMeshComponent-&gt;GetComponentSpaceTransforms();
+    AnimationTransforms[Adx] = ComponentTransforms[Cdx];   <span class="hljs-comment">// 찾으면 애니메이션 뼈 사용</span>
+}
+<span class="hljs-comment">// 못 찾으면 AnimationTransforms는 기준 자세 그대로 → 경고 없이 멈춰 있는다</span>
+</div></code></pre>
+<p><strong>스켈레톤 이름 + GUID + 메시 이름</strong>으로 조회합니다. 5.4.2에서 5.3과 같은 메시를 써야 한다고 한 이유가 이것입니다. 그래프 통합 과정에서 <code>CreateTetrahedron</code>의 <code>Collection</code> 포트에 뼈 정보가 누락된 것이 원인이었습니다. <code>Import Transform Only</code> 갈래를 <code>Collection</code> 포트에 올바르게 연결하여 에러가 해소되고 Flesh가 애니메이션을 따라가는 것을 확인하였습니다.</p>
+<h3 id="547-%ED%95%9C%EA%B3%84-%EB%B0%8F-%ED%96%A5%ED%9B%84-%EA%B3%84%ED%9A%8D">5.4.7 한계 및 향후 계획</h3>
+<ul>
+<li><strong>바인딩 파라미터 재조정 필요</strong>: Stiffness와 Search Radius는 뼈가 빠진 상태에서 정한 값입니다.</li>
+<li><strong>부위별 바인딩 미구현</strong>: 손끝·손목은 단단하게, 손등·손바닥은 유연하게 나눌 계획입니다. <code>VertexSelection</code> 입력으로 영역을 지정합니다.</li>
+<li><strong>물성 기본값에 가까움</strong>: Damping이 0이라 초기 관통 해소 시 튀어 오르는 현상이 있습니다. Inflation은 얇은 손가락을 부풀릴 가능성이 있습니다. 추가 테스트 후 조정 예정입니다.</li>
+<li><strong>LBS 대비 비교 미완료</strong>: 같은 프레임에서 관절부 형상을 나란히 비교할 예정입니다.</li>
+<li><strong>5.3 파이프라인 연동</strong>: Flesh가 계산한 표면 위치를 5.3의 입력으로 넘기는 어댑터를 만들 예정입니다.</li>
+<li><strong>시뮬레이션 전용 메시</strong>: TetWild는 생성이 느립니다. 틈을 메운 전용 메시를 따로 만들면 IsoStuffing으로 되돌릴 수 있습니다.</li>
+</ul>
+<hr>
+<h1 id="6-%EC%A3%BC%EC%9A%94-%EA%B8%B0%EC%88%A0%EC%A0%81-%EB%8F%84%EC%A0%84-%EB%B0%8F-%ED%95%B4%EA%B2%B0">6. 주요 기술적 도전 및 해결</h1>
+<h2 id="61-%EC%99%BC%EC%86%90-%EC%9A%B4%EC%A7%80%EB%B2%95-%EC%97%AD%EC%A0%84-%EB%AC%B8%EC%A0%9C-01fingering">6.1 왼손 운지법 역전 문제 (01_Fingering)</h2>
+<p><strong>현상:</strong> 왼손의 엄지(1번)가 가장 낮은 피치를, 새끼(5번)가 가장 높은 피치를 누르는 X자 꼬임 발생</p>
+<p><strong>원인:</strong> &quot;낮은 피치 = 낮은 번호 손가락&quot;이라는 오른손 중심 논리를 양손에 동일하게 적용. 왼손은 오른손의 거울상이므로 매핑 반전 필요.</p>
+<p><strong>해결:</strong> 왼손 연산 시 손가락 번호 조합 역순 배정 <code>(1,2,3)</code> → <code>(5,4,3)</code>, 교차 판정 로직 방향별 재구축.</p>
+<h2 id="62-ik-%ED%8A%B9%EC%9D%B4%EC%A0%90-%EB%AC%B8%EC%A0%9C-02ik">6.2 IK 특이점 문제 (02_IK)</h2>
+<p><strong>현상:</strong> 특정 자세에서 IK 계산값이 발산하여 불안정한 모션 생성</p>
+<p><strong>원인:</strong> 표준 Jacobian 역행렬 계산 시 특이점(Singularity) 근방에서 역행렬이 수치적으로 불안정합니다.</p>
+<p><strong>해결:</strong> $JJ^T + \lambda^2 I$ 형태의 <strong>DLS</strong> 역행렬을 적용하였습니다 ($\lambda = 0.05$). 또한 각도 변화량에 최대 스텝 제한을 두어 과도한 발산을 방지하였습니다. (이후 관절별 제한에서 9-DOF 전체 스텝 제한으로 변경 → 6.7절 참고)</p>
+<h2 id="63-gpu-%EC%85%B0%EC%9D%B4%EB%8D%94-%EB%85%B8%EB%A9%80-%EA%B0%B1%EC%8B%A0-%EB%88%84%EB%9D%BD-03skinning">6.3 GPU 셰이더 노멀 갱신 누락 (03_Skinning)</h2>
+<p><strong>현상:</strong> 정점은 움직여도 주름이 화면에 전혀 보이지 않음</p>
+<p><strong>원인:</strong> 초기 구현에서 ⑤⑥ 노멀 재계산 패스 누락. 정점 위치가 변해도 노멀이 그대로면 라이팅 계산에 반영되지 않음.</p>
+<p><strong>해결:</strong> NormalAccumulateCS + NormalResolveCS 2개 패스 추가</p>
+<h2 id="64-%EC%86%90%EB%93%B1%EC%86%90%EB%B0%94%EB%8B%A5-%EC%A3%BC%EB%A6%84-%EB%B0%A9%ED%96%A5-%EB%B0%98%EC%A0%84-%EB%AC%B8%EC%A0%9C-03skinning">6.4 손등·손바닥 주름 방향 반전 문제 (03_Skinning)</h2>
+<p><strong>현상:</strong> 편 손에서 매끈하고 주먹에서만 주름이 보이는 비정상 동작. 실제 피부는 반대.</p>
+<p><strong>원인:</strong> 주름 게이트가 &quot;눌리면 깊어진다&quot; 단일 로직이었음. 손등과 손바닥의 구분 없이 같은 gate 적용.</p>
+<p><strong>해결:</strong> 베이크 단계에서 손등/손바닥 판별값(<code>dorsality</code>) 마스크를 구워 셰이더 게이트를 양면 분리. <code>corr(dorsality, strain) = +0.68</code> 검증.</p>
+<h2 id="65-isostuffing-%EC%86%90%EA%B0%80%EB%9D%BD-%EB%B3%BC%EB%A5%A8-%EC%83%9D%EC%84%B1-%EC%8B%A4%ED%8C%A8-04flesh">6.5 IsoStuffing 손가락 볼륨 생성 실패 (04_Flesh)</h2>
+<p><strong>현상:</strong> MetaHuman 손 모델 적용 후 손가락 볼륨이 완전히 빔</p>
+<p><strong>원인:</strong> IsoStuffing의 안팎 판정이 표면 틈이 있는 메시에서 실패</p>
+<p><strong>해결:</strong> 비유사 메시에 안정적인 <strong>TetWild</strong> 방식으로 전환하여 5개 손가락 전체 볼륨 생성 확인</p>
+<h2 id="66-chaos-flesh-%EC%95%A0%EB%8B%88%EB%A9%94%EC%9D%B4%EC%85%98-%EC%B6%94%EC%A2%85-%EB%B6%88%EA%B0%80-04flesh">6.6 Chaos Flesh 애니메이션 추종 불가 (04_Flesh)</h2>
+<p><strong>현상:</strong> 스켈레탈 메시만 움직이고 Flesh는 기본 자세에 멈춤</p>
+<p><strong>원인:</strong> 그래프 통합 과정에서 <code>CreateTetrahedron</code>의 <code>Collection</code> 포트에 뼈 정보가 누락됨. 바인딩 노드가 컬렉션 내 뼈 이름으로 탐색하는 구조.</p>
+<p><strong>해결:</strong> <code>Import Transform Only</code> 갈래를 <code>Collection</code> 포트에 올바르게 연결하여 뼈 계층 복원. 에러 해소 및 애니메이션 추종 확인.</p>
+<h2 id="67-ik-%EA%B5%AD%EC%86%8C%ED%95%B4-%EA%B3%A0%EC%B0%A9-%EB%AC%B8%EC%A0%9C-02ik">6.7 IK 국소해 고착 문제 (02_IK)</h2>
+<p><strong>현상:</strong> 양손 10개 손가락으로 확장한 뒤, 일부 손가락이 관절 한계각에 걸린 채 목표에 도달하지 못하였고, 이후 타임스텝에서도 이 상태에서 빠져나오지 못하였습니다.</p>
+<p><strong>원인:</strong> 반복별 디버그 출력으로 세 가지 원인을 확인하였습니다.</p>
+<ol>
+<li><code>std::clamp</code>만으로 관절 한계를 처리하여, 이미 한계에 닿은 관절에도 계속 움직임이 배정되고 클램프로 잘리는 무의미한 스텝이 반복되었습니다.</li>
+<li>최대 스텝 제한(0.1 rad)을 관절마다 따로 적용하여, 길이 1.0인 Joint0과 0.25인 Joint2가 매 반복 같은 각도만큼만 움직였습니다. 짧은 관절이 필요 이상으로 빨리 한계각에 닿았습니다.</li>
+<li>이전 타임스텝의 관절 각도에서 IK를 시작(웜스타트)하여, 한 번 빠진 나쁜 상태가 계속 이어졌습니다.</li>
+</ol>
+<p><strong>해결:</strong></p>
+<ol>
+<li>관절 한계에 가까울수록 해당 관절의 참여를 줄이는 <strong>Weighted DLS</strong>를 적용하였습니다(5.2.3절). 하드 클램프는 마지막 안전장치로만 남겼습니다.</li>
+<li>9개 자유도 전체를 하나의 벡터로 보고 <strong>전체 스텝 길이만</strong> 제한하여, 관절 간 분배 비율을 유지하였습니다.</li>
+<li>각 타임스텝마다 관절 각도를 <strong>0°로 초기화</strong>한 뒤 새로 풀도록 하였습니다.</li>
+</ol>
+<h2 id="68-%EA%B2%80%EC%9D%80-%EA%B1%B4%EB%B0%98-%EB%8F%84%EB%8B%AC-%EC%8B%A4%ED%8C%A8-02ik">6.8 검은 건반 도달 실패 (02_IK)</h2>
+<p><strong>현상:</strong> 일반 손가락이 검은 건반을 정확히 누르지 못하였고, 한 손가락만 건반을 누를 때도 옆으로 크게 뻗는 부자연스러운 자세가 나왔습니다.</p>
+<p><strong>원인:</strong> 검은 건반은 흰 건반 사이, 더 안쪽에 더 높게 있어 손가락이 옆과 앞으로 더 뻗어야 합니다. 그런데 MCP 외전 한계가 ±20°로 좁았습니다. 또한 손목을 누르는 건반들의 <strong>평균 위치</strong>에 두어, 각 손가락이 자기 <code>rootOffset</code>(최대 0.8)만큼 옆으로 더 뻗어야 했습니다.</p>
+<p><strong>해결:</strong></p>
+<ol>
+<li>MCP 외전 범위를 ±20°에서 <strong>±35°</strong>로 넓혔습니다(5.2.2절).</li>
+<li>손목을 <strong>누르는 손가락의 뿌리가 건반 바로 위에 오는 위치</strong>에 두도록 바꾸었습니다(5.2.6절).</li>
+<li>검은 건반을 누를 때는 손목이 앞쪽으로 차이의 30%만 이동하고 살짝 들리도록 하여, 나머지 거리는 손가락이 뻗어서 처리하게 하였습니다.</li>
+</ol>
+<hr>
+<h1 id="7-%EA%B2%B0%EA%B3%BC%EB%AC%BC-%EB%B6%84%EC%84%9D">7. 결과물 분석</h1>
+<h2 id="71-%EC%9A%B4%EC%A7%80%EB%B2%95-%EC%B2%98%EB%A6%AC-%EA%B2%B0%EA%B3%BC-12%EA%B0%9C-midi">7.1 운지법 처리 결과 (12개 MIDI)</h2>
+<table>
+<thead>
+<tr>
+<th>곡명</th>
+<th>음표 수</th>
+<th>곡 길이</th>
+<th>왼손/오른손</th>
+<th>흑건 비율</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>드뷔시 Clair de Lune</td>
+<td>1,466</td>
+<td>6.5분</td>
+<td>763 / 703</td>
+<td>73.9%</td>
+</tr>
+<tr>
+<td>Super Mario 64 Medley</td>
+<td>5,435</td>
+<td>15.7분</td>
+<td>996 / 4,439</td>
+<td>17.8%</td>
+</tr>
+<tr>
+<td>Queen Bohemian Rhapsody</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Driftveil City BW</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Wii Sports Theme</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>외 7곡</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<h2 id="72-%EC%86%90%EA%B0%80%EB%9D%BD-%EC%82%AC%EC%9A%A9-%EB%B6%84%ED%8F%AC">7.2 손가락 사용 분포</h2>
+<p><img src="images/fig2_finger_dist.png" alt="손가락 사용 분포"></p>
+<ul>
+<li>드뷔시: 흑건 비율 73.9%로 모든 손가락이 고르게 사용됨</li>
+<li>마리오: 주선율이 오른손 집중 → 2번(26.5%), 4번(24.4%) 높음</li>
+<li>약지(4번) 기피 패턴이 DP 비용(+6)으로 적절히 억제됨</li>
+</ul>
+<h2 id="73-%ED%94%BC%EC%95%84%EB%85%B8-%EB%A1%A4-%EC%8B%9C%EA%B0%81%ED%99%94">7.3 피아노 롤 시각화</h2>
+<p><img src="images/fig3_piano_roll.png" alt="피아노 롤"></p>
+<p>위: 성부(MELODY/BASS/INNER) 기반 채색 / 아래: 손가락 번호 기반 채색</p>
+<h2 id="74-%EC%86%90%EB%AA%A9-yaw-%EA%B0%81%EB%8F%84-%EB%B6%84%ED%8F%AC">7.4 손목 Yaw 각도 분포</h2>
+<p><img src="images/fig4_wrist_yaw.png" alt="손목 Yaw 분포"></p>
+<p>손목 Yaw 각도가 ±35° ROM 내에서 정규 분포. 드뷔시의 분포가 더 넓은 것은 흑건 음형이 손목 회전을 더 많이 요구하기 때문입니다.</p>
+<h2 id="75-%EC%84%B1%EB%B6%80-%EC%97%AD%ED%95%A0-%EB%B6%84%ED%8F%AC">7.5 성부 역할 분포</h2>
+<p><img src="images/fig5_role_dist.png" alt="성부 분포"></p>
+<h2 id="76-gpu-%EC%8A%A4%ED%82%A4%EB%8B%9D-%EA%B2%B0%EA%B3%BC">7.6 GPU 스키닝 결과</h2>
+<ul>
+<li>편 손 상태에서 마디마다 가로 주름이 관찰됨 (손등 기본 주름)</li>
+<li>주먹 시 손바닥 주름 깊어짐, 손등은 팽팽해지며 주름 사라짐</li>
+<li>막 편 직후 약 0.9초간 이력 주름이 남아있다 서서히 소멸</li>
+</ul>
+<h2 id="77-chaos-flesh-%EA%B2%B0%EA%B3%BC">7.7 Chaos Flesh 결과</h2>
+<ul>
+<li>주먹 쥐는 4초 굴곡 사이클 애니메이션에서 Flesh가 정상 추종 확인</li>
+<li>사면체 5개 손가락 전체 채움 (TetWild, 방법 전환 후)</li>
+<li>Position Target 모드에서 살이 약간 늦게 따라오는 자연스러운 지연 효과 관찰</li>
+</ul>
+<hr>
+<h1 id="8-%ED%98%84%EC%9E%AC-%EC%83%81%ED%83%9C-%EB%B0%8F-%ED%96%A5%ED%9B%84-%EA%B3%84%ED%9A%8D">8. 현재 상태 및 향후 계획</h1>
+<h2 id="81-%EC%99%84%EB%A3%8C-%ED%95%AD%EB%AA%A9">8.1 완료 항목</h2>
+<ul>
+<li><input type="checkbox" id="checkbox0" checked="true"><label for="checkbox0">V5 Polyphonic DP 운지법 엔진</label></li>
+<li><input type="checkbox" id="checkbox1" checked="true"><label for="checkbox1">Pygame 실시간 시뮬레이터</label></li>
+<li><input type="checkbox" id="checkbox2" checked="true"><label for="checkbox2">shared_constants.py 공유 상수 분리 (W04)</label></li>
+<li><input type="checkbox" id="checkbox3" checked="true"><label for="checkbox3">IK 인터페이스 파라미터 전항목 확정 (W03)</label></li>
+<li><input type="checkbox" id="checkbox4" checked="true"><label for="checkbox4">12곡 MIDI 운지법 일괄 계산</label></li>
+<li><input type="checkbox" id="checkbox5" checked="true"><label for="checkbox5">UE5 DataTable CSV 출력 파이프라인</label></li>
+<li><input type="checkbox" id="checkbox6" checked="true"><label for="checkbox6">6-Pass GPU 스키닝 컴퓨트 셰이더 (DeformCS~NormalResolveCS)</label></li>
+<li><input type="checkbox" id="checkbox7" checked="true"><label for="checkbox7">텐션 맵 계산 (atomic int 고정소수점 누적)</label></li>
+<li><input type="checkbox" id="checkbox8" checked="true"><label for="checkbox8">이력 주름 효과 (RelaxState 프레임 간 버퍼 유지)</label></li>
+<li><input type="checkbox" id="checkbox9" checked="true"><label for="checkbox9">손등/손바닥 이중 주름 게이트</label></li>
+<li><input type="checkbox" id="checkbox10" checked="true"><label for="checkbox10">MetaHuman 손 모델 추출 및 UV 재패킹</label></li>
+<li><input type="checkbox" id="checkbox11" checked="true"><label for="checkbox11">Chaos Flesh Dataflow 그래프 (TetWild, 통합 단일)</label></li>
+<li><input type="checkbox" id="checkbox12" checked="true"><label for="checkbox12">Chaos Flesh 애니메이션 추종 확인</label></li>
+</ul>
+<h2 id="82-%EC%A7%84%ED%96%89-%EC%A4%91">8.2 진행 중</h2>
+<ul>
+<li><input type="checkbox" id="checkbox13"><label for="checkbox13">02_IK: UE5 Animation 시스템 연동 파이프라인 구축</label></li>
+<li><input type="checkbox" id="checkbox14"><label for="checkbox14">04_Flesh: 바인딩 파라미터 재조정 (뼈 복원 후)</label></li>
+<li><input type="checkbox" id="checkbox15"><label for="checkbox15">04_Flesh: 부위별 바인딩 (손끝 단단, 손등 유연)</label></li>
+<li><input type="checkbox" id="checkbox16"><label for="checkbox16">03+04: Flesh → GPU 스키닝 어댑터 연결</label></li>
+</ul>
+<h2 id="83-%EB%8B%A4%EC%9D%8C-%EB%A7%88%EC%9D%BC%EC%8A%A4%ED%86%A4">8.3 다음 마일스톤</h2>
+<table>
+<thead>
+<tr>
+<th>우선순위</th>
+<th>모듈</th>
+<th>항목</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>02_IK</td>
+<td>UE5 AnimBP 연동, <code>start_ms</code> 기반 타임라인 트리거 → Control Rig 본 타겟 연결</td>
+</tr>
+<tr>
+<td>2</td>
+<td>03_Skinning</td>
+<td>GPU 스키닝 성능 측정 (정점 77k, 6-pass 프레임 비용)</td>
+</tr>
+<tr>
+<td>3</td>
+<td>04_Flesh</td>
+<td>바인딩 파라미터 재튜닝, 부위별 VertexSelection 설정</td>
+</tr>
+<tr>
+<td>4</td>
+<td>전체</td>
+<td>Flesh 변형 표면 → GPU 스키닝 어댑터 구현</td>
+</tr>
+<tr>
+<td>5</td>
+<td>전체</td>
+<td>엔드-투-엔드 데모: 운지법 → IK → 렌더링 통합 검증</td>
+</tr>
+</tbody>
+</table>
+<h2 id="84-%EC%95%8C%EB%A0%A4%EC%A7%84-%ED%95%9C%EA%B3%84">8.4 알려진 한계</h2>
+<table>
+<thead>
+<tr>
+<th>모듈</th>
+<th>한계</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>01_Fingering</td>
+<td>복잡한 대위법·현대 곡 대응력 추가 향상 여지</td>
+</tr>
+<tr>
+<td>03_Skinning</td>
+<td>손바닥 접힘선(생명선 등)은 관절 밴드로 불출력, 수작업 맵 필요</td>
+</tr>
+<tr>
+<td>03_Skinning</td>
+<td>이력 주름 감쇠 약 0.9s — 정지 화면 확인 불가, 시퀀서 렌더 검증 예정</td>
+</tr>
+<tr>
+<td>03_Skinning</td>
+<td>손목 절단면 노멀 거침 — 커프 씌우기 또는 경계 평활화 예정</td>
+</tr>
+<tr>
+<td>04_Flesh</td>
+<td>물성 기본값에 가까움 — Damping 0.0으로 초기 관통 해소 시 튀어 오르는 현상</td>
+</tr>
+<tr>
+<td>04_Flesh</td>
+<td>LBS 대비 비교 검증 미실시</td>
+</tr>
+</tbody>
+</table>
+<hr>
+<h1 id="9-%EA%B2%B0%EB%A1%A0">9. 결론</h1>
+<p>본 중간 보고서는 피아노 연주 시뮬레이션 시스템의 2학기 W01~W04 진행 현황을 정리한 것입니다.</p>
+<p><strong>01_Fingering</strong> 모듈은 1학기에 완성된 V5 Polyphonic DP 엔진을 기반으로, 2학기에는 공유 상수 분리, IK 인터페이스 파라미터 확정, UE5 DataTable CSV 출력 파이프라인을 추가하여 운지법 파이프라인으로 완성하였습니다. 12개 MIDI 파일에 대한 일괄 처리 결과도 확보하였습니다.</p>
+<p><strong>02_IK</strong> 모듈은 DLS IK를 관절 한계를 고려한 Weighted DLS로 확장하고, 전체 스텝 제한과 타임스텝별 재초기화로 수렴 안정성을 확보하였습니다. MIDI 노트 이벤트와 실제 비율의 건반 모델을 연동하여, 양손 10개 손가락의 흰/검은 건반 타건과 손목 추적을 Vulkan 테스트베드에서 검증하였습니다. 향후 운지법 엔진 JSON 연동과 손목 회전 반영을 거쳐, 오프라인 계산 결과를 UE5로 전달할 예정입니다.</p>
+<p><strong>03_Skinning (GPU)</strong> 모듈은 1학기의 SVE 포스트프로세스 사전 검증을 발판 삼아, 2학기에는 UMeshDeformer 기반 6-Pass 컴퓨트 셰이더를 완성하였습니다. 텐션 계산, 부피 보존, 이력 주름, 손등/손바닥 이중 게이트까지 구현되어 시각적으로 사실적인 주름 렌더링을 달성하였습니다.</p>
+<p><strong>03_Skinning (Flesh)</strong> 모듈은 IsoStuffing에서 TetWild로 전환하여 MetaHuman 메시에서의 사면체 생성 문제를 해결하고, 애니메이션 추종 기능을 확인하였습니다. 바인딩 파라미터 재조정 및 부위별 바인딩 적용이 남은 과제입니다.</p>
+<p>2학기 최종 발표까지 IK-UE5 연동 완성, Flesh-GPU 스키닝 어댑터 구현, 그리고 MIDI 입력부터 최종 렌더링까지의 엔드-투-엔드 데모 시연을 목표로 개발을 지속하겠습니다.</p>
+<hr>
+<p><em>졸업프로젝트[3201] 2팀 | 정근녕, 한승현, 이수민, 곽경민</em></p>
+<p><em>본 보고서는 2026년 9월 29일 기준으로 작성되었습니다.</em></p>
+
+</body>
+</html>
