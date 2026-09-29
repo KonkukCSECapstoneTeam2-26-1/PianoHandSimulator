@@ -59,6 +59,31 @@ COPIES = [
 ]
 
 # 결과 JSON/CSV — 결과샘플/ 전체
+FLESH_IMAGES = [
+    # (원본 파일명, 대상 파일명)
+    (r"이미지\4.4_Chaos_Flesh_PBD_Skinning\스크린샷 2026-09-29 010649.png",
+     r"02_Implementation\03_Skinning\Document\images\fig_flesh_follow_after.png"),
+    (r"이미지\4.4_Chaos_Flesh_PBD_Skinning\스크린샷 2026-09-29 013157.png",
+     r"02_Implementation\03_Skinning\Document\images\fig_flesh_follow_after2.png"),
+    (r"이미지\4.4_Chaos_Flesh_PBD_Skinning\스크린샷 2026-09-29 014020.png",
+     r"02_Implementation\03_Skinning\Document\images\fig_flesh_graph.png"),
+    (r"이미지\4.4_Chaos_Flesh_PBD_Skinning\스크린샷 2026-09-28 231149.png",
+     r"02_Implementation\03_Skinning\Document\images\fig_flesh_isostuffing.png"),
+    (r"이미지\4.4_Chaos_Flesh_PBD_Skinning\스크린샷 2026-09-28 234329.png",
+     r"02_Implementation\03_Skinning\Document\images\fig_flesh_tetwild.png"),
+    # 보고서용 사본
+    (r"이미지\4.4_Chaos_Flesh_PBD_Skinning\스크린샷 2026-09-29 010649.png",
+     r"03_Reports\images\flesh_pipeline\fig_flesh_follow_after.png"),
+    (r"이미지\4.4_Chaos_Flesh_PBD_Skinning\스크린샷 2026-09-29 013157.png",
+     r"03_Reports\images\flesh_pipeline\fig_flesh_follow_after2.png"),
+    (r"이미지\4.4_Chaos_Flesh_PBD_Skinning\스크린샷 2026-09-29 014020.png",
+     r"03_Reports\images\flesh_pipeline\fig_flesh_graph.png"),
+    (r"이미지\4.4_Chaos_Flesh_PBD_Skinning\스크린샷 2026-09-28 231149.png",
+     r"03_Reports\images\flesh_pipeline\fig_flesh_isostuffing.png"),
+    (r"이미지\4.4_Chaos_Flesh_PBD_Skinning\스크린샷 2026-09-28 234329.png",
+     r"03_Reports\images\flesh_pipeline\fig_flesh_tetwild.png"),
+]
+
 RESULTS_SRC = os.path.join(SRC_BASE, "결과샘플")
 RESULTS_DST = os.path.join(DST_BASE, r"02_Implementation\01_Fingering\results")
 
@@ -87,6 +112,10 @@ def copy_tree(src_dir, dst_dir):
 if __name__ == "__main__":
     print("=== 개별 파일 복사 ===")
     for src_rel, dst_rel in COPIES:
+        copy_file(os.path.join(SRC_BASE, src_rel), os.path.join(DST_BASE, dst_rel))
+
+    print("\n=== Chaos Flesh 이미지 복사 ===")
+    for src_rel, dst_rel in FLESH_IMAGES:
         copy_file(os.path.join(SRC_BASE, src_rel), os.path.join(DST_BASE, dst_rel))
 
     print("\n=== 결과샘플 복사 ===")
