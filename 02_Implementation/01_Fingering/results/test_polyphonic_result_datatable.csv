@@ -1,0 +1,5 @@
+﻿Name,Pitch,StartMs,DurationMs,Hand,Role,Finger,Pressure,KeyDepth,IsBlack,WristPosNormalized,WristYawDeg,WristRollDeg,KeyHoldMs,PedalDown,TargetXMm,TargetYMm,TargetZMm,BoneName,FrameIndex,ReleaseFrameIndex
+Note_00001,60,0,500,Right,INNER,1,0.504,0.504,False,0.49,15,0,500,False,550.57,30,-5.04,thumb_03_r,0,15
+Note_00002,64,0,500,Right,INNER,2,0.504,0.504,False,0.49,15,0,500,False,597.43,30,-5.04,index_03_r,0,15
+Note_00003,67,0,500,Right,MELODY,3,0.504,0.504,False,0.49,15,0,500,False,644.29,30,-5.04,middle_03_r,0,15
+Note_00004,74,625,500,Right,MELODY,4,0.504,0.504,False,0.609,-5,0,500,False,738,30,-5.04,ring_03_r,19,34
