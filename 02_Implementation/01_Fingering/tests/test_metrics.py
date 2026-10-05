@@ -64,7 +64,10 @@ def run_all(raw):
     rep, _ = M.single_note_runs(chords)
     arp, _, _ = M.arpeggio_mismatch(chords)
     hs = M.hand_separation(chords)
+    i_span, i_dup, i_key, i_mono, i_inst, _ = M.check_instant_constraints(notes)
     return {
+        "A7_span": i_span, "A8_dup": i_dup, "A8b_key": i_key,
+        "A9_mono": i_mono, "A_instants": i_inst,
         "A1_span": span_bad, "A1_pairs": span_total,
         "A1b_span": span2_bad, "A1b_pairs": span2_total,
         "A2_mono": mono_bad, "A2_pairs": mono_total,
@@ -170,6 +173,51 @@ def case_cross():
     return raw
 
 
+# ── 순간 단위 지표(A7~A9) 케이스 ──────────────────────────────────
+# 핵심: 아래 음표들은 모두 **서로 다른 화음**(온셋 100ms 차이 > 30ms 윈도우)이다.
+# 따라서 화음 단위 지표(A1/A2/A4)는 0을 보고하지만, 시간상으로는 겹쳐 있으므로
+# 순간 단위 지표는 위반을 잡아내야 한다. 이 차이가 A7~A9 의 존재 이유다.
+
+def case_instant_span():
+    """지속음과 후속 단음이 겹치면서 손 범위를 초과 (화음 단위로는 안 보임)."""
+    return [
+        note(60, 0, 500, "Right", 1),     # 길게 유지
+        note(90, 100, 100, "Right", 5),   # 30반음 떨어진 음을 그 위에 타건
+    ]
+
+
+def case_instant_finger_dup():
+    """겹치는 두 음에 같은 손가락이 배정 — 한 손가락이 두 건반."""
+    return [
+        note(60, 0, 500, "Right", 3),
+        note(62, 100, 100, "Right", 3),
+    ]
+
+
+def case_instant_key_dup():
+    """같은 건반을 떼기 전에 다른 손가락으로 재타격 — 건반 하나에 손가락 둘."""
+    return [
+        note(60, 0, 500, "Left", 2),
+        note(60, 100, 100, "Left", 4),
+    ]
+
+
+def case_instant_mono():
+    """겹치는 두 음에서 pitch 순서와 손가락 순서가 어긋남."""
+    return [
+        note(60, 0, 500, "Right", 4),
+        note(64, 100, 100, "Right", 2),
+    ]
+
+
+def case_instant_clean():
+    """겹치지 않고 순차 타건 — 순간 단위 위반이 없어야 한다."""
+    return [
+        note(60, 0, 90, "Right", 1),
+        note(90, 100, 100, "Right", 5),
+    ]
+
+
 CASES = [
     ("기준(정상) 샘플", case_clean, {
         "A1_span": 0, "A2_mono": 0, "A3_conflict": 0, "A3_edge": 0, "A4_dup": 0,
@@ -191,6 +239,17 @@ CASES = [
     ("B9 같은 손가락 반복 주입", case_repeat, {"B9_repeat": 1}),
     ("B10 아르페지오 불일치 주입", case_arpeggio, {"B10_arp": 1}),
     ("B11 손 교차 주입", case_cross, {"B11_cross": 1}),
+    # 순간 단위 — 화음 단위 지표가 0인데도 위반이 잡혀야 한다
+    ("A7 순간 손 범위 초과 주입", case_instant_span,
+     {"A7_span": 1, "A_instants": 1, "A1_span": 0, "A1b_span": 0}),
+    ("A8 순간 손가락 중복 주입", case_instant_finger_dup,
+     {"A8_dup": 1, "A4_dup": 0}),
+    ("A8b 순간 건반 중복 주입", case_instant_key_dup,
+     {"A8b_key": 1, "A8_dup": 0}),
+    ("A9 순간 Monotonicity 위반 주입", case_instant_mono,
+     {"A9_mono": 1, "A2_mono": 0}),
+    ("순간 단위 정상(겹침 없음)", case_instant_clean,
+     {"A7_span": 0, "A8_dup": 0, "A8b_key": 0, "A9_mono": 0, "A_instants": 0}),
 ]
 
 

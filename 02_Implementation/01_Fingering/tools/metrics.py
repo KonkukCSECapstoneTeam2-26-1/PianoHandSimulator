@@ -18,6 +18,7 @@
 """
 import glob
 import json
+import heapq
 import os
 import sys
 import unicodedata
@@ -493,6 +494,102 @@ def role_preference(notes):
 # ─────────────────────────────────────────────────────────────
 # 리포트
 # ─────────────────────────────────────────────────────────────
+def check_instant_constraints(notes):
+    """순간 단위 물리 제약 검사 (A7/A8/A9).
+
+    A1·A2·A4 는 '화음' 단위로 검사한다. 그러나 화음은 온셋이 가까운 음표의 묶음일 뿐
+    시간을 분할하지 않는다 — 지속음은 후속 화음까지 걸치고, 서로 다른 화음이 같은
+    순간에 겹칠 수 있다. 물리 제약이 실제로 성립해야 하는 단위는 '시간상의 한 순간'이다.
+
+    시각 t 에서 한 손이 점유 중인 음표 집합
+        H(t) = { n : n.start <= t < n.start + n.key_hold }
+    에 대해 다음을 검사한다.
+        A7 손 범위   : H(t) 의 모든 손가락 쌍이 MAX_SPAN 이내
+        A8 손가락 유일: H(t) 에 같은 손가락이 둘 이상 없음
+        A8b 건반 유일 : H(t) 에 같은 pitch 가 둘 이상 없음 (한 건반 = 한 손가락)
+        A9 순서       : pitch 오름차순 ↔ 손가락 번호 단조 (오른손 증가 / 왼손 감소)
+
+    H(t) 는 온셋에서만 늘어나므로 모든 온셋 시점만 검사하면 충분하다.
+    반환: (span위반, 중복, 순서위반, 검사한 동시타건 시점 수, 예시 dict)
+    """
+    span_bad = dup_bad = mono_bad = key_bad = instants = 0
+    examples = {"A7": [], "A8": [], "A8b": [], "A9": []}
+
+    for hand in ("Left", "Right"):
+        hs = sorted((n for n in notes if n.hand == hand), key=lambda n: n.start)
+        active = []          # (점유 종료 시각, 삽입 순번, 음표)
+        i = 0
+        while i < len(hs):
+            t = hs[i].start
+            while i < len(hs) and hs[i].start == t:
+                n = hs[i]
+                # 점유 길이 0 인 음표도 타건 순간에는 눌려 있는 것으로 본다
+                heapq.heappush(active, (max(n.end, n.start + 1e-9), n.idx, n))
+                i += 1
+            # 경계 접촉 허용: 앞 음표의 점유 종료와 뒤 음표의 타건이 수학적으로는
+            # 같은 시각이어도 start+hold 와 다음 start 가 각각 반올림되어 마지막
+            # 비트가 어긋난다. A3 와 동일한 허용오차로 '뗀 것'으로 본다.
+            while active and active[0][0] <= t + OVERLAP_TOLERANCE_MS:
+                heapq.heappop(active)
+
+            # (pitch, finger) 로 정렬해 동일 pitch 에서도 순서가 결정적이게 한다
+            held = sorted((n for _, _, n in active), key=lambda n: (n.pitch, n.finger))
+            if len(held) < 2:
+                continue
+            instants += 1
+
+            # A7 — 모든 손가락 쌍의 span
+            hit = None
+            for a in range(len(held)):
+                for b in range(a + 1, len(held)):
+                    pair = tuple(sorted((held[a].finger, held[b].finger)))
+                    gap = held[b].pitch - held[a].pitch
+                    limit = MAX_SPAN.get(pair, DEFAULT_MAX_SPAN)
+                    if gap > limit:
+                        hit = (held[a], held[b], gap, limit)
+                        break
+                if hit:
+                    break
+            if hit:
+                span_bad += 1
+                if len(examples["A7"]) < 3:
+                    a, b, gap, limit = hit
+                    examples["A7"].append(
+                        f"{hand} @{t:.0f}ms 점유{[n.pitch for n in held]} "
+                        f"f{a.finger}(p{a.pitch})-f{b.finger}(p{b.pitch}) gap {gap} > {limit}")
+
+            # A8 — 손가락 중복
+            fingers = [n.finger for n in held]
+            if len(set(fingers)) != len(fingers):
+                dup_bad += 1
+                if len(examples["A8"]) < 3:
+                    examples["A8"].append(
+                        f"{hand} @{t:.0f}ms "
+                        f"{[(n.pitch, n.finger) for n in held]}")
+
+            # A8b — 동일 건반을 둘 이상이 점유 (건반 하나는 손가락 하나만 누를 수 있다)
+            pitches = [n.pitch for n in held]
+            if len(set(pitches)) != len(pitches):
+                key_bad += 1
+                if len(examples["A8b"]) < 3:
+                    examples["A8b"].append(
+                        f"{hand} @{t:.0f}ms {[(n.pitch, n.finger) for n in held]}")
+
+            # A9 — pitch 순 ↔ 손가락 순 단조성
+            if hand == "Right":
+                ok = all(fingers[k] < fingers[k + 1] for k in range(len(fingers) - 1))
+            else:
+                ok = all(fingers[k] > fingers[k + 1] for k in range(len(fingers) - 1))
+            if not ok:
+                mono_bad += 1
+                if len(examples["A9"]) < 3:
+                    examples["A9"].append(
+                        f"{hand} @{t:.0f}ms "
+                        f"{[(n.pitch, n.finger) for n in held]}")
+
+    return span_bad, dup_bad, key_bad, mono_bad, instants, examples
+
+
 def evaluate(path):
     """단일 결과 파일을 평가하고 표를 출력. 하드 위반 총합을 반환."""
     notes = load_notes(path)
@@ -526,27 +623,29 @@ def evaluate(path):
     dup_bad, dup_chords, dup_ex = check_duplicate_in_chord(chords)
     un_bad, un_ex = check_unassigned(notes)
     yaw_bad, roll_bad, yaw_max, roll_max, rom_ex = check_rom(notes)
+    i_span, i_dup, i_key, i_mono, i_instants, i_ex = check_instant_constraints(notes)
 
     hard_total = (span_bad + span2_bad + mono_bad + conf_bad + dup_bad
-                  + un_bad + yaw_bad + roll_bad)
+                  + un_bad + yaw_bad + roll_bad
+                  + i_span + i_dup + i_key + i_mono)
 
     print("[A] 물리 제약 위반 — 하드 제약 (0이어야 정상)")
     _row("지표", "값", "판정")
     print(LINE)
-    _row("A1. MAX_SPAN 초과 (화음 내 인접 손가락쌍)",
+    _row("A1. MAX_SPAN 초과 (화음 내 인접쌍) [화음단위]",
          f"{span_bad} / {span_total}쌍 ({_pc(span_bad, span_total)})",
          _verdict(span_bad))
-    _row("A1b. MAX_SPAN 초과 (비인접 손가락쌍)",
+    _row("A1b. MAX_SPAN 초과 (화음 내 비인접쌍) [화음단위]",
          f"{span2_bad} / {span2_total}쌍 ({_pc(span2_bad, span2_total)})",
          _verdict(span2_bad))
-    _row("A2. Monotonicity 위반 (pitch↔finger 순서)",
+    _row("A2. Monotonicity 위반 [화음단위]",
          f"{mono_bad} / {mono_total}쌍 ({_pc(mono_bad, mono_total)})",
          _verdict(mono_bad))
     _row("A3. 동시 누름 충돌 (같은 손·같은 손가락 중첩)",
          f"{conf_bad}쌍 (최대 {conf_max:.0f}ms)", _verdict(conf_bad))
     _row(f"A3b. 경계 접촉 (중첩 ≤{OVERLAP_TOLERANCE_MS:g}ms, 반올림 오차)",
          f"{conf_edge}쌍", "참고")
-    _row("A4. 화음 내 손가락 중복",
+    _row("A4. 화음 내 손가락 중복 [화음단위]",
          f"{dup_bad}건 (화음 {dup_chords}개)", _verdict(dup_bad))
     _row("A5. 미배정 (finger == 0)",
          f"{un_bad} / {len(notes)} ({_pc(un_bad, len(notes))})", _verdict(un_bad))
@@ -554,12 +653,22 @@ def evaluate(path):
          f"{yaw_bad} / {len(notes)} ({_pc(yaw_bad, len(notes))})", _verdict(yaw_bad))
     _row(f"A6. ROM 초과 |roll|>{roll_max:g}°",
          f"{roll_bad} / {len(notes)} ({_pc(roll_bad, len(notes))})", _verdict(roll_bad))
+    _row("A7. 손 범위 초과 [순간단위]",
+         f"{i_span} / {i_instants}시점 ({_pc(i_span, i_instants)})", _verdict(i_span))
+    _row("A8. 손가락 중복 [순간단위]",
+         f"{i_dup} / {i_instants}시점 ({_pc(i_dup, i_instants)})", _verdict(i_dup))
+    _row("A8b. 동일 건반 중복 점유 [순간단위]",
+         f"{i_key} / {i_instants}시점 ({_pc(i_key, i_instants)})", _verdict(i_key))
+    _row("A9. Monotonicity 위반 [순간단위]",
+         f"{i_mono} / {i_instants}시점 ({_pc(i_mono, i_instants)})", _verdict(i_mono))
     print(LINE)
     _row("[A] 하드 제약 위반 합계", f"{hard_total}건", _verdict(hard_total))
     print()
 
     for title, ex in (("A1", span_ex), ("A1b", span2_ex), ("A2", mono_ex),
-                      ("A3", conf_ex), ("A4", dup_ex), ("A5", un_ex), ("A6", rom_ex)):
+                      ("A3", conf_ex), ("A4", dup_ex), ("A5", un_ex), ("A6", rom_ex),
+                      ("A7", i_ex["A7"]), ("A8", i_ex["A8"]),
+                      ("A8b", i_ex["A8b"]), ("A9", i_ex["A9"])):
         if ex:
             print(f"  [{title}] 위반 예시 (최대 3건)")
             for e in ex:
