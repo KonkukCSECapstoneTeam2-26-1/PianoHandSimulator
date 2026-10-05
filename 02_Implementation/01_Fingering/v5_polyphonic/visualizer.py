@@ -1,17 +1,22 @@
 import json
 import os
+import sys
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 
-def load_data():
-    # 스크립트 위치 기준으로 결과 파일 경로 설정
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    path = os.path.abspath(os.path.join(base_dir, "../results/mario_polyphonic_result.json"))
-    
+# 엔진 출력 파일명은 입력 MIDI 이름을 따른다 (예: "<곡명>_polyphonic_result.json")
+DEFAULT_RESULT = "Super Mario 64 - Medley_polyphonic_result.json"
+
+def load_data(path=None):
+    # 인자가 없으면 스크립트 위치 기준 기본 결과 파일을 사용
+    if path is None:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.abspath(os.path.join(base_dir, "../results", DEFAULT_RESULT))
+
     if not os.path.exists(path):
         print(f"Error: Result file not found at {path}")
         return None
-        
+
     with open(path, encoding='utf-8') as f:
         return json.load(f)
 
@@ -71,7 +76,8 @@ def visualize_fingering_with_roles(data, start_ms, end_ms, output_name="viz_poly
     print(f"Visualization saved to: {save_path}")
 
 def main():
-    data = load_data()
+    # 사용법: python visualizer.py [결과JSON경로]
+    data = load_data(sys.argv[1] if len(sys.argv) > 1 else None)
     if data:
         # 곡의 앞부분(0~10초) 시각화
         visualize_fingering_with_roles(data, 0, 10000, "mario_v5_0_10s.png")
