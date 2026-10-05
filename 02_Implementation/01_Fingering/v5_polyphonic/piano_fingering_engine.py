@@ -211,20 +211,39 @@ def apply_key_hold_and_pedal(all_notes, pedal_spans):
     for note in all_notes:
         note.pedal_down = is_pedal_down(note.start_ms)
 
-    by_finger = {}
-    for note in all_notes:
-        if note.finger:
-            by_finger.setdefault((note.hand, note.finger), []).append(note)
-
     clipped = 0
-    for notes in by_finger.values():
-        notes.sort(key=lambda n: n.start_ms)
-        for curr, nxt in zip(notes, notes[1:]):
-            limit = nxt.start_ms - curr.start_ms
-            if limit < curr.key_hold_ms:
-                curr.key_hold_ms = max(limit, 0.0)
-                clipped += 1
+
+    def _clip_by(key_fn):
+        """같은 키로 묶인 음표들에서, 다음 음표가 시작하면 이전 점유를 끝낸다."""
+        nonlocal clipped
+        buckets = {}
+        for note in all_notes:
+            if note.finger:
+                buckets.setdefault(key_fn(note), []).append(note)
+        for notes in buckets.values():
+            notes.sort(key=lambda n: n.start_ms)
+            for curr, nxt in zip(notes, notes[1:]):
+                limit = nxt.start_ms - curr.start_ms
+                if limit < curr.key_hold_ms:
+                    curr.key_hold_ms = max(limit, 0.0)
+                    clipped += 1
+
+    # (1) 같은 손가락 재사용 — 손가락 하나는 한 번에 건반 하나만 누른다
+    _clip_by(lambda n: (n.hand, n.finger))
+    # (2) 같은 건반 재타격 — 건반 하나는 한 번에 손가락 하나만 누른다.
+    #     손가락이 달라도 떼었다가 다시 누르는 것이므로 이전 점유가 끝나야 한다.
+    _clip_by(lambda n: (n.hand, n.pitch))
+
     return clipped
+
+def _chord_time(chord):
+    """화음의 기준 시각 = 구성 음표 중 가장 이른 온셋.
+
+    화음 리스트는 pitch 오름차순으로 정렬되어 있으므로 chord[0] 은 '최저음'이지
+    '가장 먼저 눌린 음'이 아니다. chord[0].start_ms 를 화음의 시각으로 쓰면
+    병합·이관 판정이 실제 시간 관계와 어긋난다.
+    """
+    return min(n.start_ms for n in chord)
 
 def _dedupe_chord(chord):
     """화음 내 동일 pitch를 하나로 병합한다 (pitch 오름차순 정렬 결과 반환).
@@ -311,7 +330,11 @@ def parse_midi_to_hand_chords(file_path):
         if not h_notes: continue
         curr_group = [h_notes[0]]
         for i in range(1, len(h_notes)):
-            if h_notes[i].start_ms - curr_group[0].start_ms < 30:
+            # 동일 온셋 음표는 30ms 윈도우를 넘더라도 반드시 같은 화음에 둔다.
+            # (같은 순간에 눌리는 음이 서로 다른 화음으로 갈라지면 물리 제약을
+            #  화음 단위로 거는 의미가 사라진다)
+            same_onset = h_notes[i].start_ms == curr_group[-1].start_ms
+            if same_onset or h_notes[i].start_ms - curr_group[0].start_ms < 30:
                 curr_group.append(h_notes[i])
             else:
                 curr_group.sort(key=lambda x: x.pitch)
@@ -378,10 +401,10 @@ def split_wide_chords_between_hands(hand_chords, max_span=17, max_iter=50):
 
         # merge: 매 반복마다 30ms 이내 화음 합치기 (split 후 생긴 조각 포함)
         for h in [0, 1]:
-            hand_chords[h].sort(key=lambda c: c[0].start_ms)
+            hand_chords[h].sort(key=_chord_time)
             merged = []
             for chord in hand_chords[h]:
-                if merged and chord[0].start_ms - merged[-1][0].start_ms < 30:
+                if merged and _chord_time(chord) - _chord_time(merged[-1]) < 30:
                     merged[-1] = _dedupe_chord(merged[-1] + chord)
                 else:
                     merged.append(_dedupe_chord(chord))
@@ -405,9 +428,9 @@ def split_wide_chords_between_hands(hand_chords, max_span=17, max_iter=50):
                 new_chords.append(keep)
 
                 # 반대 손에 같은 시간대 화음이 있으면 합쳤을 때 span 미리 체크
-                move_time = move[0].start_ms
+                move_time = _chord_time(move)
                 existing = next((c for c in hand_chords[other]
-                                 if abs(c[0].start_ms - move_time) < 30), None)
+                                 if abs(_chord_time(c) - move_time) < 30), None)
                 if existing is None:
                     for n in move: n.hand = other
                     hand_chords[other].append(move)
@@ -419,7 +442,7 @@ def split_wide_chords_between_hands(hand_chords, max_span=17, max_iter=50):
                         hand_chords[other].append(move)
                     # span 초과 시 drop: 물리적으로 연주 불가능한 음표 제거
 
-            hand_chords[h] = sorted(new_chords, key=lambda c: c[0].start_ms)
+            hand_chords[h] = sorted(new_chords, key=_chord_time)
 
     return hand_chords
 
