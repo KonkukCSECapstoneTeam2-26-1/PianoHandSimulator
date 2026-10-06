@@ -513,6 +513,24 @@ def _trim_chord(chord, hand_id):
     sorted_chord = sorted(chord, key=lambda n: (priority[n.role], n.pitch if hand_id == 0 else -n.pitch))
     return sorted(sorted_chord[:5], key=lambda n: n.pitch)
 
+# --- 순간 단위(점유 기반) 제약 파라미터 -----------------------------------
+# 설계안: 01_Design/11_Temporal_Constraint_Design.md (3단계)
+HELD_DEPTH_LIMIT = 4        # 점유 정보를 기억할 최대 화음 거리 (실측상 96.8% 커버)
+DP_BEAM_WIDTH = 120         # 화음당 유지할 최대 상태 수 (상태 폭발 방지)
+OCCUPANCY_TOL_MS = 1.0      # 점유 종료 판정 허용오차 (반올림 경계)
+
+OCCUPANCY_SPAN_PENALTY = 5000    # 순간 손 범위 초과 (화음 내 SpanPenalty와 동일 수준)
+OCCUPANCY_FINGER_PENALTY = 4000  # 한 손가락이 두 건반
+OCCUPANCY_ORDER_PENALTY = 1500   # pitch 순 ↔ 손가락 순 어긋남
+
+def _occupies_at(note, t_ms):
+    """음표가 시각 t 에 아직 건반을 점유하고 있는가.
+
+    점유 길이는 required_hold_ms(페달을 고려한 최소 의무)를 쓴다. key_hold_ms 는
+    운지가 정해져야 알 수 있어 DP 중에는 사용할 수 없다. (설계안 3.3절)
+    """
+    return note.start_ms + note.required_hold_ms > t_ms + OCCUPANCY_TOL_MS
+
 def solve_fingering_chord_dp(chord_sequence, hand_id):
     if not chord_sequence: return
     chord_sequence = [_trim_chord(c, hand_id) for c in chord_sequence]
@@ -524,6 +542,58 @@ def solve_fingering_chord_dp(chord_sequence, hand_id):
         if hand_id == 0: # Left Hand: Lowest pitch gets highest finger number (5 -> 1)
             return [tuple(reversed(c)) for c in combos]
         return combos
+
+    chord_times = [_chord_time(c) for c in chord_sequence]
+    EMPTY_HELD = frozenset()
+
+    def advance_held(held, prev_idx, prev_f, t_now, curr_idx):
+        """이전 상태의 점유 집합을 현재 화음 시점으로 갱신.
+
+        - 아직 점유 중이고
+        - 화음 거리가 HELD_DEPTH_LIMIT 이내인
+        항목만 남기고, 직전 화음에서 새로 이어지는 점유를 더한다.
+        항목은 (화음 인덱스, 화음 내 위치, 손가락).
+        """
+        out = []
+        for entry in held:
+            ci, pos, fg = entry
+            if curr_idx - ci <= HELD_DEPTH_LIMIT and _occupies_at(chord_sequence[ci][pos], t_now):
+                out.append(entry)
+        prev_chord = chord_sequence[prev_idx]
+        for pos, note in enumerate(prev_chord):
+            if pos < len(prev_f) and _occupies_at(note, t_now):
+                out.append((prev_idx, pos, prev_f[pos]))
+        return frozenset(out)
+
+    def occupancy_penalty(curr_chord, curr_f, held):
+        """현재 화음 + 아직 눌려 있는 음표를 합쳐 순간 단위 제약을 검사.
+
+        화음 단위 검사만으로는 지속음과의 충돌을 볼 수 없다. 이 함수가 설계안의
+        C1(손가락 유일) · C2(손 범위) · C3(순서)를 한 순간에 대해 평가한다.
+        """
+        if not held:
+            return 0
+        items = [(n.pitch, f) for n, f in zip(curr_chord, curr_f)]
+        items += [(chord_sequence[ci][pos].pitch, fg) for ci, pos, fg in held]
+        items.sort()
+        fingers = [f for _, f in items]
+
+        penalty = (len(fingers) - len(set(fingers))) * OCCUPANCY_FINGER_PENALTY
+
+        for a in range(len(items)):
+            for b in range(a + 1, len(items)):
+                limit = MAX_SPAN.get(tuple(sorted((items[a][1], items[b][1]))), 12)
+                if items[b][0] - items[a][0] > limit:
+                    penalty += OCCUPANCY_SPAN_PENALTY
+
+        for k in range(len(fingers) - 1):
+            if hand_id == 1:
+                if fingers[k] >= fingers[k + 1]:
+                    penalty += OCCUPANCY_ORDER_PENALTY
+            else:
+                if fingers[k] <= fingers[k + 1]:
+                    penalty += OCCUPANCY_ORDER_PENALTY
+        return penalty
 
     dp = []
     first_chord = chord_sequence[0]
@@ -539,10 +609,10 @@ def solve_fingering_chord_dp(chord_sequence, hand_id):
             if not is_possible: break
         if is_possible:
             cost = sum(FINGER_DIFFICULTY[f] for f in f_tuple)
-            first_states[f_tuple] = (cost, None)
-    
+            first_states[(f_tuple, EMPTY_HELD)] = (cost, None)
+
     if not first_states:
-        first_states[get_combinations(len(first_chord))[0]] = (0, None)
+        first_states[(get_combinations(len(first_chord))[0], EMPTY_HELD)] = (0, None)
     dp.append(first_states)
 
     def calc_transition_cost(prev_notes, prev_f_tuple, curr_notes, curr_f_tuple):
@@ -642,19 +712,45 @@ def solve_fingering_chord_dp(chord_sequence, hand_id):
 
     for c_idx in range(1, len(chord_sequence)):
         curr_chord, prev_chord = chord_sequence[c_idx], chord_sequence[c_idx-1]
-        curr_states, prev_states = {}, dp[c_idx-1]
+        t_now = chord_times[c_idx]
+        prev_states = dp[c_idx-1]
+        curr_states = {}
+
+        # 이전 상태별로 점유 집합을 한 번만 갱신해 재사용
+        advanced = {}
+        for (prev_f, prev_held) in prev_states:
+            key = (prev_f, prev_held)
+            advanced[key] = advance_held(prev_held, c_idx - 1, prev_f, t_now, c_idx)
+
         for curr_f in get_combinations(len(curr_chord)):
-            min_c, best_p = float("inf"), None
-            for prev_f, (prev_c, _) in prev_states.items():
-                t_c = calc_transition_cost(prev_chord, prev_f, curr_chord, curr_f)
-                if prev_c + t_c < min_c: min_c, best_p = prev_c + t_c, prev_f
-            curr_states[curr_f] = (min_c, best_p)
+            for prev_state, (prev_c, _) in prev_states.items():
+                prev_f, _prev_held = prev_state
+                held_now = advanced[prev_state]
+                cost = (prev_c
+                        + calc_transition_cost(prev_chord, prev_f, curr_chord, curr_f)
+                        + occupancy_penalty(curr_chord, curr_f, held_now))
+                state = (curr_f, held_now)
+                known = curr_states.get(state)
+                if known is None or cost < known[0]:
+                    curr_states[state] = (cost, prev_state)
+
+        # 빔 가지치기: 비용 상위 DP_BEAM_WIDTH 개만 유지해 상태 폭발을 막는다.
+        # 점유 집합이 상태에 포함되면서 경로마다 서로 다른 상태가 생기므로,
+        # 제한하지 않으면 긴 곡에서 상태 수가 급격히 늘어난다.
+        if len(curr_states) > DP_BEAM_WIDTH:
+            kept = sorted(curr_states.items(), key=lambda kv: kv[1][0])[:DP_BEAM_WIDTH]
+            curr_states = dict(kept)
+
         dp.append(curr_states)
 
-    curr_f = min(dp[-1].keys(), key=lambda k: dp[-1][k][0])
-    for i in range(len(chord_sequence)-1, -1, -1):
-        for j, finger in enumerate(curr_f): chord_sequence[i][j].finger = finger
-        curr_f = dp[i][curr_f][1]
+    # 역추적
+    state = min(dp[-1], key=lambda k: dp[-1][k][0])
+    for i in range(len(chord_sequence) - 1, -1, -1):
+        curr_f = state[0]
+        for j, finger in enumerate(curr_f):
+            if j < len(chord_sequence[i]):
+                chord_sequence[i][j].finger = finger
+        state = dp[i][state][1]
 
 # --- 3. Wrist Physics ---
 def calculate_wrist_rotation_rom(chord_group, hand_id):
@@ -679,6 +775,11 @@ def analyze_polyphonic(file_path):
     hand_chords = split_wide_chords_between_hands(parse_midi_to_hand_chords(file_path))
     # 5음 초과 화음은 _trim_chord로 줄인 결과를 그대로 보관한다.
     # (기존에는 DP 내부에서만 잘라, 잘려나간 음표가 finger=0 으로 JSON에 새어나갔음)
+    # DP 가 점유 제약을 평가하려면 required_hold 가 먼저 있어야 한다 (설계안 3.3절)
+    pedal_spans = parse_pedal_spans(file_path)
+    compute_required_hold(
+        [n for h in [0, 1] for chord in hand_chords[h] for n in chord], pedal_spans)
+
     trimmed_out = 0
     for h in [0, 1]:
         kept = []
@@ -693,7 +794,6 @@ def analyze_polyphonic(file_path):
 
     # 운지 확정 후: 손가락 점유 시간(key_hold_ms)과 페달 상태 산출
     all_notes = [n for h in [0, 1] for group in hand_chords[h] for n in group]
-    pedal_spans = parse_pedal_spans(file_path)
     compute_required_hold(all_notes, pedal_spans)
     clipped = apply_key_hold_and_pedal(all_notes, pedal_spans)
     print(f"  페달 구간 {len(pedal_spans)}개 / 손가락 점유 보정 {clipped}건")
