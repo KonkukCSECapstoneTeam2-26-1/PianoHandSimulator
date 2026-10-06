@@ -60,6 +60,7 @@ class NoteEvent:
         # 손가락이 건반에서 떨어진 시점이 아니다. 아래 두 값은 운지 확정 후 채워진다.
         self.key_hold_ms = duration_ms   # 손가락이 실제로 건반을 누르고 있는 시간
         self.pedal_down = False          # 타건 시점에 Sustain 페달(CC64)이 눌려 있었는지
+        self.required_hold_ms = duration_ms  # 페달을 고려한 최소 필수 점유 (운지와 무관)
 
     def to_dict(self):
         # 건반 중심 X / 타건 접점 Y / 누름 깊이 반영 Z (공유 모듈 위임)
@@ -187,6 +188,63 @@ def parse_pedal_spans(file_path):
     if down_at is not None:          # 페달을 밟은 채 곡이 끝나는 경우
         spans.append((down_at, last_ms))
     return spans
+
+# 타건 자체에 필요한 최소 점유 시간(ms).
+# 페달이 처음부터 눌려 있어 건반을 즉시 떼도 되는 경우에도, 건반을 누르는 동작
+# 자체에 시간이 걸리므로 하한을 둔다. (화음 그룹화 임계값과 동일한 30ms)
+MIN_STRIKE_HOLD_MS = 30.0
+
+def _merge_spans(spans):
+    """겹치거나 맞닿는 구간을 병합해 정렬된 [(a, b)] 반환."""
+    merged = []
+    for a, b in sorted(spans):
+        if merged and a <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], b))
+        else:
+            merged.append((a, b))
+    return merged
+
+def compute_required_hold(all_notes, pedal_spans):
+    """페달을 고려한 '필수 점유 구간'(ms)을 각 음표에 산출해 넣는다.
+
+    소리는 건반 또는 Sustain 페달 중 하나가 유지한다. 따라서 건반은 발음 구간
+    [start, start+duration) 중 **페달이 떠 있는 동안에만** 눌려 있으면 되고,
+    페달이 눌린 뒤로는 손가락을 떼도 소리가 이어진다.
+
+    required_hold = (발음 구간 안에서 페달이 떠 있는 마지막 시점) − start
+
+    이 값은 MIDI 음표와 CC64 만으로 결정되므로 **운지 배정과 무관**하다.
+    key_hold_ms 는 "같은 손가락/건반이 다시 필요한 시점"에 의존하므로 운지가
+    정해져야 알 수 있는데, DP 는 그 운지를 정하는 중이라 순환 의존이 생긴다.
+    required_hold 는 그 고리를 끊어, DP 가 시작 전에 "어떤 음표들이 반드시 함께
+    눌려 있어야 하는가"를 알 수 있게 한다. (설계안 11번 문서 3.3절)
+    """
+    spans = _merge_spans(pedal_spans)
+    starts = [a for a, _ in spans]
+
+    for note in all_notes:
+        s0 = note.start_ms
+        e0 = s0 + note.duration_ms
+
+        # 발음 구간과 겹치는 페달 구간을 훑으며 '페달이 떠 있는 마지막 시점'을 찾는다
+        up_sup = s0
+        cursor = s0
+        i = bisect_right(starts, e0) - 1
+        lo = max(0, bisect_right(starts, s0) - 1)
+        for a, b in spans[lo:i + 1] if i >= lo else []:
+            if b <= s0:
+                continue
+            if a >= e0:
+                break
+            if a > cursor:          # cursor ~ a 구간은 페달이 떠 있었다
+                up_sup = a
+            cursor = max(cursor, b)
+        if cursor < e0:             # 끝까지 페달이 떠 있다
+            up_sup = e0
+
+        required = up_sup - s0
+        required = max(required, min(MIN_STRIKE_HOLD_MS, note.duration_ms))
+        note.required_hold_ms = min(required, note.duration_ms)
 
 def apply_key_hold_and_pedal(all_notes, pedal_spans):
     """운지 확정 후, 손가락 점유 시간(key_hold_ms)과 페달 상태를 산출.
@@ -636,6 +694,7 @@ def analyze_polyphonic(file_path):
     # 운지 확정 후: 손가락 점유 시간(key_hold_ms)과 페달 상태 산출
     all_notes = [n for h in [0, 1] for group in hand_chords[h] for n in group]
     pedal_spans = parse_pedal_spans(file_path)
+    compute_required_hold(all_notes, pedal_spans)
     clipped = apply_key_hold_and_pedal(all_notes, pedal_spans)
     print(f"  페달 구간 {len(pedal_spans)}개 / 손가락 점유 보정 {clipped}건")
 
