@@ -496,15 +496,41 @@ def split_wide_chords_between_hands(hand_chords, max_span=17, max_iter=50, repor
                     for n in move: n.hand = other
                     hand_chords[other].append(move)
                 else:
+                    def _fits(chord, hand):
+                        return (chord[-1].pitch - chord[0].pitch <= max_span
+                                and is_chord_playable(chord, hand))
+
                     combined = _dedupe_chord(existing + move)
-                    if (combined[-1].pitch - combined[0].pitch <= max_span
-                            and is_chord_playable(combined, other)):
+                    if _fits(combined, other):
                         for n in move: n.hand = other
                         hand_chords[other].append(move)
                     else:
-                        # 양손 어디에도 넣을 수 없는 음표 — 버린다.
-                        # 편곡 자체가 두 손으로 연주 불가능한 경우에 발생한다.
-                        dropped.extend(move)
+                        # 통째로 버리지 않고 최대한 살린다.
+                        # 1) 반대 손에 성부 중요도 순으로 한 음씩 넣어 본다
+                        order = {"MELODY": 0, "BASS": 1, "INNER": 2}
+                        ranked = sorted(move, key=lambda n: (order.get(n.role, 2), -n.velocity))
+                        accepted = []
+                        for note in ranked:
+                            if _fits(_dedupe_chord(existing + accepted + [note]), other):
+                                accepted.append(note)
+                        if accepted:
+                            for n in accepted: n.hand = other
+                            hand_chords[other].append(sorted(accepted, key=lambda n: n.pitch))
+
+                        # 2) 반대 손이 받지 못한 음은 원래 손에 되돌릴 수 있는지 본다.
+                        #    분리 지점은 '최대 간격'으로 정해지므로, 연주 가능성 기준으로는
+                        #    남은 음 일부가 원래 손에 들어갈 여지가 있다.
+                        leftover = [n for n in ranked if n not in accepted]
+                        returned = []
+                        for note in leftover:
+                            if _fits(_dedupe_chord(keep + returned + [note]), h):
+                                returned.append(note)
+                        if returned:
+                            keep.extend(returned)
+                            keep.sort(key=lambda n: n.pitch)
+
+                        # 3) 그래도 남으면 버린다 (편곡이 두 손 연주 범위를 넘는 경우)
+                        dropped.extend(n for n in leftover if n not in returned)
 
             hand_chords[h] = sorted(new_chords, key=_chord_time)
 
@@ -596,12 +622,16 @@ def solve_fingering_chord_dp(chord_sequence, hand_id):
                 if items[b][0] - items[a][0] > limit:
                     penalty += OCCUPANCY_SPAN_PENALTY
 
-        for k in range(len(fingers) - 1):
+        # 엄지(1번)는 순서 판정에서 제외한다. 엄지 넘기기 중에는 엄지가 다른 손가락보다
+        # 높은(오른손) 또는 낮은(왼손) 건반에 놓이는 것이 정상이며, 이는 손바닥 아래로
+        # 지나가는 동작이라 2~5번의 상호 순서만 유지되면 물리적으로 가능하다.
+        others = [f for f in fingers if f != 1]
+        for k in range(len(others) - 1):
             if hand_id == 1:
-                if fingers[k] >= fingers[k + 1]:
+                if others[k] >= others[k + 1]:
                     penalty += OCCUPANCY_ORDER_PENALTY
             else:
-                if fingers[k] <= fingers[k + 1]:
+                if others[k] <= others[k + 1]:
                     penalty += OCCUPANCY_ORDER_PENALTY
         return penalty
 
@@ -694,12 +724,41 @@ def solve_fingering_chord_dp(chord_sequence, hand_id):
                 if p_f == c_f:
                     penalty += 60  # 단음 연속에서 같은 손가락 반복
                 else:
-                    # 오른손: 상행=손가락 증가, 하행=손가락 감소
-                    # 왼손: 상행=손가락 감소(5→1 방향), 하행=손가락 증가
-                    rh_mismatch = (hand_id == 1 and ((pitch_dir > 0 and c_f < p_f) or (pitch_dir < 0 and c_f > p_f)))
-                    lh_mismatch = (hand_id == 0 and ((pitch_dir > 0 and c_f > p_f) or (pitch_dir < 0 and c_f < p_f)))
-                    if rh_mismatch or lh_mismatch:
-                        penalty += 35
+                    # 엄지 넘기기(thumb-under)와 손가락 넘어가기(cross-over)는 스케일·
+                    # 아르페지오의 표준 주법이다. 방향이 역전되어 보이지만 정상이므로
+                    # 패널티 대상에서 제외하고, 포지션을 다 쓴 뒤에 일어나면 보상한다.
+                    #   오른손: 상행 중 엄지로 내려오기 / 하행 중 엄지 위로 넘어가기
+                    #   왼손  : 하행 중 엄지로 올라가기 / 상행 중 엄지 아래로 넘어가기
+                    if hand_id == 1:
+                        thumb_turn = (pitch_dir > 0 and c_f == 1) or (pitch_dir < 0 and p_f == 1)
+                    else:
+                        thumb_turn = (pitch_dir < 0 and c_f == 1) or (pitch_dir > 0 and p_f == 1)
+
+                    if thumb_turn:
+                        # 엄지를 넘기는 '상대 손가락'이 무엇이냐로 자연스러움이 갈린다.
+                        # 보상하지 않는다 — 넘기기 자체를 보상하면 1-4-1-4 처럼 두 음마다
+                        # 넘기는 운지가 최적이 되어 버린다. 자연스러운 음계는 아래의
+                        # '순차 진행 보상'으로 1-2-3 을 쌓은 뒤 넘기도록 유도한다.
+                        pivot = p_f if c_f == 1 else c_f
+                        if pivot == 5:
+                            penalty += 40   # 5번 밑으로 엄지를 넘기는 것은 과도한 비틀림
+                        elif pivot == 2:
+                            penalty += 20   # 2번에서 넘기면 포지션을 낭비한다
+                    else:
+                        # 오른손: 상행=손가락 증가, 하행=손가락 감소
+                        # 왼손: 상행=손가락 감소(5→1 방향), 하행=손가락 증가
+                        rh_mismatch = (hand_id == 1 and ((pitch_dir > 0 and c_f < p_f) or (pitch_dir < 0 and c_f > p_f)))
+                        lh_mismatch = (hand_id == 0 and ((pitch_dir > 0 and c_f > p_f) or (pitch_dir < 0 and c_f < p_f)))
+                        if rh_mismatch or lh_mismatch:
+                            penalty += 35
+
+                    # 순차 진행(반음~온음)에서 손가락이 한 칸씩 이동하면 자연스럽다.
+                    # 오른손 상행/왼손 하행은 +1, 그 반대는 -1 방향이 자연스러운 진행이며,
+                    # 이 보상이 쌓여야 1-2-3 을 거친 뒤 엄지를 넘기는 표준 음계 운지가 된다.
+                    if abs(pitch_dir) <= 2:
+                        natural = 1 if ((hand_id == 1) == (pitch_dir > 0)) else -1
+                        if c_f - p_f == natural:
+                            penalty -= 20
 
         # 4. Wrist & Crossing (Standard V4 logic updated for LH)
         p_diff = curr_notes[0].pitch - prev_notes[-1].pitch
@@ -773,10 +832,12 @@ def _instant_violation(held, hand_id):
             limit = MAX_SPAN.get(tuple(sorted((items[a][1], items[b][1]))), 12)
             if items[b][0] - items[a][0] > limit:
                 return True
-    for k in range(len(fingers) - 1):
-        if hand_id == 1 and fingers[k] >= fingers[k + 1]:
+    # 엄지(1번)는 순서 판정에서 제외 — 엄지 넘기기는 정상 주법이다 (위 주석 참조)
+    others = [f for f in fingers if f != 1]
+    for k in range(len(others) - 1):
+        if hand_id == 1 and others[k] >= others[k + 1]:
             return True
-        if hand_id == 0 and fingers[k] <= fingers[k + 1]:
+        if hand_id == 0 and others[k] <= others[k + 1]:
             return True
     return False
 
