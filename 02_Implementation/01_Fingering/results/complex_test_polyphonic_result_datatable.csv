@@ -1,10 +1,10 @@
 ﻿Name,Pitch,StartMs,DurationMs,Hand,Role,Finger,Pressure,KeyDepth,IsBlack,WristPosNormalized,WristYawDeg,WristRollDeg,KeyHoldMs,PedalDown,TargetXMm,TargetYMm,TargetZMm,BoneName,FrameIndex,ReleaseFrameIndex
-Note_00001,60,0,250,Right,MELODY,1,0.504,0.504,False,0.448,10,0,250,False,550.57,30,-5.04,thumb_03_r,0,8
-Note_00002,62,250,250,Right,MELODY,2,0.504,0.504,False,0.471,5,0,250,False,574,30,-5.04,index_03_r,8,15
-Note_00003,64,500,250,Right,MELODY,3,0.504,0.504,False,0.494,0,0,250,False,597.43,30,-5.04,middle_03_r,15,22
-Note_00004,65,750,250,Right,MELODY,4,0.504,0.504,False,0.506,-5,0,250,False,620.86,30,-5.04,ring_03_r,22,30
-Note_00005,67,1000,250,Right,MELODY,5,0.504,0.504,False,0.529,-10,0,250,False,644.29,30,-5.04,pinky_03_r,30,38
-Note_00006,69,1250,250,Right,MELODY,1,0.504,0.504,False,0.552,10,0,250,False,667.71,30,-5.04,thumb_03_r,38,45
+Note_00001,60,0,250,Right,MELODY,2,0.504,0.504,False,0.448,5,0,250,False,550.57,30,-5.04,index_03_r,0,8
+Note_00002,62,250,250,Right,MELODY,3,0.504,0.504,False,0.471,0,0,250,False,574,30,-5.04,middle_03_r,8,15
+Note_00003,64,500,250,Right,MELODY,4,0.504,0.504,False,0.494,-5,0,250,False,597.43,30,-5.04,ring_03_r,15,22
+Note_00004,65,750,250,Right,MELODY,1,0.504,0.504,False,0.506,10,0,250,False,620.86,30,-5.04,thumb_03_r,22,30
+Note_00005,67,1000,250,Right,MELODY,2,0.504,0.504,False,0.529,5,0,250,False,644.29,30,-5.04,index_03_r,30,38
+Note_00006,69,1250,250,Right,MELODY,3,0.504,0.504,False,0.552,0,0,250,False,667.71,30,-5.04,middle_03_r,38,45
 Note_00007,71,1500,250,Right,MELODY,4,0.504,0.504,False,0.575,-5,0,250,False,691.14,30,-5.04,ring_03_r,45,52
 Note_00008,72,1750,250,Right,MELODY,5,0.504,0.504,False,0.586,-10,0,250,False,714.57,30,-5.04,pinky_03_r,52,60
 Note_00009,61,2104.17,250,Right,MELODY,4,0.63,0.63,True,0.46,-5,0,250,False,562.29,85,6.2,ring_03_r,63,71

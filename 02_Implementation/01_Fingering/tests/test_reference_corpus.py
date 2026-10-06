@@ -166,9 +166,14 @@ def engine_violations(path):
             fingers = [n["finger"] for n in held]
             if len(set(fingers)) != len(fingers):
                 dup_bad += 1
-            ordered = (all(fingers[k] < fingers[k + 1] for k in range(len(fingers) - 1))
+            # 엄지(1번)는 순서 판정에서 제외한다. 엄지 넘기기(thumb-under) 중에는
+            # 엄지가 다른 손가락보다 높은(오른손)/낮은(왼손) 건반에 놓이며, 손바닥
+            # 아래로 지나가므로 2~5번의 상호 순서만 유지되면 연주 가능하다.
+            # 엄지와 다른 손가락 사이의 간격은 위 MAX_SPAN 검사가 계속 제한한다.
+            others = [f for f in fingers if f != 1]
+            ordered = (all(others[k] < others[k + 1] for k in range(len(others) - 1))
                        if hand == 1 else
-                       all(fingers[k] > fingers[k + 1] for k in range(len(fingers) - 1)))
+                       all(others[k] > others[k + 1] for k in range(len(others) - 1)))
             if not ordered:
                 mono_bad += 1
     return instants, span_bad, dup_bad, mono_bad

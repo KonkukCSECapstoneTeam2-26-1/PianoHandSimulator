@@ -215,9 +215,30 @@ def piece_inner_voice():
     return p
 
 
+def piece_scale():
+    """2옥타브 음계 - 엄지 넘기기(thumb-under)가 반드시 필요한 곡.
+
+    5지 포지션으로는 5음까지만 칠 수 있으므로, 2옥타브를 이어 치려면 엄지가 다른
+    손가락 아래로 지나가야 한다. 음표끼리 시간이 겹치지 않아 물리 제약 자체는
+    자명하게 만족하며, 이 곡의 관심사는 **운지의 음악적 타당성**이다.
+    (표준 운지: 오른손 상행 1-2-3-1-2-3-4-5, 왼손 상행 5-4-3-2-1-3-2-1)
+    """
+    p = Piece("ref_08_scale", "2옥타브 다장조 음계 (엄지 넘기기 검증용)")
+    major = [0, 2, 4, 5, 7, 9, 11]
+    up_r = [60 + 12 * o + st for o in range(2) for st in major] + [84]
+    up_l = [36 + 12 * o + st for o in range(2) for st in major] + [60]
+    seq_r = up_r + up_r[-2::-1]        # 상행 후 하행
+    seq_l = up_l + up_l[-2::-1]
+    for k, pitch in enumerate(seq_r):
+        p.add("R", k * 0.25, 0.22, pitch)
+    for k, pitch in enumerate(seq_l):
+        p.add("L", k * 0.25, 0.22, pitch)
+    return p
+
+
 PIECES = [piece_five_finger, piece_block_chords, piece_alberti,
           piece_pedal_arpeggio, piece_sustained_bass, piece_position_shift,
-          piece_inner_voice]
+          piece_inner_voice, piece_scale]
 
 
 def main():

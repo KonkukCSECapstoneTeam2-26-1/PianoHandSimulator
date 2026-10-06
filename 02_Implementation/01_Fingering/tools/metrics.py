@@ -576,10 +576,14 @@ def check_instant_constraints(notes):
                         f"{hand} @{t:.0f}ms {[(n.pitch, n.finger) for n in held]}")
 
             # A9 — pitch 순 ↔ 손가락 순 단조성
+            # 엄지(1번)는 제외한다. 엄지 넘기기(thumb-under) 중에는 엄지가 다른
+            # 손가락보다 높은(오른손)/낮은(왼손) 건반에 놓이는 것이 정상 주법이며,
+            # 손바닥 아래로 지나가므로 2~5번의 상호 순서만 유지되면 연주 가능하다.
+            others = [f for f in fingers if f != 1]
             if hand == "Right":
-                ok = all(fingers[k] < fingers[k + 1] for k in range(len(fingers) - 1))
+                ok = all(others[k] < others[k + 1] for k in range(len(others) - 1))
             else:
-                ok = all(fingers[k] > fingers[k + 1] for k in range(len(fingers) - 1))
+                ok = all(others[k] > others[k + 1] for k in range(len(others) - 1))
             if not ok:
                 mono_bad += 1
                 if len(examples["A9"]) < 3:

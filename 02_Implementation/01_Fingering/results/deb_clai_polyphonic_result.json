@@ -1185,7 +1185,7 @@
         "pedal_down": true,
         "hand": "Right",
         "role": "MELODY",
-        "finger": 4,
+        "finger": 5,
         "pressure": 0.307,
         "key_depth": 0.307,
         "is_black": true,
@@ -1193,8 +1193,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.43,
         "wrist_pos_normalized": 0.563,
-        "wrist_yaw_deg": -5.0,
-        "wrist_roll_deg": 0
+        "wrist_yaw_deg": -10.0,
+        "wrist_roll_deg": -12
     },
     {
         "pitch": 65,
@@ -1204,7 +1204,7 @@
         "pedal_down": true,
         "hand": "Right",
         "role": "MELODY",
-        "finger": 3,
+        "finger": 4,
         "pressure": 0.291,
         "key_depth": 0.291,
         "is_black": false,
@@ -1212,7 +1212,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -2.91,
         "wrist_pos_normalized": 0.506,
-        "wrist_yaw_deg": 0.0,
+        "wrist_yaw_deg": -5.0,
         "wrist_roll_deg": 0
     },
     {
@@ -1242,7 +1242,7 @@
         "pedal_down": true,
         "hand": "Right",
         "role": "MELODY",
-        "finger": 2,
+        "finger": 3,
         "pressure": 0.307,
         "key_depth": 0.307,
         "is_black": true,
@@ -1250,7 +1250,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.43,
         "wrist_pos_normalized": 0.483,
-        "wrist_yaw_deg": 5.0,
+        "wrist_yaw_deg": 0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -1261,7 +1261,7 @@
         "pedal_down": false,
         "hand": "Right",
         "role": "MELODY",
-        "finger": 5,
+        "finger": 4,
         "pressure": 0.291,
         "key_depth": 0.291,
         "is_black": false,
@@ -1269,7 +1269,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -2.91,
         "wrist_pos_normalized": 0.506,
-        "wrist_yaw_deg": -10.0,
+        "wrist_yaw_deg": -5.0,
         "wrist_roll_deg": 0
     },
     {
@@ -1280,7 +1280,7 @@
         "pedal_down": false,
         "hand": "Right",
         "role": "MELODY",
-        "finger": 4,
+        "finger": 3,
         "pressure": 0.291,
         "key_depth": 0.291,
         "is_black": true,
@@ -1288,7 +1288,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.59,
         "wrist_pos_normalized": 0.483,
-        "wrist_yaw_deg": -5.0,
+        "wrist_yaw_deg": 0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -1896,18 +1896,18 @@
         "target_y_mm": 30.0,
         "target_z_mm": -2.36,
         "wrist_pos_normalized": 0.276,
-        "wrist_yaw_deg": -10.0,
-        "wrist_roll_deg": 0
+        "wrist_yaw_deg": -0.0,
+        "wrist_roll_deg": -12
     },
     {
         "pitch": 49,
         "start_ms": 38208.69,
         "duration_ms": 2584.93,
-        "key_hold_ms": 1317.32,
+        "key_hold_ms": 434.78,
         "pedal_down": false,
         "hand": "Left",
         "role": "INNER",
-        "finger": 3,
+        "finger": 1,
         "pressure": 0.283,
         "key_depth": 0.283,
         "is_black": true,
@@ -1915,8 +1915,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.67,
         "wrist_pos_normalized": 0.276,
-        "wrist_yaw_deg": -10.0,
-        "wrist_roll_deg": 0
+        "wrist_yaw_deg": -0.0,
+        "wrist_roll_deg": -12
     },
     {
         "pitch": 53,
@@ -2059,7 +2059,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 3,
         "pressure": 0.22,
         "key_depth": 0.22,
         "is_black": true,
@@ -2067,7 +2067,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.3,
         "wrist_pos_normalized": 0.483,
-        "wrist_yaw_deg": 15.0,
+        "wrist_yaw_deg": 5.0,
         "wrist_roll_deg": 0
     },
     {
@@ -2078,7 +2078,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "INNER",
-        "finger": 1,
+        "finger": 2,
         "pressure": 0.26,
         "key_depth": 0.26,
         "is_black": false,
@@ -2086,7 +2086,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -2.6,
         "wrist_pos_normalized": 0.483,
-        "wrist_yaw_deg": 15.0,
+        "wrist_yaw_deg": 5.0,
         "wrist_roll_deg": 0
     },
     {
@@ -2154,7 +2154,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 3,
+        "finger": 5,
         "pressure": 0.213,
         "key_depth": 0.213,
         "is_black": true,
@@ -2162,8 +2162,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.37,
         "wrist_pos_normalized": 0.431,
-        "wrist_yaw_deg": 5.0,
-        "wrist_roll_deg": 0
+        "wrist_yaw_deg": -10.0,
+        "wrist_roll_deg": 12
     },
     {
         "pitch": 61,
@@ -2173,7 +2173,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "INNER",
-        "finger": 2,
+        "finger": 3,
         "pressure": 0.252,
         "key_depth": 0.252,
         "is_black": true,
@@ -2181,8 +2181,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.98,
         "wrist_pos_normalized": 0.431,
-        "wrist_yaw_deg": 5.0,
-        "wrist_roll_deg": 0
+        "wrist_yaw_deg": -10.0,
+        "wrist_roll_deg": 12
     },
     {
         "pitch": 65,
@@ -2473,7 +2473,7 @@
         "pitch": 44,
         "start_ms": 45833.79,
         "duration_ms": 3941.39,
-        "key_hold_ms": 434.78,
+        "key_hold_ms": 1321.01,
         "pedal_down": false,
         "hand": "Left",
         "role": "BASS",
@@ -3047,7 +3047,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 5,
         "pressure": 0.236,
         "key_depth": 0.236,
         "is_black": true,
@@ -3055,8 +3055,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.14,
         "wrist_pos_normalized": 0.138,
-        "wrist_yaw_deg": 15.0,
-        "wrist_roll_deg": -12
+        "wrist_yaw_deg": -0.0,
+        "wrist_roll_deg": 0
     },
     {
         "pitch": 39,
@@ -3074,8 +3074,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.67,
         "wrist_pos_normalized": 0.138,
-        "wrist_yaw_deg": 15.0,
-        "wrist_roll_deg": -12
+        "wrist_yaw_deg": -0.0,
+        "wrist_roll_deg": 0
     },
     {
         "pitch": 65,
@@ -3085,7 +3085,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 5,
+        "finger": 4,
         "pressure": 0.252,
         "key_depth": 0.252,
         "is_black": false,
@@ -3093,7 +3093,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -2.52,
         "wrist_pos_normalized": 0.529,
-        "wrist_yaw_deg": -15.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -3104,7 +3104,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "INNER",
-        "finger": 4,
+        "finger": 3,
         "pressure": 0.252,
         "key_depth": 0.252,
         "is_black": true,
@@ -3112,7 +3112,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.98,
         "wrist_pos_normalized": 0.529,
-        "wrist_yaw_deg": -15.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -3123,7 +3123,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "INNER",
-        "finger": 3,
+        "finger": 2,
         "pressure": 0.252,
         "key_depth": 0.252,
         "is_black": true,
@@ -3131,7 +3131,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.98,
         "wrist_pos_normalized": 0.529,
-        "wrist_yaw_deg": -15.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -3199,7 +3199,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 3,
+        "finger": 5,
         "pressure": 0.244,
         "key_depth": 0.244,
         "is_black": true,
@@ -3207,8 +3207,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.06,
         "wrist_pos_normalized": 0.521,
-        "wrist_yaw_deg": 15.0,
-        "wrist_roll_deg": -12
+        "wrist_yaw_deg": -5.0,
+        "wrist_roll_deg": 0
     },
     {
         "pitch": 66,
@@ -3218,7 +3218,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "INNER",
-        "finger": 2,
+        "finger": 4,
         "pressure": 0.244,
         "key_depth": 0.244,
         "is_black": true,
@@ -3226,8 +3226,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.06,
         "wrist_pos_normalized": 0.521,
-        "wrist_yaw_deg": 15.0,
-        "wrist_roll_deg": -12
+        "wrist_yaw_deg": -5.0,
+        "wrist_roll_deg": 0
     },
     {
         "pitch": 70,
@@ -3245,8 +3245,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.06,
         "wrist_pos_normalized": 0.521,
-        "wrist_yaw_deg": 15.0,
-        "wrist_roll_deg": -12
+        "wrist_yaw_deg": -5.0,
+        "wrist_roll_deg": 0
     },
     {
         "pitch": 75,
@@ -3321,7 +3321,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.06,
         "wrist_pos_normalized": 0.521,
-        "wrist_yaw_deg": -15.0,
+        "wrist_yaw_deg": -5.0,
         "wrist_roll_deg": 12
     },
     {
@@ -3332,7 +3332,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "INNER",
-        "finger": 4,
+        "finger": 3,
         "pressure": 0.244,
         "key_depth": 0.244,
         "is_black": true,
@@ -3340,7 +3340,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.06,
         "wrist_pos_normalized": 0.521,
-        "wrist_yaw_deg": -15.0,
+        "wrist_yaw_deg": -5.0,
         "wrist_roll_deg": 12
     },
     {
@@ -3351,7 +3351,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "INNER",
-        "finger": 3,
+        "finger": 2,
         "pressure": 0.244,
         "key_depth": 0.244,
         "is_black": true,
@@ -3359,7 +3359,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.06,
         "wrist_pos_normalized": 0.521,
-        "wrist_yaw_deg": -15.0,
+        "wrist_yaw_deg": -5.0,
         "wrist_roll_deg": 12
     },
     {
@@ -4567,7 +4567,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 4,
+        "finger": 3,
         "pressure": 0.268,
         "key_depth": 0.268,
         "is_black": false,
@@ -4575,30 +4575,11 @@
         "target_y_mm": 30.0,
         "target_z_mm": -2.68,
         "wrist_pos_normalized": 0.529,
-        "wrist_yaw_deg": -0.0,
-        "wrist_roll_deg": 0
+        "wrist_yaw_deg": 15.0,
+        "wrist_roll_deg": -12
     },
     {
         "pitch": 66,
-        "start_ms": 62301.08,
-        "duration_ms": 1415.04,
-        "key_hold_ms": 1042.36,
-        "pedal_down": true,
-        "hand": "Left",
-        "role": "INNER",
-        "finger": 3,
-        "pressure": 0.268,
-        "key_depth": 0.268,
-        "is_black": true,
-        "target_x_mm": 632.57,
-        "target_y_mm": 85.0,
-        "target_z_mm": 9.82,
-        "wrist_pos_normalized": 0.529,
-        "wrist_yaw_deg": -0.0,
-        "wrist_roll_deg": 0
-    },
-    {
-        "pitch": 70,
         "start_ms": 62301.08,
         "duration_ms": 1415.04,
         "key_hold_ms": 1042.36,
@@ -4609,12 +4590,31 @@
         "pressure": 0.268,
         "key_depth": 0.268,
         "is_black": true,
+        "target_x_mm": 632.57,
+        "target_y_mm": 85.0,
+        "target_z_mm": 9.82,
+        "wrist_pos_normalized": 0.529,
+        "wrist_yaw_deg": 15.0,
+        "wrist_roll_deg": -12
+    },
+    {
+        "pitch": 70,
+        "start_ms": 62301.08,
+        "duration_ms": 1415.04,
+        "key_hold_ms": 1042.36,
+        "pedal_down": true,
+        "hand": "Left",
+        "role": "INNER",
+        "finger": 1,
+        "pressure": 0.268,
+        "key_depth": 0.268,
+        "is_black": true,
         "target_x_mm": 679.43,
         "target_y_mm": 85.0,
         "target_z_mm": 9.82,
         "wrist_pos_normalized": 0.529,
-        "wrist_yaw_deg": -0.0,
-        "wrist_roll_deg": 0
+        "wrist_yaw_deg": 15.0,
+        "wrist_roll_deg": -12
     },
     {
         "pitch": 77,
@@ -5969,7 +5969,7 @@
         "pitch": 44,
         "start_ms": 68963.61,
         "duration_ms": 2118.51,
-        "key_hold_ms": 550.37,
+        "key_hold_ms": 1068.15,
         "pedal_down": true,
         "hand": "Left",
         "role": "INNER",
@@ -6083,7 +6083,7 @@
         "pitch": 63,
         "start_ms": 70031.77,
         "duration_ms": 1050.36,
-        "key_hold_ms": 517.05,
+        "key_hold_ms": 1050.35,
         "pedal_down": true,
         "hand": "Left",
         "role": "INNER",
@@ -8515,7 +8515,7 @@
         "pitch": 49,
         "start_ms": 81326.39,
         "duration_ms": 2041.19,
-        "key_hold_ms": 528.2,
+        "key_hold_ms": 1535.57,
         "pedal_down": true,
         "hand": "Left",
         "role": "INNER",
@@ -8990,7 +8990,7 @@
         "pitch": 51,
         "start_ms": 84437.1,
         "duration_ms": 1970.79,
-        "key_hold_ms": 346.82,
+        "key_hold_ms": 671.95,
         "pedal_down": true,
         "hand": "Left",
         "role": "INNER",
@@ -10643,7 +10643,7 @@
         "pitch": 41,
         "start_ms": 95400.74,
         "duration_ms": 514.29,
-        "key_hold_ms": 342.85,
+        "key_hold_ms": 514.28,
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
@@ -10666,7 +10666,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 1,
+        "finger": 2,
         "pressure": 0.205,
         "key_depth": 0.205,
         "is_black": false,
@@ -10674,7 +10674,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -2.05,
         "wrist_pos_normalized": 0.31,
-        "wrist_yaw_deg": 10.0,
+        "wrist_yaw_deg": 5.0,
         "wrist_roll_deg": 0
     },
     {
@@ -10685,7 +10685,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 5,
+        "finger": 1,
         "pressure": 0.213,
         "key_depth": 0.213,
         "is_black": false,
@@ -10693,7 +10693,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -2.13,
         "wrist_pos_normalized": 0.368,
-        "wrist_yaw_deg": -10.0,
+        "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
     {
@@ -10757,11 +10757,11 @@
         "pitch": 44,
         "start_ms": 96435.4,
         "duration_ms": 520.23,
-        "key_hold_ms": 520.23,
+        "key_hold_ms": 346.82,
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 5,
+        "finger": 2,
         "pressure": 0.268,
         "key_depth": 0.268,
         "is_black": true,
@@ -10769,8 +10769,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.82,
         "wrist_pos_normalized": 0.264,
-        "wrist_yaw_deg": -10.0,
-        "wrist_roll_deg": 12
+        "wrist_yaw_deg": 5.0,
+        "wrist_roll_deg": 0
     },
     {
         "pitch": 68,
@@ -10818,7 +10818,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 3,
+        "finger": 1,
         "pressure": 0.252,
         "key_depth": 0.252,
         "is_black": false,
@@ -10826,7 +10826,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -2.52,
         "wrist_pos_normalized": 0.356,
-        "wrist_yaw_deg": -0.0,
+        "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
     {
@@ -10837,7 +10837,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 3,
         "pressure": 0.252,
         "key_depth": 0.252,
         "is_black": true,
@@ -10845,7 +10845,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.98,
         "wrist_pos_normalized": 0.402,
-        "wrist_yaw_deg": 5.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -10875,7 +10875,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 5,
+        "finger": 3,
         "pressure": 0.252,
         "key_depth": 0.252,
         "is_black": false,
@@ -10883,7 +10883,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -2.52,
         "wrist_pos_normalized": 0.494,
-        "wrist_yaw_deg": -10.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -11080,7 +11080,7 @@
         "pitch": 41,
         "start_ms": 98562.08,
         "duration_ms": 491.8,
-        "key_hold_ms": 327.86,
+        "key_hold_ms": 491.8,
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
@@ -11103,7 +11103,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 1,
+        "finger": 2,
         "pressure": 0.236,
         "key_depth": 0.236,
         "is_black": false,
@@ -11111,7 +11111,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -2.36,
         "wrist_pos_normalized": 0.31,
-        "wrist_yaw_deg": 10.0,
+        "wrist_yaw_deg": 5.0,
         "wrist_roll_deg": 0
     },
     {
@@ -11122,7 +11122,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 5,
+        "finger": 1,
         "pressure": 0.236,
         "key_depth": 0.236,
         "is_black": false,
@@ -11130,7 +11130,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -2.36,
         "wrist_pos_normalized": 0.368,
-        "wrist_yaw_deg": -10.0,
+        "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
     {
@@ -11194,11 +11194,11 @@
         "pitch": 44,
         "start_ms": 99560.32,
         "duration_ms": 489.13,
-        "key_hold_ms": 163.04,
+        "key_hold_ms": 326.08,
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 5,
+        "finger": 2,
         "pressure": 0.268,
         "key_depth": 0.268,
         "is_black": true,
@@ -11206,8 +11206,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.82,
         "wrist_pos_normalized": 0.264,
-        "wrist_yaw_deg": -10.0,
-        "wrist_roll_deg": 12
+        "wrist_yaw_deg": 5.0,
+        "wrist_roll_deg": 0
     },
     {
         "pitch": 68,
@@ -11255,7 +11255,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 4,
+        "finger": 1,
         "pressure": 0.252,
         "key_depth": 0.252,
         "is_black": false,
@@ -11263,7 +11263,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -2.52,
         "wrist_pos_normalized": 0.356,
-        "wrist_yaw_deg": -5.0,
+        "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
     {
@@ -11464,7 +11464,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 5,
+        "finger": 3,
         "pressure": 0.26,
         "key_depth": 0.26,
         "is_black": true,
@@ -11472,8 +11472,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.9,
         "wrist_pos_normalized": 0.402,
-        "wrist_yaw_deg": -10.0,
-        "wrist_roll_deg": 12
+        "wrist_yaw_deg": -0.0,
+        "wrist_roll_deg": 0
     },
     {
         "pitch": 68,
@@ -11521,7 +11521,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 3,
+        "finger": 2,
         "pressure": 0.26,
         "key_depth": 0.26,
         "is_black": true,
@@ -11529,7 +11529,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.9,
         "wrist_pos_normalized": 0.46,
-        "wrist_yaw_deg": -0.0,
+        "wrist_yaw_deg": 5.0,
         "wrist_roll_deg": 0
     },
     {
@@ -11540,7 +11540,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 1,
         "pressure": 0.268,
         "key_depth": 0.268,
         "is_black": false,
@@ -11548,7 +11548,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -2.68,
         "wrist_pos_normalized": 0.506,
-        "wrist_yaw_deg": 5.0,
+        "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
     {
@@ -11597,7 +11597,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 1,
+        "finger": 3,
         "pressure": 0.268,
         "key_depth": 0.268,
         "is_black": true,
@@ -11605,8 +11605,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.82,
         "wrist_pos_normalized": 0.54,
-        "wrist_yaw_deg": 10.0,
-        "wrist_roll_deg": -12
+        "wrist_yaw_deg": -0.0,
+        "wrist_roll_deg": 0
     },
     {
         "pitch": 65,
@@ -11616,7 +11616,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 1,
         "pressure": 0.268,
         "key_depth": 0.268,
         "is_black": false,
@@ -11624,7 +11624,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -2.68,
         "wrist_pos_normalized": 0.506,
-        "wrist_yaw_deg": 5.0,
+        "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
     {
@@ -11635,7 +11635,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 3,
+        "finger": 2,
         "pressure": 0.268,
         "key_depth": 0.268,
         "is_black": true,
@@ -11643,7 +11643,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.82,
         "wrist_pos_normalized": 0.46,
-        "wrist_yaw_deg": -0.0,
+        "wrist_yaw_deg": 5.0,
         "wrist_roll_deg": 0
     },
     {
@@ -11654,7 +11654,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 4,
+        "finger": 3,
         "pressure": 0.268,
         "key_depth": 0.268,
         "is_black": true,
@@ -11662,7 +11662,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.82,
         "wrist_pos_normalized": 0.402,
-        "wrist_yaw_deg": -5.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -11692,7 +11692,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 3,
         "pressure": 0.283,
         "key_depth": 0.283,
         "is_black": true,
@@ -11700,7 +11700,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.67,
         "wrist_pos_normalized": 0.402,
-        "wrist_yaw_deg": 5.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -11749,7 +11749,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 3,
+        "finger": 1,
         "pressure": 0.283,
         "key_depth": 0.283,
         "is_black": false,
@@ -11757,7 +11757,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -2.83,
         "wrist_pos_normalized": 0.368,
-        "wrist_yaw_deg": -0.0,
+        "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
     {
@@ -11768,7 +11768,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 4,
+        "finger": 2,
         "pressure": 0.283,
         "key_depth": 0.283,
         "is_black": true,
@@ -11776,7 +11776,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.67,
         "wrist_pos_normalized": 0.322,
-        "wrist_yaw_deg": -5.0,
+        "wrist_yaw_deg": 5.0,
         "wrist_roll_deg": 0
     },
     {
@@ -11787,7 +11787,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 5,
+        "finger": 3,
         "pressure": 0.283,
         "key_depth": 0.283,
         "is_black": true,
@@ -11795,8 +11795,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.67,
         "wrist_pos_normalized": 0.264,
-        "wrist_yaw_deg": -10.0,
-        "wrist_roll_deg": 12
+        "wrist_yaw_deg": -0.0,
+        "wrist_roll_deg": 0
     },
     {
         "pitch": 49,
@@ -12433,7 +12433,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 3,
+        "finger": 4,
         "pressure": 0.26,
         "key_depth": 0.26,
         "is_black": true,
@@ -12441,7 +12441,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.9,
         "wrist_pos_normalized": 0.287,
-        "wrist_yaw_deg": -0.0,
+        "wrist_yaw_deg": -5.0,
         "wrist_roll_deg": 0
     },
     {
@@ -12566,7 +12566,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 3,
         "pressure": 0.26,
         "key_depth": 0.26,
         "is_black": true,
@@ -12574,7 +12574,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.9,
         "wrist_pos_normalized": 0.517,
-        "wrist_yaw_deg": 5.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -12695,7 +12695,7 @@
         "pitch": 41,
         "start_ms": 107956.01,
         "duration_ms": 929.35,
-        "key_hold_ms": 147.78,
+        "key_hold_ms": 295.56,
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
@@ -12737,7 +12737,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 4,
+        "finger": 1,
         "pressure": 0.283,
         "key_depth": 0.283,
         "is_black": false,
@@ -12745,7 +12745,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -2.83,
         "wrist_pos_normalized": 0.31,
-        "wrist_yaw_deg": -5.0,
+        "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
     {
@@ -12984,7 +12984,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 3,
         "pressure": 0.268,
         "key_depth": 0.268,
         "is_black": true,
@@ -12992,7 +12992,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.82,
         "wrist_pos_normalized": 0.517,
-        "wrist_yaw_deg": 5.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -13212,7 +13212,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 3,
         "pressure": 0.346,
         "key_depth": 0.346,
         "is_black": false,
@@ -13220,7 +13220,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -3.46,
         "wrist_pos_normalized": 0.448,
-        "wrist_yaw_deg": 5.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -13383,7 +13383,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 5,
+        "finger": 4,
         "pressure": 0.315,
         "key_depth": 0.315,
         "is_black": true,
@@ -13391,8 +13391,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.35,
         "wrist_pos_normalized": 0.425,
-        "wrist_yaw_deg": -10.0,
-        "wrist_roll_deg": 12
+        "wrist_yaw_deg": -5.0,
+        "wrist_roll_deg": 0
     },
     {
         "pitch": 63,
@@ -13630,7 +13630,7 @@
         "pedal_down": false,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 4,
         "pressure": 0.457,
         "key_depth": 0.457,
         "is_black": true,
@@ -13638,7 +13638,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 7.93,
         "wrist_pos_normalized": 0.483,
-        "wrist_yaw_deg": 5.0,
+        "wrist_yaw_deg": -5.0,
         "wrist_roll_deg": 0
     },
     {
@@ -14067,7 +14067,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 5,
+        "finger": 3,
         "pressure": 0.268,
         "key_depth": 0.268,
         "is_black": false,
@@ -14075,7 +14075,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -2.68,
         "wrist_pos_normalized": 0.632,
-        "wrist_yaw_deg": -10.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -14253,7 +14253,7 @@
         "pitch": 53,
         "start_ms": 117685.79,
         "duration_ms": 860.63,
-        "key_hold_ms": 285.71,
+        "key_hold_ms": 428.57,
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
@@ -14295,7 +14295,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 1,
+        "finger": 2,
         "pressure": 0.299,
         "key_depth": 0.299,
         "is_black": false,
@@ -14303,7 +14303,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -2.99,
         "wrist_pos_normalized": 0.448,
-        "wrist_yaw_deg": 10.0,
+        "wrist_yaw_deg": 5.0,
         "wrist_roll_deg": 0
     },
     {
@@ -14314,7 +14314,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 5,
+        "finger": 1,
         "pressure": 0.315,
         "key_depth": 0.315,
         "is_black": false,
@@ -14322,7 +14322,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -3.15,
         "wrist_pos_normalized": 0.506,
-        "wrist_yaw_deg": -10.0,
+        "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
     {
@@ -14523,7 +14523,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 5,
+        "finger": 3,
         "pressure": 0.339,
         "key_depth": 0.339,
         "is_black": false,
@@ -14531,7 +14531,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -3.39,
         "wrist_pos_normalized": 0.632,
-        "wrist_yaw_deg": -10.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -14728,7 +14728,7 @@
         "pitch": 53,
         "start_ms": 120288.14,
         "duration_ms": 860.63,
-        "key_hold_ms": 285.71,
+        "key_hold_ms": 428.57,
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
@@ -14770,7 +14770,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 1,
+        "finger": 2,
         "pressure": 0.315,
         "key_depth": 0.315,
         "is_black": false,
@@ -14778,7 +14778,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -3.15,
         "wrist_pos_normalized": 0.448,
-        "wrist_yaw_deg": 10.0,
+        "wrist_yaw_deg": 5.0,
         "wrist_roll_deg": 0
     },
     {
@@ -14789,7 +14789,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 5,
+        "finger": 1,
         "pressure": 0.331,
         "key_depth": 0.331,
         "is_black": false,
@@ -14797,7 +14797,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -3.31,
         "wrist_pos_normalized": 0.506,
-        "wrist_yaw_deg": -10.0,
+        "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
     {
@@ -14960,7 +14960,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 4,
+        "finger": 2,
         "pressure": 0.354,
         "key_depth": 0.354,
         "is_black": true,
@@ -14968,7 +14968,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 8.96,
         "wrist_pos_normalized": 0.54,
-        "wrist_yaw_deg": -5.0,
+        "wrist_yaw_deg": 5.0,
         "wrist_roll_deg": 0
     },
     {
@@ -14979,7 +14979,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 3,
+        "finger": 1,
         "pressure": 0.354,
         "key_depth": 0.354,
         "is_black": false,
@@ -14987,7 +14987,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -3.54,
         "wrist_pos_normalized": 0.575,
-        "wrist_yaw_deg": -0.0,
+        "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
     {
@@ -14998,7 +14998,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 3,
         "pressure": 0.354,
         "key_depth": 0.354,
         "is_black": true,
@@ -15006,7 +15006,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 8.96,
         "wrist_pos_normalized": 0.678,
-        "wrist_yaw_deg": 5.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -15036,7 +15036,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 3,
+        "finger": 1,
         "pressure": 0.354,
         "key_depth": 0.354,
         "is_black": false,
@@ -15044,7 +15044,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -3.54,
         "wrist_pos_normalized": 0.632,
-        "wrist_yaw_deg": -0.0,
+        "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
     {
@@ -15564,11 +15564,11 @@
         "pitch": 68,
         "start_ms": 124184.51,
         "duration_ms": 371.99,
-        "key_hold_ms": 371.99,
+        "key_hold_ms": 247.99,
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 5,
+        "finger": 2,
         "pressure": 0.449,
         "key_depth": 0.449,
         "is_black": true,
@@ -15576,8 +15576,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 8.01,
         "wrist_pos_normalized": 0.54,
-        "wrist_yaw_deg": -10.0,
-        "wrist_roll_deg": 12
+        "wrist_yaw_deg": 5.0,
+        "wrist_roll_deg": 0
     },
     {
         "pitch": 92,
@@ -15606,7 +15606,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 3,
+        "finger": 1,
         "pressure": 0.425,
         "key_depth": 0.425,
         "is_black": false,
@@ -15614,7 +15614,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -4.25,
         "wrist_pos_normalized": 0.552,
-        "wrist_yaw_deg": -0.0,
+        "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
     {
@@ -15625,7 +15625,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 3,
         "pressure": 0.425,
         "key_depth": 0.425,
         "is_black": true,
@@ -15633,7 +15633,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 8.25,
         "wrist_pos_normalized": 0.598,
-        "wrist_yaw_deg": 5.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -16005,7 +16005,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 4,
         "pressure": 0.409,
         "key_depth": 0.409,
         "is_black": true,
@@ -16013,7 +16013,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 8.41,
         "wrist_pos_normalized": 0.517,
-        "wrist_yaw_deg": 5.0,
+        "wrist_yaw_deg": -5.0,
         "wrist_roll_deg": 0
     },
     {
@@ -16096,11 +16096,11 @@
         "pitch": 63,
         "start_ms": 127162.96,
         "duration_ms": 370.37,
-        "key_hold_ms": 370.37,
+        "key_hold_ms": 246.91,
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 5,
+        "finger": 3,
         "pressure": 0.37,
         "key_depth": 0.37,
         "is_black": true,
@@ -16108,8 +16108,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 8.8,
         "wrist_pos_normalized": 0.5,
-        "wrist_yaw_deg": -10.0,
-        "wrist_roll_deg": 12
+        "wrist_yaw_deg": 5.0,
+        "wrist_roll_deg": 0
     },
     {
         "pitch": 66,
@@ -16119,7 +16119,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "INNER",
-        "finger": 3,
+        "finger": 2,
         "pressure": 0.441,
         "key_depth": 0.441,
         "is_black": true,
@@ -16127,8 +16127,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 8.09,
         "wrist_pos_normalized": 0.5,
-        "wrist_yaw_deg": -10.0,
-        "wrist_roll_deg": 12
+        "wrist_yaw_deg": 5.0,
+        "wrist_roll_deg": 0
     },
     {
         "pitch": 69,
@@ -16138,7 +16138,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 3,
+        "finger": 1,
         "pressure": 0.409,
         "key_depth": 0.409,
         "is_black": false,
@@ -16146,7 +16146,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -4.09,
         "wrist_pos_normalized": 0.552,
-        "wrist_yaw_deg": -0.0,
+        "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
     {
@@ -16157,7 +16157,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 3,
         "pressure": 0.409,
         "key_depth": 0.409,
         "is_black": true,
@@ -16165,7 +16165,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 8.41,
         "wrist_pos_normalized": 0.598,
-        "wrist_yaw_deg": 5.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -16343,7 +16343,7 @@
         "pitch": 97,
         "start_ms": 128407.9,
         "duration_ms": 263.16,
-        "key_hold_ms": 263.15,
+        "key_hold_ms": 131.57,
         "pedal_down": true,
         "hand": "Right",
         "role": "MELODY",
@@ -16366,7 +16366,7 @@
         "pedal_down": true,
         "hand": "Right",
         "role": "MELODY",
-        "finger": 1,
+        "finger": 2,
         "pressure": 0.409,
         "key_depth": 0.409,
         "is_black": true,
@@ -16374,8 +16374,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 8.41,
         "wrist_pos_normalized": 0.736,
-        "wrist_yaw_deg": 10.0,
-        "wrist_roll_deg": 12
+        "wrist_yaw_deg": 5.0,
+        "wrist_roll_deg": 0
     },
     {
         "pitch": 59,
@@ -16404,7 +16404,7 @@
         "pedal_down": true,
         "hand": "Right",
         "role": "MELODY",
-        "finger": 5,
+        "finger": 1,
         "pressure": 0.646,
         "key_depth": 0.646,
         "is_black": true,
@@ -16412,8 +16412,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 6.04,
         "wrist_pos_normalized": 0.655,
-        "wrist_yaw_deg": -10.0,
-        "wrist_roll_deg": -12
+        "wrist_yaw_deg": 10.0,
+        "wrist_roll_deg": 12
     },
     {
         "pitch": 63,
@@ -16461,7 +16461,7 @@
         "pedal_down": true,
         "hand": "Right",
         "role": "MELODY",
-        "finger": 2,
+        "finger": 3,
         "pressure": 0.409,
         "key_depth": 0.409,
         "is_black": true,
@@ -16469,7 +16469,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 8.41,
         "wrist_pos_normalized": 0.517,
-        "wrist_yaw_deg": 5.0,
+        "wrist_yaw_deg": 0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -16632,7 +16632,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 5,
+        "finger": 3,
         "pressure": 0.441,
         "key_depth": 0.441,
         "is_black": true,
@@ -16640,8 +16640,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 8.09,
         "wrist_pos_normalized": 0.402,
-        "wrist_yaw_deg": -10.0,
-        "wrist_roll_deg": 12
+        "wrist_yaw_deg": -0.0,
+        "wrist_roll_deg": 0
     },
     {
         "pitch": 81,
@@ -16670,7 +16670,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 3,
+        "finger": 2,
         "pressure": 0.409,
         "key_depth": 0.409,
         "is_black": true,
@@ -16678,7 +16678,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 8.41,
         "wrist_pos_normalized": 0.46,
-        "wrist_yaw_deg": -0.0,
+        "wrist_yaw_deg": 5.0,
         "wrist_roll_deg": 0
     },
     {
@@ -16689,7 +16689,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 1,
         "pressure": 0.409,
         "key_depth": 0.409,
         "is_black": false,
@@ -16697,7 +16697,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -4.09,
         "wrist_pos_normalized": 0.494,
-        "wrist_yaw_deg": 5.0,
+        "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
     {
@@ -16708,7 +16708,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 1,
+        "finger": 3,
         "pressure": 0.409,
         "key_depth": 0.409,
         "is_black": false,
@@ -16716,7 +16716,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -4.09,
         "wrist_pos_normalized": 0.552,
-        "wrist_yaw_deg": 10.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -16841,7 +16841,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 1,
         "pressure": 0.339,
         "key_depth": 0.339,
         "is_black": true,
@@ -16849,8 +16849,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.11,
         "wrist_pos_normalized": 0.46,
-        "wrist_yaw_deg": 5.0,
-        "wrist_roll_deg": 0
+        "wrist_yaw_deg": 10.0,
+        "wrist_roll_deg": -12
     },
     {
         "pitch": 64,
@@ -16860,7 +16860,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 1,
+        "finger": 3,
         "pressure": 0.354,
         "key_depth": 0.354,
         "is_black": false,
@@ -16868,7 +16868,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -3.54,
         "wrist_pos_normalized": 0.494,
-        "wrist_yaw_deg": 10.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -16993,7 +16993,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 5,
+        "finger": 4,
         "pressure": 0.394,
         "key_depth": 0.394,
         "is_black": true,
@@ -17001,8 +17001,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 8.56,
         "wrist_pos_normalized": 0.598,
-        "wrist_yaw_deg": -10.0,
-        "wrist_roll_deg": 12
+        "wrist_yaw_deg": -5.0,
+        "wrist_roll_deg": 0
     },
     {
         "pitch": 76,
@@ -17107,7 +17107,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 5,
+        "finger": 4,
         "pressure": 0.378,
         "key_depth": 0.378,
         "is_black": true,
@@ -17115,8 +17115,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 8.72,
         "wrist_pos_normalized": 0.598,
-        "wrist_yaw_deg": -10.0,
-        "wrist_roll_deg": 12
+        "wrist_yaw_deg": -5.0,
+        "wrist_roll_deg": 0
     },
     {
         "pitch": 78,
@@ -17202,7 +17202,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 5,
+        "finger": 3,
         "pressure": 0.339,
         "key_depth": 0.339,
         "is_black": false,
@@ -17210,7 +17210,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -3.39,
         "wrist_pos_normalized": 0.494,
-        "wrist_yaw_deg": -10.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -17297,7 +17297,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 5,
+        "finger": 4,
         "pressure": 0.307,
         "key_depth": 0.307,
         "is_black": true,
@@ -17305,8 +17305,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.43,
         "wrist_pos_normalized": 0.46,
-        "wrist_yaw_deg": -10.0,
-        "wrist_roll_deg": 12
+        "wrist_yaw_deg": -5.0,
+        "wrist_roll_deg": 0
     },
     {
         "pitch": 57,
@@ -17392,7 +17392,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 3,
+        "finger": 5,
         "pressure": 0.339,
         "key_depth": 0.339,
         "is_black": true,
@@ -17400,8 +17400,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.11,
         "wrist_pos_normalized": 0.241,
-        "wrist_yaw_deg": -0.0,
-        "wrist_roll_deg": 0
+        "wrist_yaw_deg": -10.0,
+        "wrist_roll_deg": 12
     },
     {
         "pitch": 73,
@@ -17449,7 +17449,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 4,
         "pressure": 0.299,
         "key_depth": 0.299,
         "is_black": true,
@@ -17457,7 +17457,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.51,
         "wrist_pos_normalized": 0.322,
-        "wrist_yaw_deg": 5.0,
+        "wrist_yaw_deg": -5.0,
         "wrist_roll_deg": 0
     },
     {
@@ -17468,7 +17468,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 1,
+        "finger": 3,
         "pressure": 0.307,
         "key_depth": 0.307,
         "is_black": false,
@@ -17476,7 +17476,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -3.07,
         "wrist_pos_normalized": 0.356,
-        "wrist_yaw_deg": 10.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -17525,7 +17525,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 5,
+        "finger": 2,
         "pressure": 0.315,
         "key_depth": 0.315,
         "is_black": true,
@@ -17533,8 +17533,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.35,
         "wrist_pos_normalized": 0.379,
-        "wrist_yaw_deg": -10.0,
-        "wrist_roll_deg": 12
+        "wrist_yaw_deg": 5.0,
+        "wrist_roll_deg": 0
     },
     {
         "pitch": 57,
@@ -17544,7 +17544,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 3,
+        "finger": 1,
         "pressure": 0.331,
         "key_depth": 0.331,
         "is_black": false,
@@ -17552,7 +17552,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -3.31,
         "wrist_pos_normalized": 0.414,
-        "wrist_yaw_deg": -0.0,
+        "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
     {
@@ -17601,7 +17601,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 3,
         "pressure": 0.339,
         "key_depth": 0.339,
         "is_black": true,
@@ -17609,7 +17609,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.11,
         "wrist_pos_normalized": 0.46,
-        "wrist_yaw_deg": 5.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -17677,7 +17677,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 3,
         "pressure": 0.331,
         "key_depth": 0.331,
         "is_black": true,
@@ -17685,7 +17685,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.19,
         "wrist_pos_normalized": 0.46,
-        "wrist_yaw_deg": 5.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -17696,7 +17696,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 3,
+        "finger": 1,
         "pressure": 0.315,
         "key_depth": 0.315,
         "is_black": false,
@@ -17704,7 +17704,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -3.15,
         "wrist_pos_normalized": 0.414,
-        "wrist_yaw_deg": -0.0,
+        "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
     {
@@ -17753,7 +17753,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 5,
+        "finger": 2,
         "pressure": 0.315,
         "key_depth": 0.315,
         "is_black": true,
@@ -17761,8 +17761,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.35,
         "wrist_pos_normalized": 0.379,
-        "wrist_yaw_deg": -10.0,
-        "wrist_roll_deg": 12
+        "wrist_yaw_deg": 5.0,
+        "wrist_roll_deg": 0
     },
     {
         "pitch": 52,
@@ -17772,7 +17772,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 1,
+        "finger": 3,
         "pressure": 0.307,
         "key_depth": 0.307,
         "is_black": false,
@@ -17780,7 +17780,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -3.07,
         "wrist_pos_normalized": 0.356,
-        "wrist_yaw_deg": 10.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -17829,7 +17829,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 4,
         "pressure": 0.299,
         "key_depth": 0.299,
         "is_black": true,
@@ -17837,7 +17837,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.51,
         "wrist_pos_normalized": 0.322,
-        "wrist_yaw_deg": 5.0,
+        "wrist_yaw_deg": -5.0,
         "wrist_roll_deg": 0
     },
     {
@@ -17848,7 +17848,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 3,
+        "finger": 5,
         "pressure": 0.291,
         "key_depth": 0.291,
         "is_black": true,
@@ -17856,8 +17856,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.59,
         "wrist_pos_normalized": 0.241,
-        "wrist_yaw_deg": -0.0,
-        "wrist_roll_deg": 0
+        "wrist_yaw_deg": -10.0,
+        "wrist_roll_deg": 12
     },
     {
         "pitch": 57,
@@ -20736,7 +20736,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 3,
+        "finger": 4,
         "pressure": 0.331,
         "key_depth": 0.331,
         "is_black": true,
@@ -20744,7 +20744,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.19,
         "wrist_pos_normalized": 0.425,
-        "wrist_yaw_deg": -0.0,
+        "wrist_yaw_deg": -5.0,
         "wrist_roll_deg": 0
     },
     {
@@ -21192,7 +21192,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 3,
+        "finger": 4,
         "pressure": 0.331,
         "key_depth": 0.331,
         "is_black": true,
@@ -21200,7 +21200,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.19,
         "wrist_pos_normalized": 0.425,
-        "wrist_yaw_deg": -0.0,
+        "wrist_yaw_deg": -5.0,
         "wrist_roll_deg": 0
     },
     {
@@ -21515,7 +21515,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 3,
+        "finger": 4,
         "pressure": 0.291,
         "key_depth": 0.291,
         "is_black": true,
@@ -21523,7 +21523,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.59,
         "wrist_pos_normalized": 0.563,
-        "wrist_yaw_deg": -0.0,
+        "wrist_yaw_deg": -5.0,
         "wrist_roll_deg": 0
     },
     {
@@ -21534,7 +21534,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 3,
         "pressure": 0.291,
         "key_depth": 0.291,
         "is_black": true,
@@ -21542,7 +21542,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.59,
         "wrist_pos_normalized": 0.598,
-        "wrist_yaw_deg": 5.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -21610,7 +21610,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 4,
+        "finger": 1,
         "pressure": 0.283,
         "key_depth": 0.283,
         "is_black": true,
@@ -21618,8 +21618,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.67,
         "wrist_pos_normalized": 0.517,
-        "wrist_yaw_deg": -5.0,
-        "wrist_roll_deg": 0
+        "wrist_yaw_deg": 10.0,
+        "wrist_roll_deg": -12
     },
     {
         "pitch": 70,
@@ -21857,7 +21857,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 3,
+        "finger": 1,
         "pressure": 0.236,
         "key_depth": 0.236,
         "is_black": false,
@@ -21865,7 +21865,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -2.36,
         "wrist_pos_normalized": 0.552,
-        "wrist_yaw_deg": -0.0,
+        "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
     {
@@ -21876,7 +21876,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 3,
         "pressure": 0.236,
         "key_depth": 0.236,
         "is_black": true,
@@ -21884,7 +21884,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.14,
         "wrist_pos_normalized": 0.598,
-        "wrist_yaw_deg": 5.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -21952,7 +21952,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 4,
+        "finger": 1,
         "pressure": 0.268,
         "key_depth": 0.268,
         "is_black": true,
@@ -21960,8 +21960,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.82,
         "wrist_pos_normalized": 0.517,
-        "wrist_yaw_deg": -5.0,
-        "wrist_roll_deg": 0
+        "wrist_yaw_deg": 10.0,
+        "wrist_roll_deg": -12
     },
     {
         "pitch": 85,
@@ -22081,11 +22081,11 @@
         "pitch": 66,
         "start_ms": 157529.6,
         "duration_ms": 1193.05,
-        "key_hold_ms": 1193.05,
+        "key_hold_ms": 351.49,
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 5,
+        "finger": 3,
         "pressure": 0.268,
         "key_depth": 0.268,
         "is_black": true,
@@ -22093,8 +22093,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.82,
         "wrist_pos_normalized": 0.517,
-        "wrist_yaw_deg": -10.0,
-        "wrist_roll_deg": 12
+        "wrist_yaw_deg": -0.0,
+        "wrist_roll_deg": 0
     },
     {
         "pitch": 87,
@@ -22123,7 +22123,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 3,
+        "finger": 1,
         "pressure": 0.22,
         "key_depth": 0.22,
         "is_black": false,
@@ -22131,7 +22131,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -2.2,
         "wrist_pos_normalized": 0.552,
-        "wrist_yaw_deg": -0.0,
+        "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
     {
@@ -22142,7 +22142,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 3,
         "pressure": 0.22,
         "key_depth": 0.22,
         "is_black": true,
@@ -22150,7 +22150,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.3,
         "wrist_pos_normalized": 0.598,
-        "wrist_yaw_deg": 5.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -22275,7 +22275,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 5,
+        "finger": 3,
         "pressure": 0.252,
         "key_depth": 0.252,
         "is_black": false,
@@ -22283,7 +22283,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -2.52,
         "wrist_pos_normalized": 0.644,
-        "wrist_yaw_deg": -10.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -22826,7 +22826,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 3,
         "pressure": 0.213,
         "key_depth": 0.213,
         "is_black": true,
@@ -22834,7 +22834,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.37,
         "wrist_pos_normalized": 0.678,
-        "wrist_yaw_deg": 5.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -22921,7 +22921,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 3,
+        "finger": 4,
         "pressure": 0.22,
         "key_depth": 0.22,
         "is_black": false,
@@ -22929,7 +22929,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -2.2,
         "wrist_pos_normalized": 0.506,
-        "wrist_yaw_deg": -0.0,
+        "wrist_yaw_deg": -5.0,
         "wrist_roll_deg": 0
     },
     {
@@ -22974,7 +22974,7 @@
         "pitch": 63,
         "start_ms": 170187.8,
         "duration_ms": 2411.57,
-        "key_hold_ms": 2411.56,
+        "key_hold_ms": 950.39,
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
@@ -22997,7 +22997,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 3,
+        "finger": 4,
         "pressure": 0.22,
         "key_depth": 0.22,
         "is_black": true,
@@ -23005,7 +23005,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.3,
         "wrist_pos_normalized": 0.517,
-        "wrist_yaw_deg": -0.0,
+        "wrist_yaw_deg": -5.0,
         "wrist_roll_deg": 0
     },
     {
@@ -23016,7 +23016,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 3,
         "pressure": 0.205,
         "key_depth": 0.205,
         "is_black": true,
@@ -23024,7 +23024,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.45,
         "wrist_pos_normalized": 0.54,
-        "wrist_yaw_deg": 5.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -23073,7 +23073,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 1,
+        "finger": 2,
         "pressure": 0.197,
         "key_depth": 0.197,
         "is_black": false,
@@ -23081,7 +23081,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -1.97,
         "wrist_pos_normalized": 0.586,
-        "wrist_yaw_deg": 10.0,
+        "wrist_yaw_deg": 5.0,
         "wrist_roll_deg": 0
     },
     {
@@ -23092,7 +23092,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 1,
         "pressure": 0.197,
         "key_depth": 0.197,
         "is_black": true,
@@ -23100,8 +23100,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.53,
         "wrist_pos_normalized": 0.621,
-        "wrist_yaw_deg": 5.0,
-        "wrist_roll_deg": 0
+        "wrist_yaw_deg": 10.0,
+        "wrist_roll_deg": -12
     },
     {
         "pitch": 82,
@@ -23149,7 +23149,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 1,
+        "finger": 3,
         "pressure": 0.181,
         "key_depth": 0.181,
         "is_black": true,
@@ -23157,8 +23157,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.69,
         "wrist_pos_normalized": 0.655,
-        "wrist_yaw_deg": 10.0,
-        "wrist_roll_deg": -12
+        "wrist_yaw_deg": -0.0,
+        "wrist_roll_deg": 0
     },
     {
         "pitch": 80,
@@ -23206,7 +23206,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 4,
         "pressure": 0.213,
         "key_depth": 0.213,
         "is_black": true,
@@ -23214,7 +23214,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.37,
         "wrist_pos_normalized": 0.483,
-        "wrist_yaw_deg": 5.0,
+        "wrist_yaw_deg": -5.0,
         "wrist_roll_deg": 0
     },
     {
@@ -23396,7 +23396,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 3,
         "pressure": 0.252,
         "key_depth": 0.252,
         "is_black": true,
@@ -23404,7 +23404,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.98,
         "wrist_pos_normalized": 0.621,
-        "wrist_yaw_deg": 5.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -24023,7 +24023,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 3,
+        "finger": 4,
         "pressure": 0.22,
         "key_depth": 0.22,
         "is_black": true,
@@ -24031,7 +24031,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.3,
         "wrist_pos_normalized": 0.425,
-        "wrist_yaw_deg": -0.0,
+        "wrist_yaw_deg": -5.0,
         "wrist_roll_deg": 0
     },
     {
@@ -24593,7 +24593,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 3,
         "pressure": 0.213,
         "key_depth": 0.213,
         "is_black": true,
@@ -24601,7 +24601,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.37,
         "wrist_pos_normalized": 0.54,
-        "wrist_yaw_deg": 5.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -25159,7 +25159,7 @@
         "pitch": 44,
         "start_ms": 196649.26,
         "duration_ms": 2743.45,
-        "key_hold_ms": 461.46,
+        "key_hold_ms": 1398.15,
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
@@ -25581,7 +25581,7 @@
         "pedal_down": true,
         "hand": "Right",
         "role": "INNER",
-        "finger": 2,
+        "finger": 1,
         "pressure": 0.197,
         "key_depth": 0.197,
         "is_black": false,
@@ -25589,7 +25589,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -1.97,
         "wrist_pos_normalized": 0.563,
-        "wrist_yaw_deg": -5.0,
+        "wrist_yaw_deg": 5.0,
         "wrist_roll_deg": -12
     },
     {
@@ -25600,7 +25600,7 @@
         "pedal_down": true,
         "hand": "Right",
         "role": "INNER",
-        "finger": 3,
+        "finger": 2,
         "pressure": 0.197,
         "key_depth": 0.197,
         "is_black": true,
@@ -25608,7 +25608,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.53,
         "wrist_pos_normalized": 0.563,
-        "wrist_yaw_deg": -5.0,
+        "wrist_yaw_deg": 5.0,
         "wrist_roll_deg": -12
     },
     {
@@ -25627,7 +25627,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.43,
         "wrist_pos_normalized": 0.563,
-        "wrist_yaw_deg": -5.0,
+        "wrist_yaw_deg": 5.0,
         "wrist_roll_deg": -12
     },
     {
@@ -25695,7 +25695,7 @@
         "pedal_down": false,
         "hand": "Right",
         "role": "MELODY",
-        "finger": 4,
+        "finger": 3,
         "pressure": 0.228,
         "key_depth": 0.228,
         "is_black": true,
@@ -25703,7 +25703,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.22,
         "wrist_pos_normalized": 0.598,
-        "wrist_yaw_deg": -5.0,
+        "wrist_yaw_deg": 0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -25733,7 +25733,7 @@
         "pedal_down": true,
         "hand": "Right",
         "role": "INNER",
-        "finger": 2,
+        "finger": 1,
         "pressure": 0.26,
         "key_depth": 0.26,
         "is_black": true,
@@ -25741,8 +25741,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.9,
         "wrist_pos_normalized": 0.431,
-        "wrist_yaw_deg": 5.0,
-        "wrist_roll_deg": 0
+        "wrist_yaw_deg": 15.0,
+        "wrist_roll_deg": 12
     },
     {
         "pitch": 61,
@@ -25752,7 +25752,7 @@
         "pedal_down": true,
         "hand": "Right",
         "role": "MELODY",
-        "finger": 3,
+        "finger": 2,
         "pressure": 0.291,
         "key_depth": 0.291,
         "is_black": true,
@@ -25760,8 +25760,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.59,
         "wrist_pos_normalized": 0.431,
-        "wrist_yaw_deg": 5.0,
-        "wrist_roll_deg": 0
+        "wrist_yaw_deg": 15.0,
+        "wrist_roll_deg": 12
     },
     {
         "pitch": 63,
@@ -25904,7 +25904,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 5,
+        "finger": 3,
         "pressure": 0.268,
         "key_depth": 0.268,
         "is_black": true,
@@ -25912,8 +25912,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.82,
         "wrist_pos_normalized": 0.207,
-        "wrist_yaw_deg": -10.0,
-        "wrist_roll_deg": 12
+        "wrist_yaw_deg": -0.0,
+        "wrist_roll_deg": 0
     },
     {
         "pitch": 58,
@@ -25999,7 +25999,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 1,
         "pressure": 0.197,
         "key_depth": 0.197,
         "is_black": true,
@@ -26007,8 +26007,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.53,
         "wrist_pos_normalized": 0.345,
-        "wrist_yaw_deg": 5.0,
-        "wrist_roll_deg": 0
+        "wrist_yaw_deg": 10.0,
+        "wrist_roll_deg": -12
     },
     {
         "pitch": 66,
@@ -26075,7 +26075,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 1,
+        "finger": 3,
         "pressure": 0.205,
         "key_depth": 0.205,
         "is_black": true,
@@ -26083,8 +26083,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.45,
         "wrist_pos_normalized": 0.483,
-        "wrist_yaw_deg": 10.0,
-        "wrist_roll_deg": -12
+        "wrist_yaw_deg": -0.0,
+        "wrist_roll_deg": 0
     },
     {
         "pitch": 61,
@@ -27519,7 +27519,7 @@
         "pedal_down": true,
         "hand": "Right",
         "role": "MELODY",
-        "finger": 5,
+        "finger": 1,
         "pressure": 0.213,
         "key_depth": 0.213,
         "is_black": false,
@@ -27527,18 +27527,18 @@
         "target_y_mm": 30.0,
         "target_z_mm": -2.13,
         "wrist_pos_normalized": 0.644,
-        "wrist_yaw_deg": -10.0,
+        "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
     {
         "pitch": 56,
         "start_ms": 231323.02,
         "duration_ms": 2731.04,
-        "key_hold_ms": 430.3,
+        "key_hold_ms": 640.1,
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 3,
         "pressure": 0.244,
         "key_depth": 0.244,
         "is_black": true,
@@ -27546,7 +27546,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.06,
         "wrist_pos_normalized": 0.402,
-        "wrist_yaw_deg": 5.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -27557,7 +27557,7 @@
         "pedal_down": true,
         "hand": "Right",
         "role": "INNER",
-        "finger": 1,
+        "finger": 2,
         "pressure": 0.236,
         "key_depth": 0.236,
         "is_black": true,
@@ -27565,8 +27565,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.14,
         "wrist_pos_normalized": 0.695,
-        "wrist_yaw_deg": 10.0,
-        "wrist_roll_deg": 12
+        "wrist_yaw_deg": 5.0,
+        "wrist_roll_deg": 0
     },
     {
         "pitch": 83,
@@ -27584,8 +27584,8 @@
         "target_y_mm": 30.0,
         "target_z_mm": -2.6,
         "wrist_pos_normalized": 0.695,
-        "wrist_yaw_deg": 10.0,
-        "wrist_roll_deg": 12
+        "wrist_yaw_deg": 5.0,
+        "wrist_roll_deg": 0
     },
     {
         "pitch": 59,
@@ -27595,7 +27595,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 1,
+        "finger": 2,
         "pressure": 0.197,
         "key_depth": 0.197,
         "is_black": false,
@@ -27603,7 +27603,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -1.97,
         "wrist_pos_normalized": 0.437,
-        "wrist_yaw_deg": 10.0,
+        "wrist_yaw_deg": 5.0,
         "wrist_roll_deg": 0
     },
     {
@@ -27614,7 +27614,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 5,
+        "finger": 1,
         "pressure": 0.197,
         "key_depth": 0.197,
         "is_black": false,
@@ -27622,7 +27622,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -1.97,
         "wrist_pos_normalized": 0.494,
-        "wrist_yaw_deg": -10.0,
+        "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
     {
@@ -27705,11 +27705,11 @@
         "pitch": 56,
         "start_ms": 234054.06,
         "duration_ms": 2731.04,
-        "key_hold_ms": 430.3,
+        "key_hold_ms": 640.1,
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 3,
         "pressure": 0.244,
         "key_depth": 0.244,
         "is_black": true,
@@ -27717,7 +27717,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.06,
         "wrist_pos_normalized": 0.402,
-        "wrist_yaw_deg": 5.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -27766,7 +27766,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 1,
+        "finger": 2,
         "pressure": 0.197,
         "key_depth": 0.197,
         "is_black": false,
@@ -27774,7 +27774,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -1.97,
         "wrist_pos_normalized": 0.437,
-        "wrist_yaw_deg": 10.0,
+        "wrist_yaw_deg": 5.0,
         "wrist_roll_deg": 0
     },
     {
@@ -27785,7 +27785,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 5,
+        "finger": 1,
         "pressure": 0.197,
         "key_depth": 0.197,
         "is_black": false,
@@ -27793,7 +27793,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -1.97,
         "wrist_pos_normalized": 0.494,
-        "wrist_yaw_deg": -10.0,
+        "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
     {
@@ -27937,7 +27937,7 @@
         "pedal_down": true,
         "hand": "Right",
         "role": "INNER",
-        "finger": 4,
+        "finger": 1,
         "pressure": 0.291,
         "key_depth": 0.291,
         "is_black": false,
@@ -27945,7 +27945,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -2.91,
         "wrist_pos_normalized": 0.799,
-        "wrist_yaw_deg": -15.0,
+        "wrist_yaw_deg": 0.0,
         "wrist_roll_deg": -12
     },
     {
@@ -27964,7 +27964,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.35,
         "wrist_pos_normalized": 0.799,
-        "wrist_yaw_deg": -15.0,
+        "wrist_yaw_deg": 0.0,
         "wrist_roll_deg": -12
     },
     {
@@ -28032,7 +28032,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 5,
+        "finger": 3,
         "pressure": 0.165,
         "key_depth": 0.165,
         "is_black": true,
@@ -28040,8 +28040,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.85,
         "wrist_pos_normalized": 0.402,
-        "wrist_yaw_deg": -10.0,
-        "wrist_roll_deg": 12
+        "wrist_yaw_deg": -0.0,
+        "wrist_roll_deg": 0
     },
     {
         "pitch": 61,
@@ -28051,7 +28051,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 4,
+        "finger": 2,
         "pressure": 0.157,
         "key_depth": 0.157,
         "is_black": true,
@@ -28059,7 +28059,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.93,
         "wrist_pos_normalized": 0.46,
-        "wrist_yaw_deg": -5.0,
+        "wrist_yaw_deg": 5.0,
         "wrist_roll_deg": 0
     },
     {
@@ -28070,7 +28070,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 3,
+        "finger": 1,
         "pressure": 0.213,
         "key_depth": 0.213,
         "is_black": false,
@@ -28078,7 +28078,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -2.13,
         "wrist_pos_normalized": 0.506,
-        "wrist_yaw_deg": -0.0,
+        "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
     {
@@ -28089,7 +28089,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 2,
+        "finger": 3,
         "pressure": 0.173,
         "key_depth": 0.173,
         "is_black": true,
@@ -28097,7 +28097,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.77,
         "wrist_pos_normalized": 0.54,
-        "wrist_yaw_deg": 5.0,
+        "wrist_yaw_deg": -0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -28108,7 +28108,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 1,
+        "finger": 2,
         "pressure": 0.173,
         "key_depth": 0.173,
         "is_black": true,
@@ -28116,8 +28116,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.77,
         "wrist_pos_normalized": 0.598,
-        "wrist_yaw_deg": 10.0,
-        "wrist_roll_deg": -12
+        "wrist_yaw_deg": 5.0,
+        "wrist_roll_deg": 0
     },
     {
         "pitch": 77,
@@ -28127,7 +28127,7 @@
         "pedal_down": true,
         "hand": "Left",
         "role": "BASS",
-        "finger": 5,
+        "finger": 1,
         "pressure": 0.213,
         "key_depth": 0.213,
         "is_black": false,
@@ -28135,7 +28135,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -2.13,
         "wrist_pos_normalized": 0.644,
-        "wrist_yaw_deg": -10.0,
+        "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
     {
@@ -28260,7 +28260,7 @@
         "pedal_down": false,
         "hand": "Right",
         "role": "MELODY",
-        "finger": 1,
+        "finger": 2,
         "pressure": 0.189,
         "key_depth": 0.189,
         "is_black": true,
@@ -28268,8 +28268,8 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.61,
         "wrist_pos_normalized": 0.678,
-        "wrist_yaw_deg": 10.0,
-        "wrist_roll_deg": 12
+        "wrist_yaw_deg": 5.0,
+        "wrist_roll_deg": 0
     },
     {
         "pitch": 85,
@@ -28279,7 +28279,7 @@
         "pedal_down": false,
         "hand": "Right",
         "role": "MELODY",
-        "finger": 2,
+        "finger": 3,
         "pressure": 0.205,
         "key_depth": 0.205,
         "is_black": true,
@@ -28287,7 +28287,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 10.45,
         "wrist_pos_normalized": 0.736,
-        "wrist_yaw_deg": 5.0,
+        "wrist_yaw_deg": 0.0,
         "wrist_roll_deg": 0
     },
     {
@@ -28298,7 +28298,7 @@
         "pedal_down": false,
         "hand": "Right",
         "role": "MELODY",
-        "finger": 3,
+        "finger": 4,
         "pressure": 0.22,
         "key_depth": 0.22,
         "is_black": false,
@@ -28306,7 +28306,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -2.2,
         "wrist_pos_normalized": 0.782,
-        "wrist_yaw_deg": 0.0,
+        "wrist_yaw_deg": -5.0,
         "wrist_roll_deg": 0
     },
     {
@@ -28317,7 +28317,7 @@
         "pedal_down": true,
         "hand": "Right",
         "role": "MELODY",
-        "finger": 4,
+        "finger": 5,
         "pressure": 0.268,
         "key_depth": 0.268,
         "is_black": true,
@@ -28325,7 +28325,7 @@
         "target_y_mm": 85.0,
         "target_z_mm": 9.82,
         "wrist_pos_normalized": 0.816,
-        "wrist_yaw_deg": -5.0,
-        "wrist_roll_deg": 0
+        "wrist_yaw_deg": -10.0,
+        "wrist_roll_deg": -12
     }
 ]
