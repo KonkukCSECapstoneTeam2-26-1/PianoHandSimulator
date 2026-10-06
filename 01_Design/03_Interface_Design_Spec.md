@@ -63,7 +63,9 @@
   {
     "pitch":                int,    // MIDI 음고 (21~108, A0~C8)
     "start_ms":             float,  // 음표 시작 시각 (ms)
-    "duration_ms":          float,  // 음표 지속 시간 (ms)
+    "duration_ms":          float,  // 소리가 울리는 시간 (ms) — 페달로 늘어남
+    "key_hold_ms":          float,  // 손가락이 건반을 누르고 있는 시간 (ms) ★IK 사용
+    "pedal_down":           bool,   // 타건 시점 Sustain 페달 상태
     "hand":                 string, // "Left" | "Right"
     "role":                 string, // "MELODY" | "BASS" | "INNER"
     "finger":               int,    // 배정 손가락 번호 (1~5)
@@ -72,7 +74,10 @@
     "is_black":             bool,   // 흑건 여부
     "wrist_pos_normalized": float,  // 손목 가로 위치 (0.0~1.0, 88키 기준)
     "wrist_yaw_deg":        float,  // 손목 좌우 회전각 (±35.0°)
-    "wrist_roll_deg":       float   // 손목 기울기 (±20.0°)
+    "wrist_roll_deg":       float,  // 손목 기울기 (±20.0°)
+    "target_x_mm":          float,  // 건반 목표 X (mm) — 원점 A0 좌측 모서리
+    "target_y_mm":          float,  // 건반 타건 접점 Y (mm) — 백건 30.0 / 흑건 85.0
+    "target_z_mm":          float   // 건반 목표 Z (mm) — (흑건?12.5:0) − key_depth×10.0
   },
   ...
 ]
@@ -115,9 +120,12 @@
 
 | 필드 | IK에서의 역할 | 비고 |
 |------|--------------|------|
-| `pitch` | 건반 3D Target Position 계산 | 아래 2.5 변환 규칙 참고 |
+| `pitch` | 건반 3D Target Position 계산 | `target_*_mm`가 이미 산출되어 있으므로 재계산 불필요 |
+| `target_x_mm` / `target_y_mm` / `target_z_mm` | IK End Effector 목표 좌표 | **단위 mm** — UE5(cm)로 넘길 때 ÷10 |
 | `start_ms` | IK 계산 시작 타임라인 트리거 | AnimSequence 키프레임 삽입 기준 |
-| `duration_ms` | 건반 누름 유지 구간 | 해제 시점 = start_ms + duration_ms |
+| `duration_ms` | **소리** 지속 (오디오 동기용) | 페달로 늘어난 값이므로 건반 해제에 쓰지 말 것 |
+| `key_hold_ms` | **건반 누름 유지 구간** | 해제 시점 = start_ms + key_hold_ms |
+| `pedal_down` | 손가락을 떼도 소리가 유지되는 구간 표시 | 오디오·리버브 처리 참고 |
 | `hand` | 왼손/오른손 Skeletal Mesh 선택 | "Left" → `hand_l`, "Right" → `hand_r` |
 | `finger` | IK End Effector 타겟 본 선택 | 아래 2.6 본 이름 매핑 참고 |
 | `key_depth` | Fingertip IK 목표 Z축 오프셋 | 0.0~1.0 → 0~MAX_KEY_TRAVEL cm |
@@ -130,13 +138,19 @@
 
 피아노 건반의 물리적 치수 (기준):
 
-| 항목 | 수치 |
-|------|------|
-| 흰건 너비 | 2.3 cm |
-| 흑건 너비 | 1.3 cm |
-| 흰건 길이 | 15.0 cm |
-| 흑건 길이 | 9.5 cm |
-| 최대 건반 누름 깊이 (MAX_KEY_TRAVEL) | 1.0 cm (**미확정**) |
+> **확정 완료** — 근거: `01_Design/09_Interface_Parameter_Decisions.md`
+> 구현은 `02_Implementation/01_Fingering/v5_polyphonic/piano_keyboard.py` 가 **유일한 산출 경로**이며,
+> 운지법 엔진과 IK 양측이 이 모듈을 공유한다. 수치를 각자 복제하지 말 것.
+
+| 항목 | 확정값 |
+|------|--------|
+| 옥타브 폭 (백건 7개) | 164.0 mm |
+| 백건 폭 | 164.0 / 7 = 23.4286 mm (반올림 금지 — 88키에서 1.5mm 누적 오차) |
+| 흑건 폭 | 13.7 mm |
+| 백건 길이 | 150.0 mm |
+| 흑건 길이 | 95.0 mm |
+| 백건 상면 대비 흑건 상면 높이 | 12.5 mm |
+| 최대 건반 누름 깊이 (MAX_KEY_TRAVEL) | 10.0 mm |
 
 **X축 (좌우) 위치 계산:**
 
@@ -154,18 +168,30 @@ pitch_class = pitch % 12
 전체 흰건 인덱스 (MIDI 21 = A0 기준):
   white_key_index = 흰건 누적 인덱스 (pitch 21~108 범위에서 0~51)
 
-X = white_key_index × 2.3 cm          (흰건)
-X = 인접 두 흰건 X의 평균              (흑건)
+WHITE_KEY_WIDTH = 164.0 / 7           # = 23.4286 mm
+
+X = white_key_index × WHITE_KEY_WIDTH + WHITE_KEY_WIDTH / 2    (백건 중심)
+X = (좌측 인접 백건의 white_key_index + 1) × WHITE_KEY_WIDTH    (흑건 = 두 백건의 경계)
 ```
 
-**Y축 (앞뒤) 위치:**
-- 흰건: Y = 0.0 cm (건반 앞면 기준)
-- 흑건: Y = +3.0 cm (흰건 대비 뒤쪽으로 들어감)
+**Y축 (앞뒤) 위치 — 타건 접점 기준:**
+
+백건 길이 150.0mm, 흑건 길이 95.0mm 이므로 흑건 앞단은 백건 앞단에서 **55.0mm 후방**이다.
+(백건 영역 Y = 0~150, 흑건 영역 Y = 55~150)
+
+- 백건: Y = **30.0 mm** (흑건 앞쪽 노출 구간 0~55mm 의 중앙부)
+- 흑건: Y = **85.0 mm** (흑건 앞단 55.0 + 30.0)
+
+> 기존 명세의 `흑건 Y = +3.0 cm`는 건반 형상과 맞지 않는 근거 불명 값이었으며,
+> 위 값으로 정정되었다 (흑건-백건 Y 차이 = **+55.0 mm**).
 
 **Z축 (누름 깊이):**
 ```
-Z = -(key_depth × MAX_KEY_TRAVEL)   (누를수록 아래)
-  = -(key_depth × 1.0) cm
+Z = (is_black ? 12.5 : 0.0) − key_depth × MAX_KEY_TRAVEL     (mm, 누를수록 아래)
+  = (is_black ? 12.5 : 0.0) − key_depth × 10.0
+
+※ 흑건 상면이 백건보다 12.5mm 높으므로 기준면이 다르다.
+  이 값이 JSON의 target_z_mm 로 이미 산출되어 전달된다.
 ```
 
 ### 2.6 finger → UE5 본(bone) 이름 매핑
@@ -185,14 +211,23 @@ Z = -(key_depth × MAX_KEY_TRAVEL)   (누를수록 아래)
 ```
 t = start_ms:
   · Fingertip이 Target Position에 도달 완료 (건반 눌림 시작)
-  · Z = -(key_depth × MAX_KEY_TRAVEL)
+  · Z = target_z_mm  (= (흑건?12.5:0) − key_depth × MAX_KEY_TRAVEL)
 
-t = start_ms ~ start_ms + duration_ms:
+t = start_ms ~ start_ms + key_hold_ms:
   · 해당 position 유지
 
-t = start_ms + duration_ms:
-  · Fingertip Z → 0 복귀 (건반 해제)
+t = start_ms + key_hold_ms:
+  · Fingertip Z → 건반 상면(백건 0 / 흑건 12.5mm) 복귀 (건반 해제)
   · 복귀 속도: (1.0 - pressure) 에 반비례 (강타일수록 천천히 복귀)
+
+t = start_ms + duration_ms:
+  · 소리 종료. pedal_down=true 인 음표는 손가락이 떨어진 뒤에도
+    이 시점까지 소리가 유지된다 → 오디오 측에서만 처리하며 손 자세와 무관
+
+※ key_hold_ms ≤ duration_ms 가 항상 성립한다.
+  같은 손·같은 손가락이 다음 음표에 다시 필요하면 그 시점에 건반을 떼야 하므로,
+  엔진이 key_hold_ms 를 그에 맞춰 줄여 둔다. 따라서 IK가 key_hold_ms 를 그대로
+  쓰면 '한 손가락이 서로 다른 건반을 동시에 누르는' 자세는 발생하지 않는다.
 ```
 
 ---
@@ -382,10 +417,13 @@ VertexDisplacement {
 
 | # | 항목 | 관련 파트 | 현재 상태 |
 |---|------|----------|----------|
-| 1 | `MAX_KEY_TRAVEL` 수치 (건반 최대 누름 깊이) | A / 01, 02 | 1.0 cm 가정, 미합의 |
-| 2 | pitch → X좌표 변환 기준 원점 위치 | A / 01, 02 | 88키 왼쪽 끝(A0) 기준 가정 |
+| 1 | `MAX_KEY_TRAVEL` 수치 (건반 최대 누름 깊이) | A / 01, 02 | **확정 10.0 mm** (09번 문서) — 팀 확인만 남음 |
+| 2 | pitch → X좌표 변환 기준 원점 위치 | A / 01, 02 | **확정** A0 좌측 모서리 = X 0 (09번 문서) |
+| 2b | 흑건 Y 오프셋 | A / 01, 02 | **정정** +3.0 cm → +55.0 mm (09번 문서) |
+| 2c | 흑건 상면 높이 | A / 01, 02 | **신규 정의** +12.5 mm (09번 문서) |
 | 3 | Vertex Displacement 전달 방식 | B→C / 02, 03 | Buffer vs Texture 미결정 |
 | 4 | Tension Value 매핑 함수 수치 | C / 03 | θ_rest, 매핑 계수 미정의 |
+| 5 | 좌표 단위 경계 | A / 01, 02 | 엔진 출력은 **mm**, UE5는 cm → 변환 책임 주체 확인 필요 |
 
 ---
 

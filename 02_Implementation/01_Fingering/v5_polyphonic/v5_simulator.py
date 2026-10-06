@@ -13,6 +13,14 @@ import numpy as np
 import pygame
 import pygame.midi
 
+# 건반 좌표 공유 모듈 — 흑건/백건 배치의 단일 기준
+# 근거: 01_Design/09_Interface_Parameter_Decisions.md
+try:
+    import piano_keyboard as kb
+except ImportError:  # 다른 작업 디렉터리에서 실행되는 경우 대비
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import piano_keyboard as kb
+
 # 폰트 설정
 if platform.system() == 'Windows': plt.rcParams['font.family'] = 'Malgun Gothic'
 else: plt.rcParams['font.family'] = 'AppleGothic'
@@ -36,22 +44,23 @@ FPS = 30
 
 def load_v5_data():
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    path = os.path.abspath(os.path.join(base_dir, "../results/mario_polyphonic_result.json"))
+    path = os.path.abspath(os.path.join(base_dir, "../results/deb_clai_polyphonic_result.json"))
     if not os.path.exists(path): return None
     with open(path, encoding='utf-8') as f: return json.load(f)
 
 def compute_key_positions():
-    white_x, pos, white_pos = 0, {}, {}
+    """건반 x 좌표(백건 폭 단위)를 공유 모듈의 확정 규격에서 환산.
+
+    [수정 이력] 기존 구현은 흑건을 인접 백건의 '좌측 모서리' 두 개의 중점에 두어
+    흑건 36개 전부가 반 칸(백건 폭 × 0.5)만큼 왼쪽으로 치우쳐 그려졌다.
+    (예: C#4가 C4 건반 중앙에 겹침) 흑건의 올바른 위치는 두 백건의 '경계'이며,
+    piano_keyboard.key_center_x_mm()가 이를 산출한다.
+    """
+    pos = {}
     for p in range(21, 109):
-        if (p % 12) in WHITE_NOTES:
-            white_pos[p] = white_x; pos[p] = ('white', white_x + 0.5); white_x += 1
-    for p in range(21, 109):
-        if (p % 12) in BLACK_NOTES:
-            lw = next((q for q in range(p-1, 20, -1) if (q%12) in WHITE_NOTES), None)
-            rw = next((q for q in range(p+1, 109)    if (q%12) in WHITE_NOTES), None)
-            lx = white_pos.get(lw, 0); rx = white_pos.get(rw, white_x)
-            pos[p] = ('black', (lx + rx) / 2)
-    return pos, white_x
+        kind = 'black' if kb.is_black_key(p) else 'white'
+        pos[p] = (kind, kb.key_center_x_mm(p) / kb.WHITE_KEY_WIDTH_MM)
+    return pos, kb.WHITE_KEY_COUNT
 
 class HandVisualizer:
     def __init__(self, ax, is_right, key_pos):
