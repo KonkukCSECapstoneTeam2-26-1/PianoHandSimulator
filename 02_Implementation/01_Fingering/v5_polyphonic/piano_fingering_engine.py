@@ -61,6 +61,7 @@ class NoteEvent:
         self.key_hold_ms = duration_ms   # 손가락이 실제로 건반을 누르고 있는 시간
         self.pedal_down = False          # 타건 시점에 Sustain 페달(CC64)이 눌려 있었는지
         self.required_hold_ms = duration_ms  # 페달을 고려한 최소 필수 점유 (운지와 무관)
+        self.dropped = False             # 순간 단위 충돌 해소에서 제외된 음표
 
     def to_dict(self):
         # 건반 중심 X / 타건 접점 Y / 누름 깊이 반영 Z (공유 모듈 위임)
@@ -450,7 +451,9 @@ def is_chord_playable(chord, hand_id):
             return True
     return False
 
-def split_wide_chords_between_hands(hand_chords, max_span=17, max_iter=50):
+def split_wide_chords_between_hands(hand_chords, max_span=17, max_iter=50, report=None):
+    """report: dict 를 넘기면 버려진 음표 수/예시를 기록한다."""
+    dropped = []
     changed = True
     iters = 0
     while changed and iters < max_iter:   # 분리↔병합 진동 시 폭주 방지
@@ -498,10 +501,17 @@ def split_wide_chords_between_hands(hand_chords, max_span=17, max_iter=50):
                             and is_chord_playable(combined, other)):
                         for n in move: n.hand = other
                         hand_chords[other].append(move)
-                    # span 초과 시 drop: 물리적으로 연주 불가능한 음표 제거
+                    else:
+                        # 양손 어디에도 넣을 수 없는 음표 — 버린다.
+                        # 편곡 자체가 두 손으로 연주 불가능한 경우에 발생한다.
+                        dropped.extend(move)
 
             hand_chords[h] = sorted(new_chords, key=_chord_time)
 
+    if report is not None:
+        report["dropped"] = len(dropped)
+        report["examples"] = [
+            f"t={n.start_ms:.0f}ms pitch={n.pitch} ({n.role})" for n in dropped[:5]]
     return hand_chords
 
 # --- 2. Polyphonic DP Solver ---
@@ -752,6 +762,99 @@ def solve_fingering_chord_dp(chord_sequence, hand_id):
                 chord_sequence[i][j].finger = finger
         state = dp[i][state][1]
 
+def _instant_violation(held, hand_id):
+    """이 순간의 점유 집합이 물리 제약을 위반하는가 (C1 유일 / C2 범위 / C3 순서)."""
+    items = sorted(((n.pitch, n.finger) for n in held))
+    fingers = [f for _, f in items]
+    if len(set(fingers)) != len(fingers):
+        return True
+    for a in range(len(items)):
+        for b in range(a + 1, len(items)):
+            limit = MAX_SPAN.get(tuple(sorted((items[a][1], items[b][1]))), 12)
+            if items[b][0] - items[a][0] > limit:
+                return True
+    for k in range(len(fingers) - 1):
+        if hand_id == 1 and fingers[k] >= fingers[k + 1]:
+            return True
+        if hand_id == 0 and fingers[k] <= fingers[k + 1]:
+            return True
+    return False
+
+def resolve_instant_conflicts(all_notes):
+    """순간 단위 물리 제약 위반을 해소한다 (설계안 11번 문서 4단계).
+
+    DP(3단계)는 운지 배정만 바꿀 수 있어, 그 순간의 음표 집합 자체가 연주 불가능한
+    경우에는 손을 쓸 수 없다. 실측상 위반의 81.6% 가 그런 경우였다.
+    여기서는 '무엇을 눌러야 하는가' 자체를 조정한다.
+
+    처리 순서 (음악적 손실이 적은 것부터):
+      1) 점유 단축 — 앞서 눌린 음의 건반을 지금 뗀다. 연주자가 실제로 하는 동작이며
+         페달이 눌려 있으면 소리도 유지되므로 손실이 없다.
+      2) 소리 희생을 동반한 단축 — 페달이 없으면 건반을 떼는 순간 소리도 끊긴다.
+         연주 불가 상태를 유지하는 것보다는 낫다고 보고 허용하되 별도로 집계한다.
+      3) drop — 동시에 타건되는 음끼리 충돌해 단축으로 풀 수 없을 때. 성부 중요도가
+         낮은 음(INNER → BASS → MELODY)부터 버리며, 버린 사실을 반드시 보고한다.
+
+    점유 단축은 이후 시점의 점유 집합을 줄이기만 하므로 새로운 위반을 만들지 않는다.
+    따라서 온셋을 시간순으로 한 번만 훑으면 충분하다.
+    """
+    stats = {"released": 0, "released_cutting_sound": 0, "sound_cut_ms": 0.0,
+             "dropped": 0, "unresolved": 0, "drop_examples": []}
+
+    for hand_id in (0, 1):
+        notes = sorted((n for n in all_notes if n.hand == hand_id and n.finger),
+                       key=lambda n: n.start_ms)
+        if not notes:
+            continue
+        for t in sorted({n.start_ms for n in notes}):
+            held = [n for n in notes
+                    if not n.dropped and n.start_ms <= t
+                    and n.start_ms + max(n.key_hold_ms, 1e-9) > t + OCCUPANCY_TOL_MS]
+
+            guard = 0
+            while len(held) >= 2 and _instant_violation(held, hand_id) and guard < 10:
+                guard += 1
+                # 단축으로 풀 수 있으려면 '이미 충분히 눌려 있던' 음이어야 한다.
+                # 타건 후 MIN_STRIKE_HOLD_MS 도 지나지 않은 음을 떼는 것은 물리적으로
+                # 불가능하므로(누르고 떼는 동작 자체에 시간이 든다), 그런 음은
+                # 사실상 동시 타건으로 보고 아래 drop 경로로 보낸다.
+                carried = [n for n in held
+                           if t - n.start_ms >= min(MIN_STRIKE_HOLD_MS, n.duration_ms)]
+
+                if carried:
+                    # 1·2) 지금 타건되는 음들의 음역에서 가장 먼 '유지음'을 뗀다
+                    fresh = [n.pitch for n in held if n not in carried]  # 방금 눌린 음들
+                    center = (sum(fresh) / len(fresh) if fresh
+                              else sum(n.pitch for n in held) / len(held))
+                    victim = max(carried, key=lambda n: (abs(n.pitch - center), n.start_ms))
+                    new_hold = max(0.0, t - victim.start_ms)
+                    if new_hold < victim.required_hold_ms - OCCUPANCY_TOL_MS:
+                        stats["released_cutting_sound"] += 1
+                        stats["sound_cut_ms"] += victim.required_hold_ms - new_hold
+                    victim.key_hold_ms = new_hold
+                    stats["released"] += 1
+                else:
+                    # 3) 전부 동시 타건 → 단축으로 풀 수 없으므로 버린다
+                    priority = {"INNER": 0, "BASS": 1, "MELODY": 2}
+                    center = sum(n.pitch for n in held) / len(held)
+                    victim = min(held, key=lambda n: (priority.get(n.role, 0),
+                                                      -abs(n.pitch - center)))
+                    victim.dropped = True
+                    stats["dropped"] += 1
+                    if len(stats["drop_examples"]) < 5:
+                        stats["drop_examples"].append(
+                            f"{'왼손' if hand_id == 0 else '오른손'} "
+                            f"t={t:.0f}ms pitch={victim.pitch} ({victim.role}) "
+                            f"점유={[n.pitch for n in held]}")
+
+                held = [n for n in held if not n.dropped
+                        and n.start_ms + max(n.key_hold_ms, 1e-9) > t + OCCUPANCY_TOL_MS]
+
+            if len(held) >= 2 and _instant_violation(held, hand_id):
+                stats["unresolved"] += 1
+
+    return stats
+
 # --- 3. Wrist Physics ---
 def calculate_wrist_rotation_rom(chord_group, hand_id):
     if not chord_group: return 0, 0
@@ -772,7 +875,14 @@ def calculate_wrist_rotation_rom(chord_group, hand_id):
 # --- 4. Main Analysis ---
 def analyze_polyphonic(file_path):
     print(f"Analyzing with Polyphonic Voice Leading (V5): {file_path}...")
-    hand_chords = split_wide_chords_between_hands(parse_midi_to_hand_chords(file_path))
+    split_report = {}
+    hand_chords = split_wide_chords_between_hands(
+        parse_midi_to_hand_chords(file_path), report=split_report)
+    if split_report.get("dropped"):
+        print(f"  [경고] 양손 어디에도 배정할 수 없어 제외한 음표 "
+              f"{split_report['dropped']}개 (편곡이 두 손 연주 범위를 넘음)")
+        for ex in split_report["examples"]:
+            print(f"    [제외] {ex}")
     # 5음 초과 화음은 _trim_chord로 줄인 결과를 그대로 보관한다.
     # (기존에는 DP 내부에서만 잘라, 잘려나간 음표가 finger=0 으로 JSON에 새어나갔음)
     # DP 가 점유 제약을 평가하려면 required_hold 가 먼저 있어야 한다 (설계안 3.3절)
@@ -798,9 +908,20 @@ def analyze_polyphonic(file_path):
     clipped = apply_key_hold_and_pedal(all_notes, pedal_spans)
     print(f"  페달 구간 {len(pedal_spans)}개 / 손가락 점유 보정 {clipped}건")
 
+    # 순간 단위 충돌 해소 (4단계)
+    rs = resolve_instant_conflicts(all_notes)
+    print(f"  순간 충돌 해소: 점유 단축 {rs['released']}건"
+          f" (소리 희생 {rs['released_cutting_sound']}건, {rs['sound_cut_ms']/1000:.1f}s)"
+          f" / 음표 제외 {rs['dropped']}개 / 미해결 {rs['unresolved']}시점")
+    for ex in rs["drop_examples"]:
+        print(f"    [제외] {ex}")
+
     final_notes = []
     for h in [0, 1]:
         for group in hand_chords[h]:
+            group = [n for n in group if not n.dropped]   # 4단계에서 제외된 음표
+            if not group:
+                continue
             wrist_pos = round((sum(n.pitch for n in group)/len(group) - 21) / (108 - 21), 3)
             yaw, roll = calculate_wrist_rotation_rom(group, h)
             for n in group:
