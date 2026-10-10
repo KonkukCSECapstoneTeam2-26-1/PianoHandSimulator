@@ -8,10 +8,10 @@ Compression settings matter here:
                                              for a pure tangent-space normal.
   T_PH_Vein_N        TC_VectorDisplacementmap RGBA8 uncompressed. BC5 would throw the alpha away and
                                              the alpha IS the vein mask.
-  T_PH_WrinkleMask   TC_VectorDisplacementmap RGBA8 uncompressed, and NOT tiling (mesh UV space).
-                                             Block compression would smear the direction channels,
-                                             and a wrong direction reads as creases running the
-                                             wrong way across the finger.
+  T_PH_WrinkleMask   TC_HDR                   RGBA16F, from a 16-bit PNG, and NOT tiling (mesh UV
+                                             space). The G channel is a coordinate the shader turns
+                                             into furrows under 0.1cm wide; at 8 bits those come out
+                                             visibly stepped, and block compression would smear them.
 All three are linear - none of them is colour.
 """
 import unreal, os
@@ -24,7 +24,8 @@ SETTINGS = {
                               srgb=False, tiling=unreal.TextureAddress.TA_WRAP, flip_green=False),
     'T_PH_Vein_N':       dict(comp=unreal.TextureCompressionSettings.TC_VECTOR_DISPLACEMENTMAP,
                               srgb=False, tiling=unreal.TextureAddress.TA_WRAP, flip_green=False),
-    'T_PH_WrinkleMask':  dict(comp=unreal.TextureCompressionSettings.TC_VECTOR_DISPLACEMENTMAP,
+    # 16-bit source: HDR keeps it as RGBA16F, which is what the fine furrows need (RGBA8 steps)
+    'T_PH_WrinkleMask':  dict(comp=unreal.TextureCompressionSettings.TC_HDR,
                               srgb=False, tiling=unreal.TextureAddress.TA_CLAMP, flip_green=False),
 }
 

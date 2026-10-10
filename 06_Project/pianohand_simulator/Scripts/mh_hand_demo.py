@@ -43,8 +43,10 @@ START_MAT = 'skin'
 # vertex count (77k vs 92k) and the same physical size, so these carry over; the one thing that
 # does change is the material's DetailTiling, because the UVs were repacked.
 DETAIL = dict(
-    crease_depth            = 0.055,
-    crease_sharpness        = 3.0,
+    # the geometric groove is kept shallow and tight: a 0.5mm trench the width of the whole joint
+    # band read as a cuff; the crease LOOK comes from the material's furrows
+    crease_depth            = 0.025,
+    crease_sharpness        = 4.5,
     crease_compression_gain = 0.9,
     crease_stretch_relief   = 2.2,
     wrinkle_amplitude       = 0.035,

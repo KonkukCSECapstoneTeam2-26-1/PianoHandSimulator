@@ -287,9 +287,9 @@ namespace PianoHandSkinDeformer
 		}
 
 		// -------------------------------------------------------------------
-		// Phase 2: per-vertex tension (edge strain vs rest pose) -> vertex colour
+		// Phase 2: per-vertex strain tensor (stretch tensor vs rest pose) -> vertex colour
 		// -------------------------------------------------------------------
-		FRDGBufferRef VertexStrainBuffer = nullptr;
+		FRDGBufferRef VertexTensorBuffer = nullptr;
 		FRDGBufferRef RelaxStateBuffer = nullptr;
 		FRDGBufferSRVRef SkinnedPositionSRV = nullptr;
 		const uint32 NumLodVertices = Lod.GetNumVertices();
@@ -298,12 +298,14 @@ namespace PianoHandSkinDeformer
 		{
 			check(NumLodVertices > 0);
 
-			FRDGBufferRef StrainAccum = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateStructuredDesc(sizeof(int32), FMath::Max(NumLodVertices, 1u)), TEXT("PianoHandTensionStrainAccum"));
-			FRDGBufferRef StrainCount = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), FMath::Max(NumLodVertices, 1u)), TEXT("PianoHandTensionStrainCount"));
-			FRDGBufferUAVRef StrainAccumUAV = GraphBuilder.CreateUAV(StrainAccum);
-			FRDGBufferUAVRef StrainCountUAV = GraphBuilder.CreateUAV(StrainCount);
-			AddClearUAVPass(GraphBuilder, StrainAccumUAV, 0u);
-			AddClearUAVPass(GraphBuilder, StrainCountUAV, 0u);
+			// 6 unique components of the symmetric 3x3 tensor per vertex, fixed point.
+			constexpr uint32 TensorStride = 6u;
+			FRDGBufferRef TensorAccum = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateStructuredDesc(sizeof(int32), FMath::Max(NumLodVertices * TensorStride, 1u)), TEXT("PianoHandTensionTensorAccum"));
+			FRDGBufferRef TensorCount = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), FMath::Max(NumLodVertices, 1u)), TEXT("PianoHandTensionTensorCount"));
+			FRDGBufferUAVRef TensorAccumUAV = GraphBuilder.CreateUAV(TensorAccum);
+			FRDGBufferUAVRef TensorCountUAV = GraphBuilder.CreateUAV(TensorCount);
+			AddClearUAVPass(GraphBuilder, TensorAccumUAV, 0u);
+			AddClearUAVPass(GraphBuilder, TensorCountUAV, 0u);
 
 			SkinnedPositionSRV = GraphBuilder.CreateSRV(PositionBuffer, PF_R32_FLOAT);
 			TShaderMapRef<FPianoHandTensionAccumulateCS> AccumulateShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
@@ -322,8 +324,8 @@ namespace PianoHandSkinDeformer
 				AccParams->IndexBuffer = IndexSRV;
 				AccParams->RestPositionBuffer = PositionSRV;
 				AccParams->SkinnedPositionBuffer = SkinnedPositionSRV;
-				AccParams->StrainAccum = StrainAccumUAV;
-				AccParams->StrainCount = StrainCountUAV;
+				AccParams->TensorAccum = TensorAccumUAV;
+				AccParams->TensorCount = TensorCountUAV;
 
 				FComputeShaderUtils::AddPass(
 					GraphBuilder,
@@ -333,8 +335,8 @@ namespace PianoHandSkinDeformer
 					FComputeShaderUtils::GetGroupCount(Section.NumTriangles, FPianoHandTensionAccumulateCS::ThreadGroupSize));
 			}
 
-			// Raw averaged strain, kept for the Phase 3 detail pass.
-			VertexStrainBuffer = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateStructuredDesc(sizeof(float), FMath::Max(NumLodVertices, 1u)), TEXT("PianoHandVertexStrain"));
+			// Averaged tensor, kept for the Phase 3 detail pass.
+			VertexTensorBuffer = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateStructuredDesc(sizeof(float), FMath::Max(NumLodVertices * TensorStride, 1u)), TEXT("PianoHandVertexTensor"));
 
 			// ---- relax state: the one thing here that has to survive the frame -------------
 			// Skin that has been pulled taut does not come back flat. Detecting that needs last
@@ -372,10 +374,11 @@ namespace PianoHandSkinDeformer
 			FPianoHandTensionResolveCS::FParameters* ResParams = GraphBuilder.AllocParameters<FPianoHandTensionResolveCS::FParameters>();
 			ResParams->NumVertices = NumLodVertices;
 			ResParams->TensionScale = Params.TensionScale;
-			ResParams->StrainAccumIn = GraphBuilder.CreateSRV(StrainAccum);
-			ResParams->StrainCountIn = GraphBuilder.CreateSRV(StrainCount);
+			ResParams->RestTangentBuffer = TangentSRV;
+			ResParams->TensorAccumIn = GraphBuilder.CreateSRV(TensorAccum);
+			ResParams->TensorCountIn = GraphBuilder.CreateSRV(TensorCount);
 			ResParams->ColorBufferUAV = ColorUAV;
-			ResParams->VertexStrainOut = GraphBuilder.CreateUAV(VertexStrainBuffer);
+			ResParams->VertexTensorOut = GraphBuilder.CreateUAV(VertexTensorBuffer);
 			ResParams->DeltaTime = RelaxDeltaTime;
 			ResParams->RelaxGain = Params.RelaxGain;
 			ResParams->RelaxTau = Params.RelaxTau;
@@ -395,9 +398,10 @@ namespace PianoHandSkinDeformer
 		// -------------------------------------------------------------------
 		// Phase 3: detail displacement (volume preservation + joint creases)
 		// -------------------------------------------------------------------
-		if (Params.bDetailDisplacement && VertexStrainBuffer != nullptr && SkinnedPositionSRV != nullptr)
+		if (Params.bDetailDisplacement && VertexTensorBuffer != nullptr && SkinnedPositionSRV != nullptr && ColorBuffer != nullptr)
 		{
-			FRDGBufferSRVRef VertexStrainSRV = GraphBuilder.CreateSRV(VertexStrainBuffer);
+			FRDGBufferSRVRef VertexTensorSRV = GraphBuilder.CreateSRV(VertexTensorBuffer);
+			FRDGBufferUAVRef DetailColorUAV = GraphBuilder.CreateUAV(ColorBuffer, PF_R8G8B8A8);
 			FRDGBufferSRVRef RelaxStateSRV = GraphBuilder.CreateSRV(RelaxStateBuffer);
 
 			FPianoHandDetailDisplaceCS::FPermutationDomain DisplacePermutation;
@@ -443,13 +447,16 @@ namespace PianoHandSkinDeformer
 				DispParams->WrinkleFrequency = Params.WrinkleFrequency;
 				DispParams->CreaseStretchRelief = Params.CreaseStretchRelief;
 				DispParams->RelaxCreaseGain = Params.RelaxCreaseGain;
+				DispParams->TensionScale = Params.TensionScale;
 				DispParams->RestPositionBuffer = PositionSRV;
+				DispParams->RestTangentBuffer = TangentSRV;
 				DispParams->InputWeightStream = WeightSRV;
 				DispParams->RefPoseInverses = GraphBuilder.CreateSRV(RefInvBuffer);
-				DispParams->VertexStrain = VertexStrainSRV;
+				DispParams->VertexTensor = VertexTensorSRV;
 				DispParams->RelaxStateIn = RelaxStateSRV;
 				DispParams->PositionBufferUAV = PositionUAV;
 				DispParams->TangentBufferUAV = TangentUAV;
+				DispParams->ColorBufferUAV = DetailColorUAV;
 
 				FComputeShaderUtils::AddPass(
 					GraphBuilder,

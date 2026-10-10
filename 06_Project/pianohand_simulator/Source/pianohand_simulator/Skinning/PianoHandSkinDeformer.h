@@ -5,7 +5,8 @@
 //                                   bone transforms and dispatches the CustomSkinningDeformer.usf kernel that
 //                                   writes directly into the engine passthrough vertex factory buffers.
 //                                   When tension output is enabled it then runs CustomSkinningTension.usf
-//                                   (edge strain vs rest pose) and writes the result to the vertex colour buffer.
+//                                   (per-triangle stretch tensor vs rest pose, Rohmer et al. 2010) and writes
+//                                   the principal / bone-relative strain to the vertex colour buffer.
 // UPianoHandSkinningLibrary   : Blueprint / Python helpers to attach and detach the deformer.
 
 #pragma once
@@ -62,7 +63,7 @@ public:
 	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment);
 };
 
-/** Phase 2 - per-triangle edge strain accumulation (atomic, fixed point). */
+/** Phase 2 - per-triangle stretch tensor (right Cauchy-Green, rest component space) accumulation (atomic, fixed point). */
 class FPianoHandTensionAccumulateCS : public FGlobalShader
 {
 public:
@@ -77,15 +78,16 @@ public:
 		SHADER_PARAMETER_SRV(Buffer<uint>, IndexBuffer)
 		SHADER_PARAMETER_SRV(Buffer<float>, RestPositionBuffer)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<float>, SkinnedPositionBuffer)
-		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<int>, StrainAccum)
-		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, StrainCount)
+		/** 6 ints per LOD vertex: xx yy zz xy xz yz of the summed tensor. */
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<int>, TensorAccum)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, TensorCount)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
 	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment);
 };
 
-/** Phase 2 - per-vertex strain average -> vertex colour. */
+/** Phase 2 - per-vertex tensor average, eigen-decomposition in the tangent plane -> vertex colour. */
 class FPianoHandTensionResolveCS : public FGlobalShader
 {
 public:
@@ -101,10 +103,12 @@ public:
 		SHADER_PARAMETER(float, RelaxGain)
 		SHADER_PARAMETER(float, RelaxTau)
 		SHADER_PARAMETER(uint32, bResetRelax)
-		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<int>, StrainAccumIn)
-		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, StrainCountIn)
+		SHADER_PARAMETER_SRV(Buffer<SNORM float4>, RestTangentBuffer)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<int>, TensorAccumIn)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, TensorCountIn)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<UNORM float4>, ColorBufferUAV)
-		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<float>, VertexStrainOut)
+		/** Averaged tensor, 6 floats per LOD vertex, for the detail pass. */
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<float>, VertexTensorOut)
 		/** Persistent across frames: .x = last frame's strain, .y = accumulated slack. */
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<float2>, RelaxState)
 	END_SHADER_PARAMETER_STRUCT()
@@ -140,13 +144,17 @@ public:
 		SHADER_PARAMETER(float, WrinkleFrequency)
 		SHADER_PARAMETER(float, CreaseStretchRelief)
 		SHADER_PARAMETER(float, RelaxCreaseGain)
+		SHADER_PARAMETER(float, TensionScale)
 		SHADER_PARAMETER_SRV(Buffer<float>, RestPositionBuffer)
+		SHADER_PARAMETER_SRV(Buffer<SNORM float4>, RestTangentBuffer)
 		SHADER_PARAMETER_SRV(Buffer<uint>, InputWeightStream)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FBoneTransform>, RefPoseInverses)
-		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float>, VertexStrain)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float>, VertexTensor)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float2>, RelaxStateIn)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<float>, PositionBufferUAV)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<SNORM float4>, TangentBufferUAV)
+		/** Rewritten with the bone-relative strain (R stretch, G along-bone compression, B across, A slack). */
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<UNORM float4>, ColorBufferUAV)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
@@ -203,11 +211,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand")
 	EPianoHandSkinMode SkinMode = EPianoHandSkinMode::LinearBlend;
 
-	/** Compute per-vertex edge strain after skinning and write it to the vertex colour stream (R stretch, G compression, B signed). */
+	/**
+	 * Compute the per-vertex strain tensor after skinning and write it to the vertex colour stream:
+	 * R = stretch (lambda_max - 1), G = compression along the bone, B = compression across it, A = relax slack.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Tension")
 	bool bComputeTension = true;
 
-	/** Multiplier from raw strain (|edge|/|rest edge| - 1) to the 0..1 colour range. 4 => 25% stretch saturates R. */
+	/** Multiplier from raw strain (principal stretch - 1) to the 0..1 colour range. 4 => 25% stretch saturates R. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Tension", meta = (ClampMin = "0.01", UIMin = "0.5", UIMax = "20"))
 	float TensionScale = 4.0f;
 
@@ -219,7 +230,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Detail")
 	bool bRecomputeNormals = true;
 
-	/** cm of outward motion where the surface is compressed ~20%. This is the volume-preservation bulge. */
+	/** cm of outward motion where the surface AREA is compressed ~20% (thickness factor 1/J). This is the volume-preservation bulge. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Detail", meta = (UIMin = "0", UIMax = "1"))
 	float VolumeBulge = 0.15f;
 
@@ -231,11 +242,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Detail", meta = (ClampMin = "1", UIMin = "1", UIMax = "8"))
 	float CreaseSharpness = 3.0f;
 
-	/** How much compression deepens the resting crease. */
+	/** How much compression ALONG the bone deepens the resting crease. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Detail", meta = (UIMin = "0", UIMax = "5"))
 	float CreaseCompressionGain = 2.0f;
 
-	/** cm, bending-only ripples inside the joint band (needs vertex density / tessellation to read). */
+	/** cm, bending-only ripples inside the joint band, perpendicular to the bone (needs vertex density / tessellation to read). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Detail", meta = (UIMin = "0", UIMax = "0.3"))
 	float WrinkleAmplitude = 0.05f;
 
@@ -284,7 +295,7 @@ struct FPianoHandDeformerRenderState
 
 	/**
 	 * Survives between frames, which nothing else in this deformer does: two floats per LOD vertex,
-	 * .x = the strain seen last frame and .y = the slack accumulated since. Extracted out of the RDG
+	 * .x = the stretch (lambda_max - 1) seen last frame and .y = the slack accumulated since. Extracted out of the RDG
 	 * graph at the end of each frame and registered back in at the start of the next.
 	 */
 	TRefCountPtr<FRDGPooledBuffer> RelaxStateBuffer;

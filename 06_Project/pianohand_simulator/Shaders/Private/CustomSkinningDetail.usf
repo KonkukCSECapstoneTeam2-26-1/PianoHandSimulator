@@ -1,36 +1,49 @@
-// PianoHand detail displacement - volume preservation + joint creases (Phase 3)
+// PianoHand detail displacement - volume preservation + joint creases (Phase 3, tensor revision)
 //
-// Runs after CustomSkinningDeformer.usf (skinning) and CustomSkinningTension.usf (per-vertex strain),
-// inside the same RDG graph. Everything here is derived from data the GPU already has - the skin
-// weight stream, the rest pose and the per-vertex strain - so no painted tension / wrinkle / vein
-// maps are needed and the effect works on any skeletal mesh.
+// Runs after CustomSkinningDeformer.usf (skinning) and CustomSkinningTension.usf (per-vertex strain
+// tensor), inside the same RDG graph. Everything here is derived from data the GPU already has - the
+// skin weight stream, the rest pose and the per-vertex strain tensor - so no painted tension /
+// wrinkle / vein maps are needed and the effect works on any skeletal mesh.
 //
 //  DisplaceCS         : one thread per section vertex. Moves the skinned position along its normal by
 //                         d = d_volume + d_crease + d_wrinkle
-//                       and writes it back into the passthrough vertex factory position buffer.
+//                       and writes it back into the passthrough vertex factory position buffer. It
+//                       also rewrites the vertex colour with the BONE-RELATIVE strain, because it is
+//                       the one pass that knows which way the bone runs.
 //  NormalAccumulateCS : one thread per triangle. Atomically accumulates face normals of the *displaced*
 //                       surface onto its 3 vertices (fixed point), so the new folds actually shade.
 //  NormalResolveCS    : one thread per LOD vertex. Normalises that sum, re-orthogonalises the stored
 //                       tangent against it, and writes both back to the tangent buffer.
 //
 // ---------------------------------------------------------------------------------------------
+// The strain tensor (CustomSkinningTension.usf) gives, per vertex, the averaged right Cauchy-Green
+// tensor C3 in rest component space. Projected onto the rest tangent plane it is a 2x2 whose
+// eigenvalues are the squared principal stretches and whose determinant is the squared AREA ratio J.
+// Projected onto the bone axis it gives the stretch ALONG the finger - which is what a bending joint
+// changes - and onto the perpendicular the stretch ACROSS it.
+//
 // d_volume  - volume preservation
-//     lambda = 1 + strain is the local in-plane stretch factor. An incompressible solid that is
-//     squashed in plane has to grow along its normal; for an isotropic in-plane factor lambda the
-//     thickness factor is 1/lambda^2. So compression (lambda < 1) pushes the surface out and stretch
-//     pulls it in. This is what makes a bent knuckle bulge instead of collapsing the way raw LBS does.
+//     An incompressible solid whose surface area is scaled by J has to change thickness by 1/J, so
+//     compression (J < 1) pushes the surface out and stretch pulls it in. This is what makes a bent
+//     knuckle bulge instead of collapsing the way raw LBS does. (Before the tensor this used the
+//     isotropic guess 1/lambda^2 from a scalar edge strain.)
 //
 // d_crease  - the permanent joint creases
 //     A vertex sitting on a joint is, by construction, a vertex the skinning blends between two bones.
 //     Taking the two largest influence weights w0 >= w1, the quantity 4*w0*w1 is 0 on rigid parts and
 //     exactly 1 on the 50/50 blend line that runs along the joint - a joint band that costs nothing to
 //     compute and needs no authored mask. Grooving along that band gives the creases that are visible
-//     on every knuckle even with the finger held straight, and the groove deepens under compression.
+//     on every knuckle even with the finger held straight; the groove deepens with compression ALONG
+//     the bone and is ironed flat by stretch.
 //
 // d_wrinkle - the extra folds that appear when bending, and again on the way back
-//     Ripples along the bone's own axis inside the joint band, scaled by compression only, so they
-//     vanish on a straight finger. Their density is limited by vertex density - for fine skin folds
-//     on a low-poly mesh this term wants Nanite tessellation underneath it.
+//     Ripples along the bone's own axis inside the joint band. Folds form perpendicular to the
+//     compression axis (Rohmer et al. 2010), and on a finger that axis is the bone, so the ripples
+//     are driven by the along-bone compression only - sideways squash does not make knuckle folds.
+//
+// Vertex colour written here (overrides the principal-strain colour from ResolveCS):
+//     R = stretch (lambda_max - 1)          G = compression ALONG the bone (1 - lambda_bone)
+//     B = compression ACROSS the bone        A = relax slack (from ResolveCS, passed through)
 // ---------------------------------------------------------------------------------------------
 
 #include "/Engine/Private/Common.ush"
@@ -63,15 +76,29 @@ float WrinkleAmplitude;      // cm, bending-only ripples inside the joint band
 float WrinkleFrequency;      // radians per cm along the bone axis
 float CreaseStretchRelief;   // how strongly stretch irons the resting groove flat
 float RelaxCreaseGain;       // cm of extra groove at full relax slack
+float TensionScale;          // strain -> 0..1 colour mapping, same value ResolveCS uses
 
 Buffer<float>                    RestPositionBuffer;   // 3 floats per vertex, rest pose
+Buffer<SNORM float4>             RestTangentBuffer;    // 2 per vertex: TangentX, TangentZ (w = sign), rest pose
 Buffer<uint>                     InputWeightStream;    // FSkinWeightVertexBuffer data
 StructuredBuffer<FBoneTransform> RefPoseInverses;      // RefBasesInvMatrix in section BoneMap order
-StructuredBuffer<float>          VertexStrain;         // per LOD vertex, from CustomSkinningTension.usf
+StructuredBuffer<float>          VertexTensor;         // averaged C3, 6 floats per LOD vertex (xx yy zz xy xz yz)
 StructuredBuffer<float2>         RelaxStateIn;         // .y = relax slack, from CustomSkinningTension.usf
 
 RWBuffer<float>                   PositionBufferUAV;   // read + write (displaced in place)
 RWBuffer<TANGENT_RWBUFFER_FORMAT> TangentBufferUAV;    // read only in this pass
+RWBuffer<UNORM float4>            ColorBufferUAV;      // vertex colour, rewritten with bone-relative strain
+
+#define TENSOR_STRIDE 6u
+
+// v^T C3 w for a symmetric 3x3 stored as (xx, yy, zz, xy, xz, yz)
+float TensorForm(float C[6], float3 V, float3 W)
+{
+	return C[0] * V.x * W.x + C[1] * V.y * W.y + C[2] * V.z * W.z
+	     + C[3] * (V.x * W.y + V.y * W.x)
+	     + C[4] * (V.x * W.z + V.z * W.x)
+	     + C[5] * (V.y * W.z + V.z * W.y);
+}
 
 float3 LoadPosition(Buffer<float> Buf, uint VertexIndex)
 {
@@ -96,10 +123,31 @@ void DisplaceCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	const float4 PackedTZ = TangentBias_SkinCache(TangentBufferUAV[VertexIndex * 2 + GPUSKIN_RWBUFFER_OFFSET_TANGENT_Z]);
 	const float3 Normal = normalize(PackedTZ.xyz + float3(0.0f, 0.0f, 1e-6f));
 
-	// ---- volume preservation -------------------------------------------------
-	const float Strain = VertexStrain[VertexIndex];
-	const float Lambda = max(1.0f + Strain, 0.2f);
-	const float VolumeTerm = VolumeBulge * clamp(1.0f / (Lambda * Lambda) - 1.0f, -2.0f, 2.0f);
+	// ---- strain tensor in the rest tangent plane ------------------------------
+	float C[6];
+	UNROLL
+	for (uint c = 0; c < TENSOR_STRIDE; ++c)
+	{
+		C[c] = VertexTensor[VertexIndex * TENSOR_STRIDE + c];
+	}
+	const float4 RestTX = RestTangentBuffer[VertexIndex * 2 + GPUSKIN_VB_OFFSET_TANGENT_X];
+	const float4 RestTZ = RestTangentBuffer[VertexIndex * 2 + GPUSKIN_VB_OFFSET_TANGENT_Z];
+	const float3 RestN = normalize(RestTZ.xyz + float3(0, 0, 1e-6f));
+	float3 RestT = RestTX.xyz - RestN * dot(RestN, RestTX.xyz);
+	RestT = (dot(RestT, RestT) > 1e-8f) ? normalize(RestT) : float3(1, 0, 0);
+	const float3 RestB = cross(RestN, RestT) * (RestTZ.w < 0.0f ? -1.0f : 1.0f);
+
+	const float a = TensorForm(C, RestT, RestT);
+	const float b = TensorForm(C, RestT, RestB);
+	const float d = TensorForm(C, RestB, RestB);
+	const float Half = 0.5f * (a + d);
+	const float Disc = sqrt(max(0.25f * (a - d) * (a - d) + b * b, 0.0f));
+	const float LambdaMax = sqrt(max(Half + Disc, 0.0f));
+	const float AreaRatio = sqrt(max(a * d - b * b, 1e-4f));       // J = lambda_1 * lambda_2
+
+	// ---- volume preservation ------------------------------------------------
+	// thickness factor of an incompressible slab whose area scaled by J is 1/J
+	const float VolumeTerm = VolumeBulge * clamp(1.0f / AreaRatio - 1.0f, -2.0f, 2.0f);
 
 	// ---- joint band from the skin weights -----------------------------------
 	const uint StreamOffset = VertexIndex * (InputWeightStride / 4);
@@ -134,10 +182,23 @@ void DisplaceCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	const float JointBlend = saturate(4.0f * LargestWeight * SecondWeight);
 	const float JointBand = pow(max(JointBlend, 0.0f), max(CreaseSharpness, 1.0f));
 
+	// ---- bone axis, and the stretch along / across it ------------------------
+	// RefInv maps rest component space into the bone's local frame (p' = M p), so the bone's local
+	// +X expressed in component space is the first COLUMN of its rotation. MetaHuman / UE bones run
+	// down local -X, but for a stretch along an axis the sign does not matter.
+	const FBoneTransform RefInv = RefPoseInverses[min(DominantBone, NumSectionBones - 1)];
+	const float3 BoneAxis3 = float3(RefInv.Row0.x, RefInv.Row1.x, RefInv.Row2.x);
+	float2 Ax = float2(dot(BoneAxis3, RestT), dot(BoneAxis3, RestB));
+	Ax = (dot(Ax, Ax) > 1e-4f) ? normalize(Ax) : float2(1.0f, 0.0f);
+	const float2 Px = float2(-Ax.y, Ax.x);
+	const float LambdaBone = sqrt(max(a * Ax.x * Ax.x + 2.0f * b * Ax.x * Ax.y + d * Ax.y * Ax.y, 0.0f));
+	const float LambdaPerp = sqrt(max(a * Px.x * Px.x + 2.0f * b * Px.x * Px.y + d * Px.y * Px.y, 0.0f));
+
 	// Compression and stretch are handled separately on purpose. Skin is not symmetric about rest:
 	// the inside of a bend folds hard, while the outside only smooths - one signed term cannot do both.
-	const float Compression = max(-Strain, 0.0f);
-	const float Stretch = max(Strain, 0.0f);
+	const float Stretch = max(LambdaMax - 1.0f, 0.0f);
+	const float Compression = max(1.0f - LambdaBone, 0.0f);     // along the bone: what a bend does
+	const float CompressAcross = max(1.0f - LambdaPerp, 0.0f);  // across it: sideways squash
 	const float Slack = RelaxStateIn[VertexIndex].y;
 
 	// ---- resting crease: deepened by compression, ironed flat by stretch -----
@@ -149,13 +210,17 @@ void DisplaceCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	                       - RelaxCreaseGain * JointBand * Slack;
 
 	// ---- ripples along the bone axis ----------------------------------------
-	// Driven by compression while bending, and by the released slack on the way back out - that
-	// second term is what puts folds on the back of a knuckle just after the finger straightens.
+	// Driven by along-bone compression while bending, and by the released slack on the way back out -
+	// that second term is what puts folds on the back of a knuckle just after the finger straightens.
 	const float3 RestP = LoadPosition(RestPositionBuffer, VertexIndex);
-	const FBoneTransform RefInv = RefPoseInverses[min(DominantBone, NumSectionBones - 1)];
 	const float3 BoneLocal = TransformPosition(RefInv, RestP);
 	const float RippleDrive = Compression + Slack;
 	const float WrinkleTerm = WrinkleAmplitude * JointBand * RippleDrive * sin(WrinkleFrequency * BoneLocal.x);
+
+	// ---- bone-relative strain to the material -------------------------------
+	const float4 Color = float4(saturate(Stretch * TensionScale), saturate(Compression * TensionScale),
+	                            saturate(CompressAcross * TensionScale), Slack);
+	ColorBufferUAV[VertexIndex] = Color FMANUALFETCH_COLOR_COMPONENT_SWIZZLE;
 
 	const float Displacement = VolumeTerm + CreaseTerm + WrinkleTerm;
 	const float3 OutP = SkinnedP + Normal * Displacement;

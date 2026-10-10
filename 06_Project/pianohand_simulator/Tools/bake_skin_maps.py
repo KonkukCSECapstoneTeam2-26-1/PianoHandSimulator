@@ -2,13 +2,19 @@
 
     python bake_skin_maps.py <skin_bake_data.json> <out_dir>
 
-Produces three PNGs that Scripts/import_skin_textures.py then imports as UE textures:
+Needs numpy, Pillow and opencv-python (the 16-bit RGBA writer). Produces three PNGs that Scripts/import_skin_textures.py then imports as UE textures:
 
-  T_PH_WrinkleMask.png   RGBA, mesh UV space, NOT tiling
+  T_PH_WrinkleMask.png   RGBA 16-bit, mesh UV space, NOT tiling (import as TC_HDR to keep the bits)
      R = weighted joint band  - where creases concentrate, per-finger weights applied
      G = 0.5 + 0.5 * clamp(s / S_RANGE, -1, 1), where s is the signed distance ALONG the joint's
          bone axis, measured from the joint pivot (cm)
-     B = raw joint band (4*w0*w1), unweighted
+     B = joint TYPE code: 0 none, 0.2 MCP, 0.4 PIP, 0.6 DIP, 0.8 thumb MP, 1.0 other (CMC,
+         metacarpal, palm, wrist). The three finger joints wrinkle differently - the back of the
+         PIP carries several irregular folds, the DIP one or two, the MCP only faint ones, and on
+         the palm the PIP crease is double - so the shader needs to know which joint it is on.
+         Rasterised NEAREST-vertex (not interpolated) and re-quantised after dilation, so a texel
+         never lands between two codes. (This channel used to hold the unweighted raw band, which
+         the shader never read.)
      A = 0.5 + 0.5 * dorsality - which SIDE of the joint a texel is on. +1 is the side that
          STRETCHES when the joint flexes (the back of the hand), -1 the side that COMPRESSES
          (the palm). Without this the shader has one crease gate for a band that wraps all the
@@ -52,9 +58,11 @@ from PIL import Image
 
 MASK_SIZE = 2048
 
-# Half-range, in cm, of the signed along-bone coordinate stored in G. Finger segments are 2-4cm,
-# so +-3cm covers a whole segment either side of a knuckle. The shader multiplies back by this.
-S_RANGE = 3.0
+# Half-range, in cm, of the signed along-bone coordinate stored in G. The shader multiplies back by
+# this. G is 8 bits, so the range sets the resolution: +-2cm gives 0.016cm steps, which is what the
+# fine PIP furrows (about 0.08cm wide) need; +-3cm was visibly stepped. The creases live within
+# +-1cm of a joint anyway.
+S_RANGE = 2.0
 TILE_SIZE = 1024
 
 # Per-joint crease weighting. The key matches the CHILD bone of the joint (the deeper one).
@@ -70,6 +78,26 @@ FINGER_WEIGHTS = [
     ('hand_',       0.35),
 ]
 DEFAULT_WEIGHT = 0.6
+
+# Joint type code stored in mask B, keyed by the CHILD bone of the joint. Order matters: the thumb
+# bones are also called *_01_/_02_/_03_ and get their own codes.
+JOINT_TYPES = [
+    ('thumb_01', 1.0),   # CMC, buried in the palm: treat as 'other'
+    ('thumb_02', 0.8),   # thumb MP: prominent transverse folds, like a PIP
+    ('thumb_03', 0.6),   # thumb IP: one clean line, like a DIP
+    ('_01_',     0.2),   # MCP
+    ('_02_',     0.4),   # PIP
+    ('_03_',     0.6),   # DIP
+]
+DEFAULT_TYPE = 1.0       # metacarpal / palm / wrist
+
+
+def joint_type(name):
+    low = name.lower()
+    for key, code in JOINT_TYPES:
+        if key in low:
+            return code
+    return DEFAULT_TYPE
 
 
 def joint_weight(name):
@@ -150,6 +178,8 @@ def bake_wrinkle_mask(data, size):
     band_w = np.zeros(n_vtx)
     along = np.zeros(n_vtx)
     dorsal = np.zeros(n_vtx)
+    jtype = np.zeros(n_vtx)
+    joint_of = np.full(n_vtx, -1, dtype=np.int64)   # child bone naming the joint, for the recentre
 
     for v, w in enumerate(weights):
         w = [e for e in w if e[1] > 0.0]
@@ -168,6 +198,9 @@ def bake_wrinkle_mask(data, size):
                 tot += bw
         dorsal[v] = acc / tot if tot > 1e-9 else 0.0
         if len(w) < 2:
+            # rigidly bound: typed by the joint at the proximal end of its own bone, so the
+            # code stays continuous up to the band of the next joint
+            jtype[v] = joint_type(bone_name[w[0][0]])
             continue
         (b0, w0), (b1, w1) = w[0], w[1]
         raw = min(1.0, 4.0 * w0 * w1)
@@ -176,6 +209,8 @@ def bake_wrinkle_mask(data, size):
         child = b1 if bone_parent[b1] == b0 else (b0 if bone_parent[b0] == b1 else
                                                  (b0 if _depth(bone_parent, b0) > _depth(bone_parent, b1) else b1))
         band_w[v] = raw * joint_weight(bone_name[child])
+        jtype[v] = joint_type(bone_name[child])
+        joint_of[v] = child
         par = bone_parent[child]
         if par >= 0:
             axis = bone_pos[child] - bone_pos[par]
@@ -185,6 +220,16 @@ def bake_wrinkle_mask(data, size):
                 # crease pattern is continuous across it instead of restarting per segment
                 along[v] = float((pos[v] - bone_pos[child]) @ (axis / n))
 
+    # Recentre s on the BAND, not on the bone pivot. The 50/50 skin-weight line of a MetaHuman
+    # finger joint sits ~0.5cm proximal of the pivot, and the shader puts its main palm crease and
+    # mirrors its knuckle folds about s = 0 - so without this the deepest crease lands at the edge
+    # of the band where it is barely visible. Per joint, the band-weighted mean of s is subtracted.
+    for child in np.unique(joint_of[joint_of >= 0]):
+        sel = joint_of == child
+        w = band[sel] ** 4
+        if w.sum() > 1e-9:
+            along[sel] -= float((along[sel] * w).sum() / w.sum())
+
     acc = np.zeros((size, size, 4), dtype=np.float32)
     cov = np.zeros((size, size), dtype=np.float32)
 
@@ -193,19 +238,23 @@ def bake_wrinkle_mask(data, size):
         if uv is None:
             continue
         pts = [np.array(x, dtype=np.float64) for x in uv]
-        vals = [(band_w[vi], along[vi], band[vi], dorsal[vi]) for vi in (i0, i1, i2)]
-        _raster(acc, cov, size, pts, vals)
+        vals = [(band_w[vi], along[vi], jtype[vi], dorsal[vi]) for vi in (i0, i1, i2)]
+        _raster(acc, cov, size, pts, vals, nearest=(2,))
 
     mask = np.zeros((size, size, 4), dtype=np.float32)
     hit = cov > 0
     mask[hit] = acc[hit] / cov[hit][:, None]
     mask = _dilate(mask, hit, 6)
+    # the type code must never sit between two codes: re-quantise after the dilation blur
+    mask[..., 2] = np.round(mask[..., 2] * 5.0) / 5.0
 
-    out = np.zeros((size, size, 4), dtype=np.uint8)
-    out[..., 0] = np.clip(mask[..., 0], 0, 1) * 255
-    out[..., 1] = np.clip(mask[..., 1] / S_RANGE * 0.5 + 0.5, 0, 1) * 255
-    out[..., 2] = np.clip(mask[..., 2], 0, 1) * 255
-    out[..., 3] = np.clip(mask[..., 3] * 0.5 + 0.5, 0, 1) * 255
+    # 16 bits per channel. G is a coordinate that the shader turns into furrows ~0.08cm wide; at 8
+    # bits over +-S_RANGE a level is 0.016cm and the furrows come out visibly stepped.
+    out = np.zeros((size, size, 4), dtype=np.uint16)
+    out[..., 0] = np.clip(mask[..., 0], 0, 1) * 65535
+    out[..., 1] = np.clip(mask[..., 1] / S_RANGE * 0.5 + 0.5, 0, 1) * 65535
+    out[..., 2] = np.clip(mask[..., 2], 0, 1) * 65535
+    out[..., 3] = np.clip(mask[..., 3] * 0.5 + 0.5, 0, 1) * 65535
     return out, float(hit.mean())
 
 
@@ -232,8 +281,11 @@ def _depth(parents, b):
     return d
 
 
-def _raster(acc, cov, size, uv, vals):
-    """Scanline-free barycentric rasteriser over the triangle's UV bounding box."""
+def _raster(acc, cov, size, uv, vals, nearest=()):
+    """Scanline-free barycentric rasteriser over the triangle's UV bounding box.
+
+    Channels listed in `nearest` take the value of the closest vertex (largest barycentric weight)
+    instead of interpolating - for categorical data such as the joint type code."""
     # UE's UV origin is the TOP-left of the texture and V grows downward, which is already the
     # image row order - do NOT flip V here. Flipping it puts the bake in the wrong half of the
     # atlas and the material then samples empty texels (a flat, uniform mask).
@@ -261,8 +313,12 @@ def _raster(acc, cov, size, uv, vals):
         return
 
     v = np.array(vals)          # 3 x 4
+    near = np.argmax(np.stack([l0, l1, l2]), axis=0)
     for ch in range(4):
-        val = l0 * v[0, ch] + l1 * v[1, ch] + l2 * v[2, ch]
+        if ch in nearest:
+            val = np.choose(near, [np.full_like(l0, v[0, ch]), np.full_like(l0, v[1, ch]), np.full_like(l0, v[2, ch])])
+        else:
+            val = l0 * v[0, ch] + l1 * v[1, ch] + l2 * v[2, ch]
         acc[y0:y1, x0:x1, ch] += np.where(inside, val, 0.0)
     cov[y0:y1, x0:x1] += inside.astype(np.float64)
 
@@ -347,8 +403,10 @@ def main():
     data = json.load(open(src))
 
     mask, coverage = bake_wrinkle_mask(data, MASK_SIZE)
-    Image.fromarray(mask, 'RGBA').save(out_dir + '/T_PH_WrinkleMask.png')
-    print('T_PH_WrinkleMask  %dx%d  UV coverage %.1f%%  (G range +-%.1fcm, A = dorsal side)'
+    # PIL cannot write 16-bit RGBA; OpenCV can (it wants BGRA order)
+    import cv2
+    cv2.imwrite(out_dir + '/T_PH_WrinkleMask.png', mask[..., [2, 1, 0, 3]])
+    print('T_PH_WrinkleMask  %dx%d  UV coverage %.1f%%  (G range +-%.1fcm, B = joint type, A = dorsal side)'
           % (MASK_SIZE, MASK_SIZE, coverage * 100, S_RANGE))
 
     Image.fromarray(bake_skin_detail(TILE_SIZE), 'RGB').save(out_dir + '/T_PH_SkinDetail_N.png')

@@ -19,7 +19,10 @@ Layers
           skin micro-relief map that ships with the MetaHumanCharacter plugin; it replaced the
           procedurally baked T_PH_SkinDetail_N, which stays in the project as the fallback for
           anyone without the plugin.
-  crease  procedural lines, DIRECTION from the baked wrinkle map, amplitude from band x compression
+          Under strain it is made ANISOTROPIC (Nagano et al. 2015): the micro grooves bunch up across
+          the compressed axis and flatten along a stretched one.
+  crease  procedural furrows, POSITION/DIRECTION from the baked wrinkle map, Bando et al. 2002
+          cross-section, and a different pattern per joint type (MCP / PIP / DIP) from mask B
   veins   T_PH_Vein_N         tiling ridges + mask in alpha, gated by stretch
 
 Maps
@@ -27,11 +30,12 @@ Maps
   T_PH_WrinkleMask  baked from the rig by Tools/bake_skin_maps.py, mesh UV space:
       R = weighted joint band (per-finger weights applied at bake time)
       G = signed distance along the bone from the joint pivot, +-CreaseRange cm
-      B = raw joint band
+      B = joint type code (0 none, .2 MCP, .4 PIP, .6 DIP, .8 thumb MP, 1 other)
       A = which side of the joint - +1 stretches on flexion (back of hand), -1 compresses (palm)
   Vertex colour A carries the relax slack (released stretch, decaying) from the tension pass.
     CreaseRange here MUST match S_RANGE in the baker, or the crease spacing comes out wrong.
-  Tension vertex colour from CustomSkinningTension.usf: R stretch, G compression, B signed.
+  Strain vertex colour from the deformer (strain tensor, CustomSkinningDetail.usf):
+      R stretch (lambda_max - 1), G compression ALONG the bone, B compression ACROSS it.
 """
 import unreal
 
@@ -114,17 +118,32 @@ PARAMS = [
     # to fill 0..1, so it needs many more repeats than our own 1k tile did (that one was 4.0).
     ('DetailTiling',    14.0),   # skin micro-relief repeats per UV unit
     ('DetailStrength',   0.8),
-    ('CreaseFrequency', 1.15),   # creases per CENTIMETRE along the bone (the map is in cm)
-    ('CreaseSharpness',  3.2),   # higher = narrower grooves
-    ('CreaseWarp',      0.25),   # fbm meander in cm, so the lines are not parallel rulings
-    ('CreaseDepth',    0.042),
-    ('CreaseRange',      3.0),   # MUST match S_RANGE in Tools/bake_skin_maps.py
+    ('MicroAniso',       1.5),   # micro-groove slope gain per unit compression (Nagano: up to ~2.5x)
+    ('MicroFlatten',     0.5),   # micro-groove slope loss per unit stretch
+    ('VSign',            1.0),   # -1 if the mask's V gradient runs against the normal map's y
+    ('CreaseFrequency',  1.3),   # furrows per CENTIMETRE along the bone, before the per-joint multiplier
+    ('CreaseSharpness',  3.2),   # legacy: narrows the furrow (3.2 = the Bando width as-is)
+    ('CreaseWarp',      0.25),   # fbm meander as a fraction of the furrow spacing
+    ('CreaseDepth',     0.45),   # cm-equivalent depth of the furrows; exaggerated, relief has no AO to help it read
+    ('UVScaleCm',       25.0),   # cm per UV unit of the hand mesh (median edge ratio, see Tools)
+    ('CreaseRange',      2.0),   # MUST match S_RANGE in Tools/bake_skin_maps.py
+    ('FurrowWidth',     0.22),   # Bando w as a fraction of the furrow spacing
+    ('Irregularity',     1.0),   # how broken / jittered the PIP folds are
+    # per-joint pattern (mask B says which joint a texel belongs to)
+    ('FoldsMCP',         1.1),   # frequency multipliers, back of the hand
+    ('FoldsPIP',         2.2),   #   PIP: 3-6 fine irregular folds
+    ('FoldsDIP',         0.8),   #   DIP: one or two clean lines
+    ('DepthMCP',        0.55),   # depth multipliers, both sides
+    ('DepthPIP',         1.0),
+    ('DepthDIP',        0.75),
+    ('PalmSplit',        0.3),   # cm, half-distance of the palmar PIP double crease
+    ('SideFolds',       0.35),   # oblique folds at the sides of a flexed joint (Bando's crossing family)
     ('VeinTiling',       4.0),
     ('VeinStrength',     0.6),
     # Two crease regimes, because the joint band wraps all the way around a joint and the two
     # sides of it do OPPOSITE things. Mask alpha says which side a texel is on.
     #   palm    rest creases deepen as the hand CLOSES
-    ('PalmarBase',      0.30),   # standing creases on an open palm
+    ('PalmarBase',      0.45),   # standing creases on an open palm
     ('PalmarCompress',   2.6),   # how fast they deepen under compression
     ('PalmarIron',       1.2),   # how fast stretch irons them flat
     ('PalmarRelax',      0.8),   # released-stretch slack, palm side
@@ -133,32 +152,33 @@ PARAMS = [
     ('DorsalBase',      0.40),   # folds standing over an extended knuckle
     ('DorsalIron',       5.0),   # how fast flexion spends that slack and the surface goes taut
     ('DorsalRelax',      4.0),   # the folds that come back just after a fist opens
-    ('SideSharpness',    2.0),   # how narrow the palm/back transition is around the sides
+    ('SideSharpness',    3.0),   # how narrow the palm/back transition is around the sides
     ('SideFlip',         1.0),   # -1 if a rig curls the other way; avoids a re-bake
     ('MaskGain',         1.0),   # widens/narrows the baked concentration band
-    ('MaskSharpness',    4.5),   # tightens the band around the joint (1 = the raw baked band)
-    ('Eps',            0.0020),  # finite-difference step in UV; a few texels of the 2k mask
+    ('MaskSharpness',    3.0),   # tightens the band around the joint (1 = the raw baked band)
+    ('Eps',            0.0008),  # finite-difference step in UV; ~0.02cm, a quarter of the finest furrow
 ]
 p = {n: scalar(n, v, -1700, 400 + i * 80) for i, (n, v) in enumerate(PARAMS)}
 
-SIDE_ARGS = ['PalmarBase', 'PalmarCompress', 'PalmarIron', 'PalmarRelax',
-             'DorsalBase', 'DorsalIron', 'DorsalRelax', 'SideSharpness', 'SideFlip']
+# everything the crease model needs, packed into FPHSkinParams inside the node body
+STRUCT_ARGS = ['CreaseFrequency', 'CreaseSharpness', 'CreaseWarp', 'CreaseRange', 'FurrowWidth', 'Irregularity',
+               'FoldsMCP', 'FoldsPIP', 'FoldsDIP', 'DepthMCP', 'DepthPIP', 'DepthDIP', 'PalmSplit', 'SideFolds',
+               'PalmarBase', 'PalmarCompress', 'PalmarIron', 'PalmarRelax',
+               'DorsalBase', 'DorsalIron', 'DorsalRelax', 'SideSharpness', 'SideFlip',
+               'MaskGain', 'MaskSharpness']
 
-NORMAL_ARGS = (['DetailTiling', 'DetailStrength', 'CreaseFrequency', 'CreaseSharpness', 'CreaseWarp',
-                'CreaseDepth', 'CreaseRange', 'VeinTiling', 'VeinStrength']
-               + SIDE_ARGS + ['MaskGain', 'MaskSharpness', 'Eps'])
+FILL_STRUCT = 'FPHSkinParams P;\n' + ''.join('P.%s = %s;\n' % (n, n) for n in STRUCT_ARGS)
 
-NORMAL_BODY = """return PH_SkinNormal(
+NORMAL_ARGS = (['DetailTiling', 'DetailStrength', 'MicroAniso', 'MicroFlatten', 'VSign',
+                'CreaseDepth', 'UVScaleCm', 'VeinTiling', 'VeinStrength', 'Eps'] + STRUCT_ARGS)
+
+NORMAL_BODY = FILL_STRUCT + """return PH_SkinNormal(
     UV, Tension, Relax,
     WrinkleMaskTex, WrinkleMaskTexSampler,
     SkinDetailTex, SkinDetailTexSampler,
     VeinTex, VeinTexSampler,
-    DetailTiling, DetailStrength,
-    CreaseFrequency, CreaseSharpness, CreaseWarp, CreaseDepth, CreaseRange,
-    VeinTiling, VeinStrength,
-    PalmarBase, PalmarCompress, PalmarIron, PalmarRelax,
-    DorsalBase, DorsalIron, DorsalRelax, SideSharpness, SideFlip,
-    MaskGain, MaskSharpness, Eps);"""
+    DetailTiling, DetailStrength, MicroAniso, MicroFlatten, VSign,
+    CreaseDepth, UVScaleCm, VeinTiling, VeinStrength, Eps, P);"""
 
 nrm_inputs = ['UV', 'Tension', 'Relax', 'WrinkleMaskTex', 'SkinDetailTex', 'VeinTex'] + NORMAL_ARGS
 nrm = custom('PH_SkinNormal', NORMAL_BODY, unreal.CustomMaterialOutputType.CMOT_FLOAT3, nrm_inputs, -1000, -300)
@@ -169,13 +189,8 @@ vein_inputs = ['UV', 'Tension', 'WrinkleMaskTex', 'VeinTex', 'VeinTiling', 'Side
                'SideFlip', 'MaskGain', 'MaskSharpness']
 vein = custom('PH_VeinMask', VEIN_BODY, unreal.CustomMaterialOutputType.CMOT_FLOAT1, vein_inputs, -1000, 300)
 
-CREASE_BODY = """return PH_CreaseMask(UV, Tension, Relax, WrinkleMaskTex, WrinkleMaskTexSampler,
-    CreaseFrequency, CreaseSharpness, CreaseWarp, CreaseRange,
-    PalmarBase, PalmarCompress, PalmarIron, PalmarRelax,
-    DorsalBase, DorsalIron, DorsalRelax, SideSharpness, SideFlip,
-    MaskGain, MaskSharpness);"""
-crease_inputs = (['UV', 'Tension', 'Relax', 'WrinkleMaskTex', 'CreaseFrequency', 'CreaseSharpness',
-                  'CreaseWarp', 'CreaseRange'] + SIDE_ARGS + ['MaskGain', 'MaskSharpness'])
+CREASE_BODY = FILL_STRUCT + """return PH_CreaseMask(UV, Tension, Relax, WrinkleMaskTex, WrinkleMaskTexSampler, P);"""
+crease_inputs = ['UV', 'Tension', 'Relax', 'WrinkleMaskTex'] + STRUCT_ARGS
 crease = custom('PH_CreaseMask', CREASE_BODY, unreal.CustomMaterialOutputType.CMOT_FLOAT1, crease_inputs, -1000, 560)
 
 
@@ -203,10 +218,10 @@ wire(vein, vein_inputs)
 wire(crease, crease_inputs)
 
 # --- base colour --------------------------------------------------------------------------------
-skin = vector('SkinColor', unreal.LinearColor(0.80, 0.60, 0.52, 1.0), -1000, 800)
+skin = vector('SkinColor', unreal.LinearColor(0.74, 0.50, 0.40, 1.0), -1000, 800)
 # the colour layers stay close to the skin tone - the relief should read from the NORMAL,
 # not from painted-on dark bands, which look like dirt the moment the light moves
-flush = vector('CompressionFlush', unreal.LinearColor(0.74, 0.50, 0.43, 1.0), -1000, 920)
+flush = vector('CompressionFlush', unreal.LinearColor(0.70, 0.42, 0.36, 1.0), -1000, 920)
 veincol = vector('VeinColor', unreal.LinearColor(0.70, 0.55, 0.56, 1.0), -1000, 1040)
 creasecol = vector('CreaseShadow', unreal.LinearColor(0.68, 0.48, 0.41, 1.0), -1000, 1160)
 
@@ -225,7 +240,7 @@ mel.connect_material_expressions(l2, '', l3, 'A')
 mel.connect_material_expressions(creasecol, '', l3, 'B')
 mel.connect_material_expressions(crease, '', l3, 'Alpha')
 
-rough = scalar('Roughness', 0.55, -600, 1300, 'Surface')
+rough = scalar('Roughness', 0.5, -600, 1300, 'Surface')
 spec = scalar('Specular', 0.32, -600, 1380, 'Surface')
 
 mel.connect_material_property(nrm, '', unreal.MaterialProperty.MP_NORMAL)
