@@ -18,7 +18,8 @@
 // T_PH_WrinkleMask, baked from the rig by Tools/bake_skin_maps.py (mesh UV space, not tiling):
 //   R = weighted joint band   0 on rigid parts, 1 on a joint's 50/50 skin-weight blend line,
 //                             scaled by the per-finger weights chosen at bake time
-//   G = 0.5 + 0.5 * s / CreaseRange, s = signed distance ALONG the bone from the joint pivot (cm)
+//   G = d / CreaseRange, d = UNSIGNED distance ALONG the bone to the nearest joint band centre (cm);
+//       unsigned and nearest-of-all-joints so it stays continuous between two joints
 //   B = joint TYPE, as a code: 0 none, 0.2 MCP, 0.4 PIP, 0.6 DIP, 0.8 thumb MP, 1.0 other (wrist,
 //       metacarpal, palm). Anatomically the three finger joints do not wrinkle alike: the back of
 //       the PIP carries 3-6 irregular transverse folds that are deepest with the finger straight,
@@ -73,7 +74,11 @@ struct FPHSkinParams
 	float CreaseWarp;         // fbm meander of the furrows, in cm
 	float CreaseRange;        // MUST match S_RANGE in the baker (cm)
 	float FurrowWidth;        // Bando w, as a fraction of the furrow spacing
-	float Irregularity;       // how broken / jittered the PIP folds are
+	float Irregularity;       // how unevenly the secondary folds are spaced and weighted
+	float SecondaryDepth;     // depth of the fine fold family relative to the primary crease (~0.3)
+	float JointReach;         // cm from the band centre beyond which the folds have faded out
+	float CompressNarrow;     // furrows narrow as the skin across them compresses (Disney 2024)
+	float StretchWiden;       // and widen / flatten as it stretches
 	float FoldsMCP, FoldsPIP, FoldsDIP;   // per-joint frequency multipliers (back of the hand)
 	float DepthMCP, DepthPIP, DepthDIP;   // per-joint depth multipliers (both sides)
 	float PalmSplit;          // cm: half-distance of the palmar PIP double crease
@@ -260,43 +265,58 @@ float PH_CreaseHeightAt(float2 UV, float4 M, float3 Strain, float Relax, FPHSkin
 
 	// s in cm along the bone, zero on the joint band; the warp is added in the SAME units, so it
 	// just nudges each furrow sideways instead of rotating anything. The warp scales with the
-	// furrow spacing - a meander larger than the spacing turns the family into noise - and the
-	// irregular joints get a little more of it.
+	// furrow spacing - a meander larger than the spacing turns the family into noise.
 	float Spacing = 1.0f / max(P.CreaseFrequency * Folds, 1e-3f);
 	float Warp = P.CreaseWarp * Spacing * (1.0f + 0.5f * Irreg);
-	float S0 = (M.g * 2.0f - 1.0f) * P.CreaseRange;
+	float S0 = M.g * P.CreaseRange;   // unsigned distance to the nearest band centre, cm
 	float S = S0 + PH_Fbm(UV * 90.0f) * Warp;
 
-	// Bando width as a fraction of the spacing; the legacy CreaseSharpness still narrows it.
-	float W = P.FurrowWidth / max(P.CreaseSharpness * 0.3125f, 0.5f);   // 3.2 -> x1
+	// ---- furrow width: Bando w as a fraction of the spacing, coupled to the strain across the
+	// furrow (Weiss et al. 2024, "Fast Dynamic Facial Wrinkles"): a wrinkle is a reserve of skin,
+	// so compression along the bone makes it narrower and stretch makes it wider and flatter.
+	// The legacy CreaseSharpness still narrows it (3.2 -> x1).
+	float W = P.FurrowWidth / max(P.CreaseSharpness * 0.3125f, 0.5f);
+	W *= (1.0f + P.StretchWiden * Stretch) / (1.0f + P.CompressNarrow * Compress);
 
-	// ---- back of the hand: a family of transverse furrows, deepest when the finger is straight --
-	float Back = PH_FurrowFamily(S, P.CreaseFrequency * Folds, W);
-	// per-furrow depth varies, as a smooth function of s only - real knuckle folds are not a
-	// uniform corrugation. Noise in s stays smooth in screen space, so this costs no stability.
-	Back *= saturate(0.55f + PH_Fbm(float2(S * 2.5f, 3.1f)) * 1.8f);
-	// and the folds break up along their length - the PIP's especially
-	Back *= lerp(1.0f, saturate(0.35f + PH_Fbm(UV * 70.0f) * 1.6f), saturate(Irreg));
-
-	// ---- palm: one deep crease (two on the PIP) on the band, plus faint secondaries -------------
-	// The main crease takes a gentle warp of its own; the secondaries are the family, unwarped.
+	// ---- two scales, not one (skin topography: a few deep creases over a shallow line network;
+	// Pierard / Lagarde classify primary lines at tens of um and expression creases at hundreds).
+	//   primary    one crease on the band centre (the PIP a pair, +-Split), full depth
+	//   secondary  the per-joint family of fine folds, SecondaryDepth of that
+	// The old version gave every fold in the family the primary depth - that is what read as
+	// a knuckle carved out of plaster.
 	float Sp = S0 + PH_Fbm(UV * 60.0f + 7.0f) * P.CreaseWarp * 0.5f;
-	float Palm = PH_Furrow(abs(Sp) - Split, W / max(P.CreaseFrequency, 1e-3f) * 1.4f);
-	Palm += 0.15f * PH_FurrowFamily(S0, P.CreaseFrequency * 0.8f, W);
+	float Primary = PH_Furrow(abs(Sp) - Split, W / max(P.CreaseFrequency, 1e-3f) * 1.4f);
 
-	float H = lerp(Palm * Gate.x, Back * Gate.y, Dorsal) * Depth;
+	float Secondary = PH_FurrowFamily(S, P.CreaseFrequency * Folds, W);
+	// per-fold weight varies smoothly along s, and fades smoothly along the fold - never clipped
+	// to on/off, which is what made the folds look lumpy
+	Secondary *= 0.7f + 0.3f * PH_Fbm(float2(S * 2.5f, 3.1f)) * 2.0f;
+	Secondary *= lerp(1.0f, 0.65f + 0.35f * PH_Fbm(UV * 24.0f) * 2.0f, saturate(Irreg));
+	// no secondary fold ON the primary crease
+	Secondary *= saturate(abs(abs(Sp) - Split) / max(Spacing * 0.5f, 1e-3f));
+
+	// ---- amplitude vs strain: the primary crease scales with its gate; the fine folds are a
+	// buckling pattern whose amplitude grows like sqrt(compression) (Cerda & Mahadevan 2003), so
+	// they come in fast at small strain and then saturate instead of deepening without limit.
+	float Back = Primary * Gate.y + Secondary * P.SecondaryDepth * sqrt(Gate.y);
+	float Palm = Primary * Gate.x + Secondary * P.SecondaryDepth * 0.5f * sqrt(Gate.x);
+	float H = lerp(Palm, Back, Dorsal) * Depth;
+	// Folds cluster around the joint: fade them out with the distance to the band centre, in cm.
+	// This also keeps the per-joint pattern seams (where the nearest joint changes, mid-phalanx)
+	// out of sight - by then there is nothing left to be discontinuous.
+	H *= 1.0f - smoothstep(P.JointReach * 0.55f, P.JointReach, S0);
 
 	// ---- sides: the oblique folds where the two furrow families cross (Bando 2002) -------------
 	// Around the sides of a flexed joint the skin is squashed along the bone AND sheared, and the
 	// folds there run at an angle, converging on the joint. We use the dorsality itself as the
 	// across-finger coordinate (it is the cosine of the angle around the finger), so these lines
-	// need nothing extra baked. They never show on a straight finger.
+	// need nothing extra baked. They never show on a straight finger. Secondary scale.
 	float SideW = pow(saturate(1.0f - abs(M.a * 2.0f - 1.0f)), 2.0f);
 	float Tacross = asin(clamp(M.a * 2.0f - 1.0f, -1.0f, 1.0f)) * 0.8f;   // ~cm, finger radius 0.8
 	float Q1 = S * 0.5f + Tacross * 0.866f;
 	float Q2 = S * 0.5f - Tacross * 0.866f;
 	float Side = min(PH_FurrowFamily(Q1, P.CreaseFrequency * 0.9f, W), PH_FurrowFamily(Q2, P.CreaseFrequency * 0.9f, W));
-	H += Side * SideW * P.SideFolds * saturate(Compress * 2.0f + Across + Relax * 0.5f) * Depth;
+	H += Side * SideW * P.SideFolds * P.SecondaryDepth * sqrt(saturate(Compress * 2.0f + Across + Relax * 0.5f)) * Depth;
 
 	return H * Band;
 }
@@ -369,7 +389,7 @@ float3 PH_SkinNormal(
 	// Slope of a groove CreaseDepth cm deep: dH/ds with s in cm, so the UV step is converted with
 	// the mesh's cm-per-UV scale (about 25 for the repacked hand). Clamped at ~72 degrees.
 	float2 G = float2(HX - H0, HY - H0) / max(Eps, 1e-6f) * CreaseDepth / max(UVScaleCm, 1e-3f);
-	G = clamp(G, -3.0f, 3.0f);
+	G = clamp(G, -2.0f, 2.0f);   // ~63 degrees: anything steeper reads as a cut, not a fold
 	float3 Crease = normalize(float3(-G.x, -G.y, 1.0f));
 
 	// --- detail: tiling relief, no rotation, but anisotropic in slope under strain

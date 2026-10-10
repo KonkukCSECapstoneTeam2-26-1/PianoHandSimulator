@@ -45,18 +45,20 @@ START_MAT = 'skin'
 DETAIL = dict(
     # the geometric groove is kept shallow and tight: a 0.5mm trench the width of the whole joint
     # band read as a cuff; the crease LOOK comes from the material's furrows
-    crease_depth            = 0.025,
-    crease_sharpness        = 4.5,
+    crease_depth            = 0.0,      # the resting groove is a material job now; any geometric
+    crease_sharpness        = 4.5,      # trench the width of the band reads as a cuff
     crease_compression_gain = 0.9,
     crease_stretch_relief   = 2.2,
-    wrinkle_amplitude       = 0.035,
+    # geometric ripples are kept small: the fine folds are a normal-map job, and 0.35mm of
+    # real displacement on a 77k mesh reads as lumps
+    wrinkle_amplitude       = 0.012,
     wrinkle_frequency       = 6.0,
-    volume_bulge            = 0.15,
+    volume_bulge            = 0.10,
     # 0.45s is closer to real skin, but the fold it leaves is then gone before a
     # screenshot round-trip can catch it; 0.9s reads in motion and still stills.
     relax_gain              = 12.0,
     relax_tau               = 0.9,
-    relax_crease_gain       = 0.06,
+    relax_crease_gain       = 0.03,
 )
 
 ELL = unreal.EditorLevelLibrary

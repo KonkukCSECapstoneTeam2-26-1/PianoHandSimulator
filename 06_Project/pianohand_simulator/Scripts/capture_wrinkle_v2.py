@@ -21,11 +21,14 @@ RES = '2560x1440'
 ELL = unreal.EditorLevelLibrary
 SLB = unreal.SystemLibrary
 
-V2 = dict(CreaseFrequency=1.3, FurrowWidth=0.22, Irregularity=1.0,
+V2 = dict(CreaseFrequency=1.3, FurrowWidth=0.25, Irregularity=1.0, SecondaryDepth=0.4, JointReach=1.2,
+          CompressNarrow=2.0, StretchWiden=2.0, CreaseDepth=0.35, DetailStrength=0.55,
           FoldsMCP=1.1, FoldsPIP=2.2, FoldsDIP=0.8, DepthMCP=0.55, DepthPIP=1.0, DepthDIP=0.75,
-          PalmSplit=0.3, SideFolds=0.35, MicroAniso=1.5, MicroFlatten=0.5)
-# one pattern for every joint, no micro anisotropy, no side folds - the previous look
-V1 = dict(CreaseFrequency=1.15, FurrowWidth=0.5, Irregularity=0.0,
+          PalmSplit=0.3, SideFolds=0.25, MicroAniso=1.0, MicroFlatten=0.5)
+# one pattern for every joint, every fold at full depth, no strain coupling, no micro anisotropy,
+# no side folds - the previous look
+V1 = dict(CreaseFrequency=1.15, FurrowWidth=0.5, Irregularity=0.0, SecondaryDepth=1.0, JointReach=2.0,
+          CompressNarrow=0.0, StretchWiden=0.0, CreaseDepth=0.45, DetailStrength=0.8,
           FoldsMCP=1.0, FoldsPIP=1.0, FoldsDIP=1.0, DepthMCP=1.0, DepthPIP=1.0, DepthDIP=1.0,
           PalmSplit=0.0, SideFolds=0.0, MicroAniso=0.0, MicroFlatten=0.0)
 

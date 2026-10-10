@@ -6,8 +6,9 @@ Needs numpy, Pillow and opencv-python (the 16-bit RGBA writer). Produces three P
 
   T_PH_WrinkleMask.png   RGBA 16-bit, mesh UV space, NOT tiling (import as TC_HDR to keep the bits)
      R = weighted joint band  - where creases concentrate, per-finger weights applied
-     G = 0.5 + 0.5 * clamp(s / S_RANGE, -1, 1), where s is the signed distance ALONG the joint's
-         bone axis, measured from the joint pivot (cm)
+     G = clamp(d / S_RANGE, 0, 1), where d is the UNSIGNED distance ALONG the bone axis to the
+         nearest joint band centre (cm). Unsigned and nearest-of-all-joints so it is continuous
+         across the hand-over between two joints (see the comment in bake_wrinkle_mask)
      B = joint TYPE code: 0 none, 0.2 MCP, 0.4 PIP, 0.6 DIP, 0.8 thumb MP, 1.0 other (CMC,
          metacarpal, palm, wrist). The three finger joints wrinkle differently - the back of the
          PIP carries several irregular folds, the DIP one or two, the MCP only faint ones, and on
@@ -224,11 +225,49 @@ def bake_wrinkle_mask(data, size):
     # finger joint sits ~0.5cm proximal of the pivot, and the shader puts its main palm crease and
     # mirrors its knuckle folds about s = 0 - so without this the deepest crease lands at the edge
     # of the band where it is barely visible. Per joint, the band-weighted mean of s is subtracted.
+    offset = {}
     for child in np.unique(joint_of[joint_of >= 0]):
         sel = joint_of == child
         w = band[sel] ** 4
         if w.sum() > 1e-9:
-            along[sel] -= float((along[sel] * w).sum() / w.sum())
+            offset[int(child)] = float((along[sel] * w).sum() / w.sum())
+
+    # Store the UNSIGNED distance to the NEAREST band centre, over every joint a vertex could
+    # belong to (its dominant bone's own joint and that bone's children). The old signed,
+    # per-joint value jumped mid-phalanx where the second influence hands over from the parent to
+    # the child bone - and the hand-over is not equidistant from the two bands, so the jump was
+    # ~0.4cm and the shader's finite difference drew it as a thin zig-zag line. A min over
+    # continuous distances is continuous. The crease model only ever used |s| (the primary crease
+    # and the fold family are symmetric about the joint), so nothing is lost.
+    axis_of = {}
+    for child, off in offset.items():
+        par = bone_parent[child]
+        axis = bone_pos[child] - bone_pos[par]
+        n = np.linalg.norm(axis)
+        if n > 1e-6:
+            axis_of[child] = (axis / n, bone_pos[child] + axis / n * off)
+    children_of = {}
+    for b, par in enumerate(bone_parent):
+        children_of.setdefault(par, []).append(b)
+    for v, w in enumerate(weights):
+        w = [e for e in w if e[1] > 0.0]
+        if not w:
+            continue
+        dom = w[0][0]
+        cands = [dom] + children_of.get(dom, [])
+        if len(w) > 1:
+            cands += [w[1][0]] + children_of.get(w[1][0], [])
+        best = None
+        for j in cands:
+            if j not in axis_of:
+                continue
+            ax, ctr = axis_of[j]
+            d = abs(float((pos[v] - ctr) @ ax))
+            if best is None or d < best[0]:
+                best = (d, j)
+        if best is not None:
+            along[v] = best[0]
+            jtype[v] = joint_type(bone_name[best[1]])
 
     acc = np.zeros((size, size, 4), dtype=np.float32)
     cov = np.zeros((size, size), dtype=np.float32)
@@ -252,7 +291,7 @@ def bake_wrinkle_mask(data, size):
     # bits over +-S_RANGE a level is 0.016cm and the furrows come out visibly stepped.
     out = np.zeros((size, size, 4), dtype=np.uint16)
     out[..., 0] = np.clip(mask[..., 0], 0, 1) * 65535
-    out[..., 1] = np.clip(mask[..., 1] / S_RANGE * 0.5 + 0.5, 0, 1) * 65535
+    out[..., 1] = np.clip(mask[..., 1] / S_RANGE, 0, 1) * 65535
     out[..., 2] = np.clip(mask[..., 2], 0, 1) * 65535
     out[..., 3] = np.clip(mask[..., 3] * 0.5 + 0.5, 0, 1) * 65535
     return out, float(hit.mean())
@@ -406,7 +445,7 @@ def main():
     # PIL cannot write 16-bit RGBA; OpenCV can (it wants BGRA order)
     import cv2
     cv2.imwrite(out_dir + '/T_PH_WrinkleMask.png', mask[..., [2, 1, 0, 3]])
-    print('T_PH_WrinkleMask  %dx%d  UV coverage %.1f%%  (G range +-%.1fcm, B = joint type, A = dorsal side)'
+    print('T_PH_WrinkleMask  %dx%d  UV coverage %.1f%%  (G range 0..%.1fcm unsigned, B = joint type, A = dorsal side)'
           % (MASK_SIZE, MASK_SIZE, coverage * 100, S_RANGE))
 
     Image.fromarray(bake_skin_detail(TILE_SIZE), 'RGB').save(out_dir + '/T_PH_SkinDetail_N.png')

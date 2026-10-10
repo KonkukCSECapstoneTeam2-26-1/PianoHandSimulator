@@ -117,18 +117,22 @@ PARAMS = [
     # T_SkinMicroNormal is authored at MetaHuman body texel density; the hand's UVs are repacked
     # to fill 0..1, so it needs many more repeats than our own 1k tile did (that one was 4.0).
     ('DetailTiling',    14.0),   # skin micro-relief repeats per UV unit
-    ('DetailStrength',   0.8),
-    ('MicroAniso',       1.5),   # micro-groove slope gain per unit compression (Nagano: up to ~2.5x)
+    ('DetailStrength',  0.55),
+    ('MicroAniso',       1.0),   # micro-groove slope gain per unit compression (Nagano: up to ~2.5x)
     ('MicroFlatten',     0.5),   # micro-groove slope loss per unit stretch
     ('VSign',            1.0),   # -1 if the mask's V gradient runs against the normal map's y
     ('CreaseFrequency',  1.3),   # furrows per CENTIMETRE along the bone, before the per-joint multiplier
     ('CreaseSharpness',  3.2),   # legacy: narrows the furrow (3.2 = the Bando width as-is)
     ('CreaseWarp',      0.25),   # fbm meander as a fraction of the furrow spacing
-    ('CreaseDepth',     0.45),   # cm-equivalent depth of the furrows; exaggerated, relief has no AO to help it read
+    ('CreaseDepth',     0.35),   # cm-equivalent depth of the PRIMARY crease; relief has no AO so it is exaggerated
     ('UVScaleCm',       25.0),   # cm per UV unit of the hand mesh (median edge ratio, see Tools)
     ('CreaseRange',      2.0),   # MUST match S_RANGE in Tools/bake_skin_maps.py
-    ('FurrowWidth',     0.22),   # Bando w as a fraction of the furrow spacing
-    ('Irregularity',     1.0),   # how broken / jittered the PIP folds are
+    ('FurrowWidth',     0.25),   # Bando w as a fraction of the furrow spacing
+    ('Irregularity',     1.0),   # how unevenly the secondary folds are spaced / weighted
+    ('SecondaryDepth',   0.4),   # fine fold family depth relative to the primary crease
+    ('JointReach',       1.2),   # cm from the band centre where the folds have faded out
+    ('CompressNarrow',   2.0),   # furrows narrow under compression across them (Weiss 2024)
+    ('StretchWiden',     2.0),   # and widen / flatten under stretch
     # per-joint pattern (mask B says which joint a texel belongs to)
     ('FoldsMCP',         1.1),   # frequency multipliers, back of the hand
     ('FoldsPIP',         2.2),   #   PIP: 3-6 fine irregular folds
@@ -137,7 +141,7 @@ PARAMS = [
     ('DepthPIP',         1.0),
     ('DepthDIP',        0.75),
     ('PalmSplit',        0.3),   # cm, half-distance of the palmar PIP double crease
-    ('SideFolds',       0.35),   # oblique folds at the sides of a flexed joint (Bando's crossing family)
+    ('SideFolds',       0.25),   # oblique folds at the sides of a flexed joint (Bando's crossing family)
     ('VeinTiling',       4.0),
     ('VeinStrength',     0.6),
     # Two crease regimes, because the joint band wraps all the way around a joint and the two
@@ -162,6 +166,7 @@ p = {n: scalar(n, v, -1700, 400 + i * 80) for i, (n, v) in enumerate(PARAMS)}
 
 # everything the crease model needs, packed into FPHSkinParams inside the node body
 STRUCT_ARGS = ['CreaseFrequency', 'CreaseSharpness', 'CreaseWarp', 'CreaseRange', 'FurrowWidth', 'Irregularity',
+               'SecondaryDepth', 'JointReach', 'CompressNarrow', 'StretchWiden',
                'FoldsMCP', 'FoldsPIP', 'FoldsDIP', 'DepthMCP', 'DepthPIP', 'DepthDIP', 'PalmSplit', 'SideFolds',
                'PalmarBase', 'PalmarCompress', 'PalmarIron', 'PalmarRelax',
                'DorsalBase', 'DorsalIron', 'DorsalRelax', 'SideSharpness', 'SideFlip',
