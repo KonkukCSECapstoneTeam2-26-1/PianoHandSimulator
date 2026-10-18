@@ -1,0 +1,5 @@
+---,Pitch,StartMs,DurationMs,Hand,Role,Finger,Pressure,KeyDepth,bIsBlack,WristPosNorm,WristYawDeg,WristRollDeg
+Note_000000,60,0.0,500.0,Right,INNER,1,0.504,0.504,False,0.49,15.0,0
+Note_000001,64,0.0,500.0,Right,INNER,2,0.504,0.504,False,0.49,15.0,0
+Note_000002,67,0.0,500.0,Right,MELODY,3,0.504,0.504,False,0.49,15.0,0
+Note_000003,74,625.0,500.0,Right,MELODY,4,0.504,0.504,False,0.609,-5.0,0

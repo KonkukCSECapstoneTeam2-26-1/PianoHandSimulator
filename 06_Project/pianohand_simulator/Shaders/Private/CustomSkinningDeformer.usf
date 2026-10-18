@@ -1,0 +1,129 @@
+// PianoHand custom skinning deformer kernel (UMeshDeformer path)
+//
+// One dispatch per render section. Reads the engine skeletal mesh LOD buffers
+// (rest positions, packed tangents, skin weight stream), blends with the
+// per-section bone transforms uploaded from the game thread, and writes the
+// result into the passthrough vertex factory position / tangent buffers.
+//
+// SKIN_MODE 0 : Linear Blend Skinning (LBS)
+// SKIN_MODE 1 : Dual Quaternion Skinning (DQS)
+// GPUSKIN_BONE_INDEX_UINT16 / GPUSKIN_BONE_WEIGHTS_UINT16 : weight stream layout (from FSkinWeightVertexBuffer)
+
+#include "/Engine/Private/Common.ush"
+#include "/Engine/Private/GpuSkinCommon.ush"
+#include "/PianoHand/Public/SkinningCommon.ush"
+
+#ifndef THREADGROUP_SIZE
+#define THREADGROUP_SIZE 64
+#endif
+
+#ifndef SKIN_MODE
+#define SKIN_MODE 0
+#endif
+
+uint NumVertices;          // vertices in this section
+uint BaseVertexIndex;      // first vertex of this section inside the LOD buffers
+uint NumBoneInfluences;    // max influences per vertex (constant-stride weight layout)
+uint InputWeightStride;    // bytes per vertex in the weight stream
+uint NumSectionBones;      // entries in BoneTransforms (section BoneMap order)
+
+Buffer<float>                     PositionInputBuffer;   // 3 floats per vertex, rest pose
+Buffer<SNORM float4>              TangentInputBuffer;    // 2 per vertex: TangentX, TangentZ (w = sign)
+Buffer<uint>                      InputWeightStream;     // FSkinWeightVertexBuffer data (section-local bone indices)
+StructuredBuffer<FBoneTransform>  BoneTransforms;        // RefPoseInverse * ComponentSpace, indexed by section BoneMap
+
+RWBuffer<float>                   PositionBufferUAV;
+RWBuffer<TANGENT_RWBUFFER_FORMAT> TangentBufferUAV;
+
+[numthreads(THREADGROUP_SIZE, 1, 1)]
+void DeformCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	const uint LocalIndex = DispatchThreadId.x;
+	if (LocalIndex >= NumVertices)
+	{
+		return;
+	}
+	const uint VertexIndex = BaseVertexIndex + LocalIndex;
+
+	const float3 RestP = float3(
+		PositionInputBuffer[VertexIndex * 3 + 0],
+		PositionInputBuffer[VertexIndex * 3 + 1],
+		PositionInputBuffer[VertexIndex * 3 + 2]);
+	const float4 RestTX = TangentInputBuffer[VertexIndex * 2 + GPUSKIN_VB_OFFSET_TANGENT_X];
+	const float4 RestTZ = TangentInputBuffer[VertexIndex * 2 + GPUSKIN_VB_OFFSET_TANGENT_Z];
+
+	// Gather up to 12 influences (3 groups of 4) from the constant-stride weight stream.
+	const uint StreamOffset = VertexIndex * (InputWeightStride / 4);
+	const uint NumGroups = (NumBoneInfluences + 3) / 4;
+
+	float3 SkinnedP  = 0;
+	float3 SkinnedTX = 0;
+	float3 SkinnedTZ = 0;
+
+#if SKIN_MODE == 0
+	// ---------------- LBS ----------------
+	for (uint g = 0; g < NumGroups; ++g)
+	{
+		const int4   Idx = GetBlendIndices(InputWeightStream, StreamOffset, g);
+		const float4 W   = GetBlendWeights(InputWeightStream, StreamOffset, g, NumBoneInfluences);
+		UNROLL
+		for (uint i = 0; i < 4; ++i)
+		{
+			const float Weight = W[i];
+			if (Weight > 0.0f)
+			{
+				const FBoneTransform T = BoneTransforms[min((uint)Idx[i], NumSectionBones - 1)];
+				SkinnedP  += Weight * TransformPosition(T, RestP);
+				SkinnedTX += Weight * TransformVector(T, RestTX.xyz);
+				SkinnedTZ += Weight * TransformVector(T, RestTZ.xyz);
+			}
+		}
+	}
+#else
+	// ---------------- DQS ----------------
+	FDualQuat Blend;
+	Blend.Real = 0;
+	Blend.Dual = 0;
+	float4 PivotReal = 0;
+	bool bHavePivot = false;
+
+	for (uint g = 0; g < NumGroups; ++g)
+	{
+		const int4   Idx = GetBlendIndices(InputWeightStream, StreamOffset, g);
+		const float4 W   = GetBlendWeights(InputWeightStream, StreamOffset, g, NumBoneInfluences);
+		UNROLL
+		for (uint i = 0; i < 4; ++i)
+		{
+			const float Weight = W[i];
+			if (Weight > 0.0f)
+			{
+				FDualQuat DQ = DualQuatFromTransform(BoneTransforms[min((uint)Idx[i], NumSectionBones - 1)]);
+				if (!bHavePivot)
+				{
+					PivotReal = DQ.Real;
+					bHavePivot = true;
+				}
+				// Antipodality: keep every quaternion in the same hemisphere as the first influence
+				const float Sign = (dot(DQ.Real, PivotReal) < 0.0f) ? -1.0f : 1.0f;
+				Blend.Real += Weight * Sign * DQ.Real;
+				Blend.Dual += Weight * Sign * DQ.Dual;
+			}
+		}
+	}
+
+	const float Len = max(length(Blend.Real), 1e-8f);
+	Blend.Real /= Len;
+	Blend.Dual /= Len;
+
+	SkinnedP  = DualQuatTransformPosition(Blend, RestP);
+	SkinnedTX = DualQuatTransformVector(Blend, RestTX.xyz);
+	SkinnedTZ = DualQuatTransformVector(Blend, RestTZ.xyz);
+#endif
+
+	PositionBufferUAV[VertexIndex * 3 + 0] = SkinnedP.x;
+	PositionBufferUAV[VertexIndex * 3 + 1] = SkinnedP.y;
+	PositionBufferUAV[VertexIndex * 3 + 2] = SkinnedP.z;
+
+	TangentBufferUAV[VertexIndex * 2 + GPUSKIN_RWBUFFER_OFFSET_TANGENT_X] = TangentUnbias_SkinCache(float4(normalize(SkinnedTX), RestTX.w));
+	TangentBufferUAV[VertexIndex * 2 + GPUSKIN_RWBUFFER_OFFSET_TANGENT_Z] = TangentUnbias_SkinCache(float4(normalize(SkinnedTZ), RestTZ.w));
+}

@@ -1,0 +1,243 @@
+// PianoHand custom skinning - per-vertex strain TENSOR kernels (Phase 2, revised)
+//
+// Runs after CustomSkinningDeformer.usf inside the same RDG graph.
+//
+// The first version of this file averaged a scalar edge strain (|p_i-p_j|/|r_i-r_j| - 1) per vertex.
+// A scalar cannot say in WHICH direction skin is compressed, and that direction is what decides
+// where a wrinkle runs: folds form perpendicular to the compression axis (Rohmer et al. 2010,
+// "Animation Wrinkling: Augmenting Coarse Cloth Simulations with Realistic-Looking Wrinkles").
+// So this version follows that paper and computes, per triangle, the 2D deformation gradient
+//
+//     F = [p1 p2] * [u1 u2]^-1        (rest edges u_i in the triangle plane, skinned edges p_i)
+//
+// and its right Cauchy-Green tensor C = F^T F, whose eigenvalues are the squared principal
+// stretches (lambda_1^2, lambda_2^2) and whose eigenvectors are the stretch / compression axes.
+//
+//  AccumulateCS : one thread per triangle. Builds C in the triangle's rest basis (e1, e2), lifts it
+//                 to a 3x3 tensor in REST COMPONENT SPACE (C3 = sum_ij C_ij e_i e_j^T) and atomically
+//                 adds its 6 unique components + a count onto the 3 vertices. Component space is used
+//                 so that neighbouring triangles with different local bases can be averaged without
+//                 any per-triangle rotation.
+//  ResolveCS    : one thread per LOD vertex. Averages C3, projects it onto the vertex's rest tangent
+//                 plane (T, B from the rest tangent buffer) and eigen-decomposes the 2x2 result.
+//                 Writes the averaged C3 for CustomSkinningDetail.usf and the vertex colour:
+//                   R = saturate((lambda_max - 1) * TensionScale)   stretch     (0..1)
+//                   G = saturate((1 - lambda_min) * TensionScale)   compression (0..1)
+//                   B = 0 here; DisplaceCS, which knows the bone axis, overwrites G/B with the
+//                       compression ALONG and ACROSS the bone (see CustomSkinningDetail.usf)
+//                   A = relax slack (0..1) - stretch that has just been released, decaying
+//                 Materials read this through the VertexColor node.
+
+#include "/Engine/Private/Common.ush"
+#include "/Engine/Private/GpuSkinCommon.ush"
+
+#ifndef THREADGROUP_SIZE
+#define THREADGROUP_SIZE 64
+#endif
+
+// Fixed point scale for the atomic accumulation. Tensor components are clamped to [-64, 64]
+// (lambda up to 8) before packing, so up to ~1000 incident triangles cannot overflow int32.
+#define TENSOR_FIXED_SCALE 32768.0f
+#define TENSOR_STRIDE 6u   // xx, yy, zz, xy, xz, yz
+
+// ---------------------------------------------------------------------------
+// Accumulate (per triangle)
+// ---------------------------------------------------------------------------
+
+uint NumTriangles;         // triangles in this section
+uint BaseIndex;            // first index of this section inside the LOD index buffer
+
+Buffer<uint>  IndexBuffer;             // LOD index buffer (16 or 32 bit typed SRV, both read as uint)
+Buffer<float> RestPositionBuffer;      // 3 floats per vertex (engine position vertex buffer)
+Buffer<float> SkinnedPositionBuffer;   // 3 floats per vertex (output of DeformCS)
+
+RWStructuredBuffer<int>  TensorAccum;  // 6 fixed point tensor components per LOD vertex
+RWStructuredBuffer<uint> TensorCount;  // number of triangle contributions per LOD vertex
+
+float3 LoadPos(Buffer<float> Buf, uint VertexIndex)
+{
+	return float3(Buf[VertexIndex * 3 + 0], Buf[VertexIndex * 3 + 1], Buf[VertexIndex * 3 + 2]);
+}
+
+void AccumulateTensor(uint V, float C[6])
+{
+	UNROLL
+	for (uint i = 0; i < TENSOR_STRIDE; ++i)
+	{
+		InterlockedAdd(TensorAccum[V * TENSOR_STRIDE + i], (int)round(clamp(C[i], -64.0f, 64.0f) * TENSOR_FIXED_SCALE));
+	}
+	InterlockedAdd(TensorCount[V], 1u);
+}
+
+[numthreads(THREADGROUP_SIZE, 1, 1)]
+void AccumulateCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	const uint Tri = DispatchThreadId.x;
+	if (Tri >= NumTriangles)
+	{
+		return;
+	}
+	const uint I = BaseIndex + Tri * 3;
+	const uint V0 = IndexBuffer[I + 0];
+	const uint V1 = IndexBuffer[I + 1];
+	const uint V2 = IndexBuffer[I + 2];
+
+	const float3 R0 = LoadPos(RestPositionBuffer, V0);
+	const float3 R1 = LoadPos(RestPositionBuffer, V1);
+	const float3 R2 = LoadPos(RestPositionBuffer, V2);
+	const float3 P0 = LoadPos(SkinnedPositionBuffer, V0);
+	const float3 P1 = LoadPos(SkinnedPositionBuffer, V1);
+	const float3 P2 = LoadPos(SkinnedPositionBuffer, V2);
+
+	// ---- rest triangle basis ------------------------------------------------
+	const float3 U1 = R1 - R0;
+	const float3 U2 = R2 - R0;
+	float3 N = cross(U1, U2);
+	const float NLen = length(N);
+	const float U1Len = length(U1);
+	// Degenerate rest triangle (duplicated vertices, zero area) contributes nothing.
+	if (NLen < 1e-10f || U1Len < 1e-5f)
+	{
+		return;
+	}
+	N /= NLen;
+	const float3 E1 = U1 / U1Len;
+	const float3 E2 = cross(N, E1);
+
+	// rest edges in 2D: u1 = (U1Len, 0), u2 = (u2.x, u2.y)
+	const float2 u2 = float2(dot(U2, E1), dot(U2, E2));
+	const float Det = U1Len * u2.y;          // det [u1 u2]
+	if (abs(Det) < 1e-8f)
+	{
+		return;
+	}
+
+	// ---- deformation gradient F = [p1 p2] [u1 u2]^-1 (3x2, columns F1, F2) ----
+	const float3 D1 = P1 - P0;
+	const float3 D2 = P2 - P0;
+	const float3 F1 = D1 * (u2.y / Det);
+	const float3 F2 = (D2 * U1Len - D1 * u2.x) / Det;
+
+	// ---- C = F^T F in the (E1, E2) basis ----
+	const float A = dot(F1, F1);
+	const float B = dot(F1, F2);
+	const float D = dot(F2, F2);
+
+	// ---- lift to rest component space: C3 = A e1e1' + B (e1e2' + e2e1') + D e2e2' ----
+	float C[6];
+	C[0] = A * E1.x * E1.x + 2.0f * B * E1.x * E2.x + D * E2.x * E2.x;                 // xx
+	C[1] = A * E1.y * E1.y + 2.0f * B * E1.y * E2.y + D * E2.y * E2.y;                 // yy
+	C[2] = A * E1.z * E1.z + 2.0f * B * E1.z * E2.z + D * E2.z * E2.z;                 // zz
+	C[3] = A * E1.x * E1.y + B * (E1.x * E2.y + E2.x * E1.y) + D * E2.x * E2.y;        // xy
+	C[4] = A * E1.x * E1.z + B * (E1.x * E2.z + E2.x * E1.z) + D * E2.x * E2.z;        // xz
+	C[5] = A * E1.y * E1.z + B * (E1.y * E2.z + E2.y * E1.z) + D * E2.y * E2.z;        // yz
+
+	AccumulateTensor(V0, C);
+	AccumulateTensor(V1, C);
+	AccumulateTensor(V2, C);
+}
+
+// ---------------------------------------------------------------------------
+// Resolve (per vertex)
+// ---------------------------------------------------------------------------
+
+uint  NumVertices;         // vertices in the LOD
+float TensionScale;        // strain -> 0..1 mapping (e.g. 4 => 25% stretch saturates)
+float DeltaTime;           // seconds since the last dispatch, clamped on the CPU side
+float RelaxGain;           // slack gained per unit of released stretch
+float RelaxTau;            // seconds for that slack to decay to ~37%
+uint  bResetRelax;         // 1 on the first frame / after a LOD change: start from a clean state
+
+Buffer<SNORM float4>   RestTangentBuffer;   // 2 per vertex: TangentX, TangentZ (w = bitangent sign)
+StructuredBuffer<int>  TensorAccumIn;
+StructuredBuffer<uint> TensorCountIn;
+RWBuffer<UNORM float4> ColorBufferUAV;      // passthrough vertex factory colour buffer (RGBA8)
+RWStructuredBuffer<float> VertexTensorOut;  // averaged C3, 6 floats per vertex, consumed by CustomSkinningDetail.usf
+RWStructuredBuffer<float2> RelaxState;      // PERSISTS between frames: .x = last stretch, .y = slack
+
+// v^T C3 w for a symmetric 3x3 stored as (xx, yy, zz, xy, xz, yz)
+float TensorForm(float C[6], float3 V, float3 W)
+{
+	return C[0] * V.x * W.x + C[1] * V.y * W.y + C[2] * V.z * W.z
+	     + C[3] * (V.x * W.y + V.y * W.x)
+	     + C[4] * (V.x * W.z + V.z * W.x)
+	     + C[5] * (V.y * W.z + V.z * W.y);
+}
+
+[numthreads(THREADGROUP_SIZE, 1, 1)]
+void ResolveCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	const uint V = DispatchThreadId.x;
+	if (V >= NumVertices)
+	{
+		return;
+	}
+	const uint Count = TensorCountIn[V];
+
+	// Rest tangent frame of the vertex. The tensor is projected onto this plane, which is also the
+	// material's tangent space, so anything derived here lines up with the normal map.
+	const float4 TX = RestTangentBuffer[V * 2 + GPUSKIN_VB_OFFSET_TANGENT_X];
+	const float4 TZ = RestTangentBuffer[V * 2 + GPUSKIN_VB_OFFSET_TANGENT_Z];
+	const float3 N = normalize(TZ.xyz + float3(0, 0, 1e-6f));
+	float3 T = TX.xyz - N * dot(N, TX.xyz);
+	T = (dot(T, T) > 1e-8f) ? normalize(T) : float3(1, 0, 0);
+	const float3 Bt = cross(N, T) * (TZ.w < 0.0f ? -1.0f : 1.0f);
+
+	float C[6];
+	if (Count > 0u)
+	{
+		UNROLL
+		for (uint i = 0; i < TENSOR_STRIDE; ++i)
+		{
+			C[i] = ((float)TensorAccumIn[V * TENSOR_STRIDE + i] / TENSOR_FIXED_SCALE) / (float)Count;
+		}
+	}
+	else
+	{
+		// isolated vertex: identity in the tangent plane
+		C[0] = T.x * T.x + Bt.x * Bt.x; C[1] = T.y * T.y + Bt.y * Bt.y; C[2] = T.z * T.z + Bt.z * Bt.z;
+		C[3] = T.x * T.y + Bt.x * Bt.y; C[4] = T.x * T.z + Bt.x * Bt.z; C[5] = T.y * T.z + Bt.y * Bt.z;
+	}
+	UNROLL
+	for (uint j = 0; j < TENSOR_STRIDE; ++j)
+	{
+		VertexTensorOut[V * TENSOR_STRIDE + j] = C[j];
+	}
+
+	// ---- 2x2 in the tangent plane, eigenvalues = squared principal stretches ----
+	const float a = TensorForm(C, T, T);
+	const float b = TensorForm(C, T, Bt);
+	const float d = TensorForm(C, Bt, Bt);
+	const float Half = 0.5f * (a + d);
+	const float Disc = sqrt(max(0.25f * (a - d) * (a - d) + b * b, 0.0f));
+	const float LambdaMax = sqrt(max(Half + Disc, 0.0f));
+	const float LambdaMin = sqrt(max(Half - Disc, 0.0f));
+	const float Stretch = max(LambdaMax - 1.0f, 0.0f);
+	const float Compress = max(1.0f - LambdaMin, 0.0f);
+
+	// ---------------------------------------------------------------------------
+	// Relax slack - the only history this pipeline keeps
+	//
+	// Strain alone is memoryless: a finger held straight looks identical whether it has been straight
+	// all along or has just come back from a hard bend. Real skin does not. Stretched skin pays out
+	// slack, and that slack takes a moment to settle, which is why the back of a knuckle wrinkles
+	// just AFTER the finger straightens. So we track the stretch that was released and let it decay.
+	// ---------------------------------------------------------------------------
+	const float2 PrevState = (bResetRelax != 0u) ? float2(Stretch, 0.0f) : RelaxState[V];
+	const float PrevStretch = max(PrevState.x, 0.0f);
+	const float NowStretch = Stretch;
+
+	float Slack = PrevState.y;
+	// Stretch coming off pays slack out; stretch going back on irons it straight back in, so the
+	// effect only shows on release and does not build up over a held pose.
+	Slack += max(PrevStretch - NowStretch, 0.0f) * RelaxGain;
+	Slack -= max(NowStretch - PrevStretch, 0.0f) * RelaxGain;
+	Slack = saturate(Slack) * exp(-DeltaTime / max(RelaxTau, 1e-3f));
+
+	RelaxState[V] = float2(Stretch, Slack);
+
+	// A carries the slack to the material - the colour buffer's alpha was a constant 1 before.
+	const float4 Color = float4(saturate(Stretch * TensionScale), saturate(Compress * TensionScale), 0.0f, Slack);
+	// Same swizzle the engine's own deformer writer uses so the vertex factory reads RGBA back correctly.
+	ColorBufferUAV[V] = Color FMANUALFETCH_COLOR_COMPONENT_SWIZZLE;
+}

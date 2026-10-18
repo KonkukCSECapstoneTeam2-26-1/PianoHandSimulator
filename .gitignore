@@ -1,8 +1,51 @@
-# Python
+# ===================== Unreal Engine (06_Project/*, 02_Implementation/03_Skinning) =====================
+# Generated / build output
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+06_Project/**/Build/
+Plugins/**/Binaries/
+Plugins/**/Intermediate/
+
+# Simulation / cache data
+Caches/
+SimCache/
+*_BuiltData.uasset
+
+# Generated project files (regenerate via right-click .uproject > Generate Visual Studio project files)
+*.sln
+*.suo
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.opendb
+*.xcodeproj
+*.xcworkspace
+.vs/
+.idea/
+*.code-workspace
+
+# Logs / crash dumps
+*.log
+*.dmp
+
+# ===================== Python (02_Implementation/01_Fingering) =====================
 __pycache__/
 *.py[cod]
 
-# 대용량 미디어 — GitHub 파일당 100MB 한도 초과분이 있어 저장소에 포함하지 않음
-# (최종발표영상 등은 별도 공유)
+# ===================== OS =====================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Claude Code personal settings
+.claude/settings.local.json
+
+# Claude 세션 스크래치
+Claude outputs/
+NotForCommit/
+
+# ===================== 대용량 미디어 =====================
 # 최종발표영상 (104MB) — GitHub 파일당 100MB 한도 초과. 별도 공유.
 03_Reports/Final/최종 제출본/*_최종발표영상.mp4
