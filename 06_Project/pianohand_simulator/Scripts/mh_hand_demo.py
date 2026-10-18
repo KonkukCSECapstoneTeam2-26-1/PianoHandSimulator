@@ -1,6 +1,6 @@
 """PianoHand demo on the MetaHuman hand.
 
-    exec(open(r'C:/Git/PianoHandSimulator/06_Project/pianohand_simulator/Scripts/mh_hand_demo.py').read())
+    exec(open('<project>/Scripts/mh_hand_demo.py').read())          # Windows or macOS
 
 Mesh    /Game/Characters/MetaHumanHand/SKM_MH_Hand_R_Dense   (77k verts, PN tess level 3)
 Anim    /Game/Characters/MetaHumanHand/A_MH_Hand_Cycle       (4s idle -> grasp -> release -> settle)
@@ -21,6 +21,16 @@ Helpers left in the global namespace:
     skin_params()
     view('dorsal', 16)           # repeatable camera, derived from the rig's own flexion axis
     shot('name')                 # HighResShot; must be its own call, after the pose settles
+
+Phase 5 helpers (individual hands):
+    measure()                                    # the mesh's own palm / finger lengths, cm
+    set_proportions(index=(1.1, 1.05, 1.0), ...) # per-finger (proximal, middle, distal) length scales
+    set_proportions(palm_length=1.08, palm_width=0.95, thickness=0.9, overall=1.0)
+    fit_measurements(palm_length=10.5, index=(4.6, 2.6, 2.3), ...)   # target cm -> scale factors
+    reset_proportions()
+    use_mask_groove(True)                        # geometric groove on the primary crease line (mask-driven)
+    use_implicit(True, implicit_bulge=0.1)       # Phase 8 implicit skinning on/off (+ any implicit_* override)
+    implicit_summary()                           # what was fitted (prims, centres, iso range)
 """
 import unreal
 
@@ -53,7 +63,9 @@ DETAIL = dict(
     # real displacement on a 77k mesh reads as lumps
     wrinkle_amplitude       = 0.012,
     wrinkle_frequency       = 6.0,
-    volume_bulge            = 0.10,
+    volume_bulge            = 0.35,     # Phase 7: the roll-up at a bent joint IS this term (1/J thickness), see §1-M
+    tensor_smooth_iterations = 3,       # Phase 7b: 1-ring Laplacian passes on the strain tensor (fist cobbles without it)
+    bulge_gain              = 0.0,      # the capsule ring bulge reads as a ligature; contact push stays on
     # 0.45s is closer to real skin, but the fold it leaves is then gone before a
     # screenshot round-trip can catch it; 0.9s reads in motion and still stills.
     relax_gain              = 12.0,
@@ -84,6 +96,127 @@ hand_actor, hand_comp = _spawn()
 deformer = unreal.PianoHandSkinningLibrary.apply_custom_skinning(hand_comp, MODE, True, TENSION_SCALE, True)
 for _k, _v in DETAIL.items():
     deformer.set_editor_property(_k, _v)
+
+# Phase 5: the geometric groove follows the baked crease LINE instead of the whole joint band
+MASK = '/Game/PianoHand/Textures/T_PH_WrinkleMask'
+MASK_GROOVE = dict(mask_crease_depth=0.035, mask_crease_width=0.12,
+                   dorsal_gather=0.045, dorsal_gather_spacing=0.24, dorsal_gather_reach=0.7, dorsal_gather_base=0.8, dorsal_gather_iron=8.0)
+
+
+def use_mask_groove(on=True):
+    deformer.set_editor_property('wrinkle_mask', unreal.load_asset(MASK) if on else None)
+    for k, v in MASK_GROOVE.items():
+        deformer.set_editor_property(k, v)
+    print('mask groove ->', on)
+
+
+use_mask_groove(True)
+
+# Phase 8: implicit skinning (Vaillant et al. 2013) - HRBF field per bone part, Newton projection
+# of the LBS/DQS pose back to each vertex's rest iso-value, contact stop at 55 deg, tangential
+# relaxation, localised Laplacian smoothing, gradient-based bulge-in-contact. See
+# Docs/ImplicitSkinning_Study.md. The capsule contact push is superseded by it.
+IMPLICIT = dict(
+    implicit_iterations=12, implicit_sigma=0.35, implicit_stop_angle=55.0, implicit_max_step=0.3,
+    implicit_tolerance=0.002, implicit_relax=1.0, implicit_beta_diffusion=12, implicit_smooth_iterations=24,
+    implicit_smooth_beta=1.0, implicit_bulge=0.0, implicit_bulge_start=15.0, implicit_bulge_full=70.0,
+    implicit_bend_start=10.0, implicit_bend_full=40.0, implicit_contact_depth=0.25,
+    implicit_samples_per_bone=50, implicit_palm_samples=100,
+)
+
+
+def use_implicit(on=True, **kw):
+    """Switch the implicit skinning stage; kw overrides any implicit_* property."""
+    params = dict(IMPLICIT)
+    params.update(kw)
+    for k, v in params.items():
+        deformer.set_editor_property(k, v)
+    deformer.set_editor_property('implicit_skinning', bool(on))
+    deformer.set_editor_property('contact_bulge', not on)   # capsule contact is the pre-implicit fallback
+    # the implicit volume replaces most of the 1/J bulge; the strain pass would otherwise amplify every
+    # contact push into a crushed knuckle. DQS is the paper's initial solution (LBS self-intersects deeper).
+    deformer.set_editor_property('volume_bulge', 0.15 if on else DETAIL['volume_bulge'])
+    deformer.set_editor_property('skin_mode', unreal.PianoHandSkinMode.DUAL_QUATERNION if on else MODE)
+    print('implicit skinning ->', on)
+
+
+def implicit_summary():
+    s = unreal.PianoHandSkinningLibrary.get_implicit_skinning_summary(hand_comp)
+    print('implicit:', s or '(not built yet - needs a rendered frame)')
+    return s
+
+
+use_implicit(True)
+
+FINGERS = ('thumb', 'index', 'middle', 'ring', 'pinky')
+
+
+def _finger_struct(spec, thickness=None):
+    f = unreal.PianoHandFingerProportions()
+    if spec is not None:
+        p, m, d = spec
+        f.set_editor_property('proximal', float(p)); f.set_editor_property('middle', float(m)); f.set_editor_property('distal', float(d))
+    if thickness is not None:
+        f.set_editor_property('thickness', float(thickness))
+    return f
+
+
+def set_proportions(palm_length=None, palm_width=None, palm_thickness=None, thickness=None, overall=None, **fingers):
+    """Scale factors on the authored hand, applied per bone inside the deformer. Lengths move the
+    joints downstream and stretch the segment's skin; the strain field is taken against the scaled
+    rest pose, so a longer finger does not read as a stretched one. Omitted entries keep their value.
+        set_proportions(index=(1.1, 1.05, 1.0), pinky=(0.9, 0.9, 0.9), thickness=0.95)"""
+    P = deformer.get_editor_property('proportions')
+    if palm_length is not None: P.set_editor_property('palm_length', float(palm_length))
+    if palm_width is not None: P.set_editor_property('palm_width', float(palm_width))
+    if palm_thickness is not None: P.set_editor_property('palm_thickness', float(palm_thickness))
+    if overall is not None: P.set_editor_property('overall_scale', float(overall))
+    for name in FINGERS:
+        if name in fingers or thickness is not None:
+            cur = P.get_editor_property(name)
+            spec = fingers.get(name)
+            if spec is not None:
+                cur.set_editor_property('proximal', float(spec[0])); cur.set_editor_property('middle', float(spec[1])); cur.set_editor_property('distal', float(spec[2]))
+            if thickness is not None:
+                cur.set_editor_property('thickness', float(thickness))
+            P.set_editor_property(name, cur)
+    deformer.set_editor_property('proportions', P)
+    print('proportions ->', {k: v for k, v in dict(palm_length=palm_length, palm_width=palm_width, thickness=thickness, overall=overall, **fingers).items() if v is not None})
+
+
+def reset_proportions():
+    deformer.set_editor_property('proportions', unreal.PianoHandProportions())
+    print('proportions -> identity')
+
+
+def measure():
+    """Palm length / width and each finger's segment lengths of the mesh's reference pose, in cm."""
+    m = unreal.PianoHandSkinningLibrary.measure_hand(hand_comp)
+    print('palm  length %.2f  width %.2f' % (m.get_editor_property('palm_length'), m.get_editor_property('palm_width')))
+    for name in FINGERS:
+        f = m.get_editor_property(name)
+        print('%-7s proximal %.2f  middle %.2f  distal %.2f' % (name, f.get_editor_property('proximal'), f.get_editor_property('middle'), f.get_editor_property('distal')))
+    return m
+
+
+def fit_measurements(palm_length=0.0, palm_width=0.0, **fingers):
+    """Turn a real hand's measurements (cm; 0 = leave as authored) into proportions and apply them.
+        fit_measurements(palm_length=10.5, palm_width=8.2, index=(4.6, 2.7, 2.3), pinky=(3.4, 2.0, 1.9))"""
+    t = unreal.PianoHandMeasurements()
+    t.set_editor_property('palm_length', float(palm_length)); t.set_editor_property('palm_width', float(palm_width))
+    for name in FINGERS:
+        if name in fingers:
+            fl = unreal.PianoHandFingerLengths()
+            p, m, d = fingers[name]
+            fl.set_editor_property('proximal', float(p)); fl.set_editor_property('middle', float(m)); fl.set_editor_property('distal', float(d))
+            t.set_editor_property(name, fl)
+    P = unreal.PianoHandSkinningLibrary.proportions_from_measurements(hand_comp, t)
+    deformer.set_editor_property('proportions', P)
+    print('fitted proportions: palm %.3f x %.3f' % (P.get_editor_property('palm_length'), P.get_editor_property('palm_width')))
+    for name in FINGERS:
+        f = P.get_editor_property(name)
+        print('  %-7s %.3f %.3f %.3f' % (name, f.get_editor_property('proximal'), f.get_editor_property('middle'), f.get_editor_property('distal')))
+    return P
 
 
 def use_material(key='skin'):

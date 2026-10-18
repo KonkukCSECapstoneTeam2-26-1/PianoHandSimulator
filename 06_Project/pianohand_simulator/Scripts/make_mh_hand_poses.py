@@ -19,7 +19,8 @@ import unreal
 
 SKELETON = '/MetaHumanCharacter/Female/Medium/NormalWeight/Body/metahuman_base_skel'
 DST_DIR = '/Game/Characters/MetaHumanHand'
-ANIM_NAME = 'A_MH_Hand_Cycle'
+# 10-16: overridable from the caller (define PH_* before exec) so pose variants can be authored side by side
+ANIM_NAME = globals().get('PH_ANIM_NAME', 'A_MH_Hand_Cycle')
 ANIM_PATH = DST_DIR + '/' + ANIM_NAME
 
 FPS = 30
@@ -32,16 +33,23 @@ KEYFRAMES = [(0.0, 0.0), (0.5, 0.0), (1.2, 1.0), (2.0, 1.0), (2.5, 0.0), (4.0, 0
 MARKS = {'idle': 0.25, 'closing': 0.85, 'grasp': 1.60, 'released': 2.55, 'settled': 3.60}
 
 # degrees of yaw at curl = 1, per joint
+# 10-16: 68/82/46 drove the fingertips through the palm and the fingers were crushed by the implicit pushes;
+# 62/72/32 lands the tips on the palm surface (the paper's contact handling takes it from there)
 CURL = {
     '%s_metacarpal_r': 0.0,
-    '%s_01_r': -68.0,
-    '%s_02_r': -82.0,
-    '%s_03_r': -46.0,
+    '%s_01_r': -62.0,
+    '%s_02_r': -72.0,
+    '%s_03_r': -32.0,
 }
 FINGERS = ['index', 'middle', 'ring', 'pinky']
 # the palm cups as the outer fingers close
 METACARPAL_CUP = {'index': 0.0, 'middle': 0.0, 'ring': -7.0, 'pinky': -13.0}
-THUMB = {'thumb_01_r': -22.0, 'thumb_02_r': -30.0, 'thumb_03_r': -34.0}
+THUMB = globals().get('PH_THUMB', {'thumb_01_r': -16.0, 'thumb_02_r': -24.0, 'thumb_03_r': -28.0})   # 10-16: was 22/30/34
+# 10-16: extra (pitch, roll) degrees at curl = 1 on the thumb bones - the yaw-only curl drove the thumb straight
+# through the index / middle fingers of the fist ("뚫림"); the paper's contact handling cannot undo a pose
+# that already interpenetrates, so the thumb has to swing OUTSIDE the curled fingers
+THUMB_SWING = globals().get('PH_THUMB_SWING', {'thumb_01_r': (-12.0, -10.0)})   # 10-16 variant G: beside the index, no crossing
+CURL.update(globals().get('PH_CURL', {}))
 
 ML = unreal.MathLibrary
 
@@ -93,7 +101,10 @@ def create_anim():
     if skel is None:
         raise RuntimeError('skeleton not found: ' + SKELETON)
     if unreal.EditorAssetLibrary.does_asset_exist(ANIM_PATH):
-        unreal.EditorAssetLibrary.delete_asset(ANIM_PATH)
+        # 10-16: re-key the existing asset instead of deleting it - the demo level and the spawned hand reference it
+        anim = unreal.load_asset(ANIM_PATH)
+        anim.get_editor_property('controller').remove_all_bone_tracks()
+        return anim
     factory = unreal.AnimSequenceFactory()
     factory.set_editor_property('target_skeleton', skel)
     return unreal.AssetToolsHelpers.get_asset_tools().create_asset(ANIM_NAME, DST_DIR, unreal.AnimSequence, factory)
@@ -115,8 +126,9 @@ def run():
         ref = refs[name]
         ref_rot = ref.rotation.rotator()
         pos, rot, scl = [], [], []
+        sw = THUMB_SWING.get(name, (0.0, 0.0))
         for c in curls:
-            delta = unreal.Rotator(roll=0.0, pitch=0.0, yaw=deg * c)
+            delta = unreal.Rotator(roll=sw[1] * c, pitch=sw[0] * c, yaw=deg * c)
             pos.append(ref.translation)
             rot.append(ML.compose_rotators(delta, ref_rot).quaternion())
             scl.append(unreal.Vector(1.0, 1.0, 1.0))

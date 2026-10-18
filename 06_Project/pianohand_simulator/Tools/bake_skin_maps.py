@@ -48,6 +48,30 @@ Needs numpy, Pillow and opencv-python (the 16-bit RGBA writer). Produces three P
      RGB = tangent-space normal of sparse raised vein ridges
      A   = vein mask (for base-colour tinting)
 
+  T_PH_WrinkleMask2.png  RGBA 16-bit, mesh UV space, NOT tiling (v3 - crease shape, palm lines, identity)
+     R = joint SEED, a per-joint hash in 0.05..0.95. Nearest-vertex (categorical): constant over a
+         joint's band, so it never interpolates between two joints. The shader uses it to make every
+         joint's fold count / phase / fork direction its own - the same pattern repeating on ten
+         fingers is what reads as "procedural".
+     G = clamp(d / PALM_RANGE, 0, 1), d = distance (cm) to the nearest of the three major palm
+         creases (distal palmar, proximal palmar, thenar), 1 = far / not palm. The curves are not
+         hand-authored: they are quadratic Beziers placed from the MCP / wrist bone landmarks in a
+         hand-local frame (see palm_creases), so they move with the rig and survive a re-bake.
+     B = that crease's depth at the nearest point (0..1): each curve tapers towards its ends, and the
+         three curves do not share one depth. 0 away from the palm.
+     A = L / L_RANGE, L = distance along the hand's distal axis from the wrist (cm), INTERPOLATED and
+         continuous over the whole hand. The shader never reads its value - only its UV GRADIENT,
+         which it dots with the gradient of mask 1's unsigned s to recover WHICH side of the nearest
+         joint a texel is on (s grows with L distal of the band, against it proximal). That sign is
+         what lets the primary crease bow towards the fingertip and fork at its ends. A per-vertex
+         flag was tried first and failed: a categorical side bit flips on vertex-Voronoi borders, not
+         on the s = 0 line, so sign * |s| jumped inside every triangle and the creases came out as a
+         zig-zag. Two gradients of two smooth fields flip exactly where they should.
+
+  T_PH_PalmRidge_N.png   RGB tangent-space normal, seamlessly tiling
+     Papillary (fingerprint) ridges: one slowly meandering line family, period 1/40 tile. Real ridge
+     spacing is ~0.5mm, so at 25cm per UV unit the shader tiles this ~12x.
+
 All noise here is PERIODIC (lattice hashes taken mod the period), which is what makes the two
 tiling maps seamless - a plain frac(sin(dot)) hash does not wrap.
 """
@@ -65,6 +89,18 @@ MASK_SIZE = 2048
 # +-1cm of a joint anyway.
 S_RANGE = 2.0
 TILE_SIZE = 1024
+
+# Half-range (cm) of the distance-to-palm-crease field in mask 2's G.
+PALM_RANGE = 2.0
+
+# Range (cm) of the along-hand coordinate stored in mask 2's A (wrist cap ~ -2 -> fingertips ~ 20).
+L_RANGE = 24.0
+
+
+def encode_seed(bone_index):
+    """Mask 2 R: a per-joint hash in 0.05..0.95."""
+    h = ((bone_index * 2654435761) & 0xFFFFFFFF) / float(0xFFFFFFFF)   # Knuth multiplicative hash
+    return 0.05 + h * 0.9
 
 # Per-joint crease weighting. The key matches the CHILD bone of the joint (the deeper one).
 # Tune these to move where the wrinkles pile up.
@@ -225,6 +261,41 @@ def bake_wrinkle_mask(data, size):
     # finger joint sits ~0.5cm proximal of the pivot, and the shader puts its main palm crease and
     # mirrors its knuckle folds about s = 0 - so without this the deepest crease lands at the edge
     # of the band where it is barely visible. Per joint, the band-weighted mean of s is subtracted.
+    # The along-bone axis of a joint is the BISECTOR of the two segments it joins (a mitre), not the
+    # parent segment alone. MetaHuman's reference pose has the fingers slightly curled (12-20 deg at
+    # the PIPs), so a plane square to the proximal phalanx cuts the middle phalanx obliquely: the
+    # crease then ran at a slant across the finger and, where the slanted band met the side of the
+    # finger at a shallow angle, the material drew a wide dark wedge (first seen on the index PIP).
+    # Square to the bisector it is off by half the bend on each side, and there is no seam.
+    children_of = {}
+    for b, par in enumerate(bone_parent):
+        children_of.setdefault(par, []).append(b)
+
+    def joint_axis(child):
+        par = bone_parent[child]
+        a1 = bone_pos[child] - bone_pos[par]
+        n1 = np.linalg.norm(a1)
+        if n1 < 1e-6:
+            return None
+        a1 = a1 / n1
+        kids = [k for k in children_of.get(child, []) if np.linalg.norm(bone_pos[k] - bone_pos[child]) > 1e-6]
+        if kids:
+            a2 = bone_pos[kids[0]] - bone_pos[child]
+            a2 = a2 / np.linalg.norm(a2)
+            ax = a1 + a2
+            n = np.linalg.norm(ax)
+            if n > 1e-6:
+                return ax / n
+        return a1
+
+    # re-measure the first-pass 'along' with the mitre axis so the recentre below uses the same frame
+    for v in range(n_vtx):
+        child = joint_of[v]
+        if child >= 0:
+            ax = joint_axis(int(child))
+            if ax is not None:
+                along[v] = float((pos[v] - bone_pos[child]) @ ax)
+
     offset = {}
     for child in np.unique(joint_of[joint_of >= 0]):
         sel = joint_of == child
@@ -239,23 +310,27 @@ def bake_wrinkle_mask(data, size):
     # ~0.4cm and the shader's finite difference drew it as a thin zig-zag line. A min over
     # continuous distances is continuous. The crease model only ever used |s| (the primary crease
     # and the fold family are symmetric about the joint), so nothing is lost.
+    seed = np.full(n_vtx, 0.05)            # mask 2 R
+    to_frame, _ = _hand_frame(bones)
+    along_hand = np.array([to_frame(p)[0] for p in pos])   # mask 2 A: distal coordinate, cm
     axis_of = {}
     for child, off in offset.items():
-        par = bone_parent[child]
-        axis = bone_pos[child] - bone_pos[par]
-        n = np.linalg.norm(axis)
-        if n > 1e-6:
-            axis_of[child] = (axis / n, bone_pos[child] + axis / n * off)
-    children_of = {}
-    for b, par in enumerate(bone_parent):
-        children_of.setdefault(par, []).append(b)
+        ax = joint_axis(int(child))
+        if ax is not None:
+            axis_of[child] = (ax, bone_pos[child] + ax * off)
     for v, w in enumerate(weights):
         w = [e for e in w if e[1] > 0.0]
         if not w:
             continue
         dom = w[0][0]
+        # Only joints on the dominant bone's OWN chain: the joint at its proximal end (named by dom)
+        # and at its distal end (dom's children). The second influence used to be a candidate too,
+        # but at the sides of a finger that influence can belong to the NEIGHBOURING finger, whose
+        # joint band then measures as "0 cm away" along its own oblique axis over a wide patch of
+        # skin - which the shader drew as a deep triangular wedge beside the index PIP. A parent or
+        # child second influence is on the same chain and is already covered.
         cands = [dom] + children_of.get(dom, [])
-        if len(w) > 1:
+        if len(w) > 1 and (bone_parent[w[1][0]] == dom or bone_parent[dom] == w[1][0]):
             cands += [w[1][0]] + children_of.get(w[1][0], [])
         best = None
         for j in cands:
@@ -268,6 +343,11 @@ def bake_wrinkle_mask(data, size):
         if best is not None:
             along[v] = best[0]
             jtype[v] = joint_type(bone_name[best[1]])
+            seed[v] = encode_seed(int(best[1]))
+        else:
+            seed[v] = encode_seed(int(dom))
+
+    palm_flag = palm_vertex_flags(data, pos, weights, bone_name)
 
     acc = np.zeros((size, size, 4), dtype=np.float32)
     cov = np.zeros((size, size), dtype=np.float32)
@@ -294,7 +374,146 @@ def bake_wrinkle_mask(data, size):
     out[..., 1] = np.clip(mask[..., 1] / S_RANGE, 0, 1) * 65535
     out[..., 2] = np.clip(mask[..., 2], 0, 1) * 65535
     out[..., 3] = np.clip(mask[..., 3] * 0.5 + 0.5, 0, 1) * 65535
-    return out, float(hit.mean())
+
+    # ---- mask 2: seed (categorical), palm crease distance, palm crease depth, along-hand coordinate
+    # The palm crease distance is computed PER TEXEL from the texel's interpolated hand-frame
+    # position, not per vertex: the base mesh has 4.8k vertices, and a distance field sampled at
+    # them and interpolated across 0.6 cm triangles has an iso-line that zig-zags along the
+    # triangle edges - a sawtooth along every palm crease at 4K.
+    to_frame_fn, _ = _hand_frame(bones)
+    frame_xyz = np.array([to_frame_fn(p) for p in pos])
+    acc2 = np.zeros((size, size, 4), dtype=np.float32)
+    cov2 = np.zeros((size, size), dtype=np.float32)
+    accf = np.zeros((size, size, 4), dtype=np.float32)    # hand-frame x, y, z (interpolated), palm flag (nearest)
+    covf = np.zeros((size, size), dtype=np.float32)
+    for t, (i0, i1, i2) in enumerate(tris):
+        uv = uvs[t]
+        if uv is None:
+            continue
+        pts = [np.array(x, dtype=np.float64) for x in uv]
+        vals = [(seed[vi], 0.0, 0.0, along_hand[vi]) for vi in (i0, i1, i2)]
+        _raster(acc2, cov2, size, pts, vals, nearest=(0,))
+        fvals = [(frame_xyz[vi][0], frame_xyz[vi][1], frame_xyz[vi][2], palm_flag[vi]) for vi in (i0, i1, i2)]
+        _raster(accf, covf, size, pts, fvals, nearest=(3,))
+    mask2 = np.zeros((size, size, 4), dtype=np.float32)
+    hit2 = cov2 > 0
+    mask2[hit2] = acc2[hit2] / cov2[hit2][:, None]
+    framef = np.zeros((size, size, 4), dtype=np.float32)
+    framef[hit2] = accf[hit2] / covf[hit2][:, None]
+    palm_d, palm_amp = palm_crease_texels(bones, framef, hit2)
+    mask2[..., 1] = palm_d
+    mask2[..., 2] = palm_amp
+    mask2[..., 1][~hit2] = PALM_RANGE          # empty texels read as "far from any palm crease"
+    mask2 = _dilate(mask2, hit2, 6)
+
+    out2 = np.zeros((size, size, 4), dtype=np.uint16)
+    out2[..., 0] = np.clip(mask2[..., 0], 0, 1) * 65535
+    out2[..., 1] = np.clip(mask2[..., 1] / PALM_RANGE, 0, 1) * 65535
+    out2[..., 2] = np.clip(mask2[..., 2], 0, 1) * 65535
+    out2[..., 3] = np.clip((mask2[..., 3] + 2.0) / L_RANGE, 0, 1) * 65535   # wrist cap sits ~2cm proximal of hand_r
+    return out, out2, float(hit.mean())
+
+
+# ---------------------------------------------------------------------------------------------
+# 1b) the three major palm creases, from bone landmarks
+# ---------------------------------------------------------------------------------------------
+
+def _hand_frame(bones):
+    """Origin at hand_r; x points distally (wrist -> fingers), y across the palm towards the LITTLE
+    finger (the thumb is at negative y), z towards the back of the hand. All unit, component space."""
+    by_name = {b['name']: b for b in bones}
+    hand = by_name['hand_r']
+    origin = np.array(hand['pos'], dtype=np.float64)
+    fwd = np.array(hand['fwd'], dtype=np.float64)
+    flex = np.array(hand['flex'], dtype=np.float64)
+    fwd /= np.linalg.norm(fwd)
+    dorsal = np.cross(flex, fwd)
+    dorsal /= np.linalg.norm(dorsal)
+    ulnar = np.cross(dorsal, fwd)
+    ulnar /= np.linalg.norm(ulnar)
+
+    def to_frame(p):
+        r = np.asarray(p, dtype=np.float64) - origin
+        return np.array([r @ fwd, r @ ulnar, r @ dorsal])
+    return to_frame, by_name
+
+
+def _bezier(p0, p1, p2, n=2000):   # dense: the texel distance field is to the nearest POINT, so the spacing must be far under the furrow width
+    t = np.linspace(0.0, 1.0, n)[:, None]
+    return (1 - t) ** 2 * p0 + 2 * (1 - t) * t * p1 + t ** 2 * p2
+
+
+def palm_creases(bones):
+    """The distal palmar, proximal palmar and thenar creases as polylines in the hand frame (x, y),
+    each with a depth profile along its length. Placed from the MCP joints and the wrist.
+
+    Anatomy, palm up, right hand: the distal palmar crease starts at the ulnar edge about 1.5cm
+    proximal of the little-finger MCP, runs radially under the ring and middle MCPs about 1-1.5cm
+    proximal of the joints and fades out between the index and middle fingers. The proximal palmar
+    crease starts at the radial edge below the index MCP, crosses the palm more obliquely and fades
+    under the ring / little fingers. The thenar crease leaves the same radial start, bows around
+    the ball of the thumb and runs down to the middle of the wrist. The last two often meet at the
+    radial end, which is why they share it here."""
+    to_frame, by_name = _hand_frame(bones)
+    mcp = {k: to_frame(by_name[k + '_01_r']['pos'])[:2] for k in ('index', 'middle', 'ring', 'pinky')}
+    wrist = np.array([0.6, -0.2])
+
+    distal = _bezier(
+        np.array([mcp['pinky'][0] - 1.5, mcp['pinky'][1] + 0.5]),
+        np.array([(mcp['ring'][0] + mcp['middle'][0]) * 0.5 - 0.9, (mcp['ring'][1] + mcp['middle'][1]) * 0.5 + 0.2]),
+        np.array([(mcp['index'][0] + mcp['middle'][0]) * 0.5 - 1.3, (mcp['index'][1] + mcp['middle'][1]) * 0.5 - 0.3]))
+    radial_start = np.array([mcp['index'][0] - 1.4, mcp['index'][1] - 1.1])
+    proximal = _bezier(
+        radial_start,
+        np.array([mcp['middle'][0] - 2.4, mcp['middle'][1] - 0.2]),
+        np.array([mcp['ring'][0] - 3.3, mcp['pinky'][1] - 0.6]))
+    thenar = _bezier(
+        radial_start + np.array([-0.3, 0.0]),
+        np.array([wrist[0] + 2.6, mcp['index'][1] - 1.8]),
+        wrist)
+
+    def taper(n, head, tail, depth):
+        t = np.linspace(0.0, 1.0, n)
+        return depth * np.clip(np.minimum(t / max(head, 1e-3), (1.0 - t) / max(tail, 1e-3)), 0.0, 1.0) ** 0.7
+
+    return [
+        (distal,   taper(len(distal),   0.12, 0.45, 1.0)),    # fades gently towards the index side
+        (proximal, taper(len(proximal), 0.15, 0.35, 0.9)),
+        (thenar,   taper(len(thenar),   0.20, 0.25, 0.8)),
+    ]
+
+
+def palm_vertex_flags(data, pos, weights, bone_name):
+    """1 on vertices whose dominant bone is a palm bone (hand, metacarpals, thumb base, proximal
+    phalanges), 0 elsewhere. Rasterised nearest-vertex, it gates where the palm creases may be drawn."""
+    palm_bones = {i for i, nm in enumerate(bone_name)
+                  if nm.lower() in ('hand_r', 'thumb_01_r') or 'metacarpal' in nm.lower() or nm.lower().endswith('_01_r')}
+    flag = np.zeros(len(pos))
+    for v, w in enumerate(weights):
+        w = [e for e in w if e[1] > 0.0]
+        if w and w[0][0] in palm_bones:
+            flag[v] = 1.0
+    return flag
+
+
+def palm_crease_texels(bones, framef, hit):
+    """Per texel: distance (cm, in the palm plane) to the nearest palm crease and that crease's depth
+    there, from the texel's interpolated hand-frame position. Only texels on the PALMAR side
+    (z < -0.25) of palm bones take part; everything else reads as PALM_RANGE / 0."""
+    from scipy.spatial import cKDTree
+    size = framef.shape[0]
+    dist = np.full((size, size), PALM_RANGE, dtype=np.float32)
+    amp = np.zeros((size, size), dtype=np.float32)
+    curves = palm_creases(bones)
+    pts = np.concatenate([c for c, _ in curves])
+    amps = np.concatenate([a for _, a in curves])
+    sel = hit & (framef[..., 3] > 0.5) & (framef[..., 2] < -0.25)
+    if sel.any():
+        q = framef[sel][:, :2]
+        d, k = cKDTree(pts).query(q)
+        dist[sel] = np.minimum(d, PALM_RANGE)
+        amp[sel] = amps[k]
+    return dist, amp
 
 
 def _dorsal_axes(bones):
@@ -437,16 +656,49 @@ def bake_veins(size):
     return out
 
 
+# ---------------------------------------------------------------------------------------------
+# 4) tiling palm (papillary) ridge normal
+# ---------------------------------------------------------------------------------------------
+
+def bake_palm_ridges(size):
+    """Fingerprint-style ridges: ONE line family (unlike the crossed grooves of the back of the
+    hand) whose direction drifts slowly, so the field reads as flowing ridges and not a grating.
+    The ridge count per tile (40) is what the shader's RidgeTiling is calibrated against."""
+    u = (np.arange(size) + 0.5) / size
+    gx, gy = np.meshgrid(u, u)
+    P = 8
+    RIDGES = 40.0
+    # slow 2D warp: bends the ridges into the meanders of a real print without breaking periodicity
+    wx = (pfbm(gx * P, gy * P, P, 401, octaves=3) - 0.5) * 2.0
+    wy = (pfbm(gx * P + 2.9, gy * P + 7.3, P, 409, octaves=3) - 0.5) * 2.0
+    phase = (gx * P + wx) * (RIDGES / P) + 0.35 * (gy * P + wy) * (RIDGES / P)
+    ridge = np.sin(phase * np.pi * 2.0)
+    # rounded crests, slightly sharper valleys (sweat-gland pores sit on the crests; not modelled)
+    h = np.sign(ridge) * np.abs(ridge) ** 0.8 * 0.5
+    # local interruptions - ridge endings and bifurcations, which every print has
+    # kept mild: a print is ridges everywhere with SHORT interruptions, not islands of ridges
+    gaps = np.clip((pfbm(gx * P * 3, gy * P * 3, P * 3, 421, octaves=2) - 0.5) * 4.0 + 1.0, 0.45, 1)
+    h *= gaps
+    n = height_to_normal(h, strength=2.2)
+    return encode_normal(n)
+
+
 def main():
     src, out_dir = sys.argv[1], sys.argv[2]
     data = json.load(open(src))
 
-    mask, coverage = bake_wrinkle_mask(data, MASK_SIZE)
+    mask, mask2, coverage = bake_wrinkle_mask(data, MASK_SIZE)
     # PIL cannot write 16-bit RGBA; OpenCV can (it wants BGRA order)
     import cv2
     cv2.imwrite(out_dir + '/T_PH_WrinkleMask.png', mask[..., [2, 1, 0, 3]])
     print('T_PH_WrinkleMask  %dx%d  UV coverage %.1f%%  (G range 0..%.1fcm unsigned, B = joint type, A = dorsal side)'
           % (MASK_SIZE, MASK_SIZE, coverage * 100, S_RANGE))
+    cv2.imwrite(out_dir + '/T_PH_WrinkleMask2.png', mask2[..., [2, 1, 0, 3]])
+    print('T_PH_WrinkleMask2 %dx%d  (R = joint seed, G = palm crease distance 0..%.1fcm, B = palm crease depth, A = along-hand / %.0fcm)'
+          % (MASK_SIZE, MASK_SIZE, PALM_RANGE, L_RANGE))
+
+    Image.fromarray(bake_palm_ridges(TILE_SIZE), 'RGB').save(out_dir + '/T_PH_PalmRidge_N.png')
+    print('T_PH_PalmRidge_N  %dx%d  tiling' % (TILE_SIZE, TILE_SIZE))
 
     Image.fromarray(bake_skin_detail(TILE_SIZE), 'RGB').save(out_dir + '/T_PH_SkinDetail_N.png')
     print('T_PH_SkinDetail_N %dx%d  tiling' % (TILE_SIZE, TILE_SIZE))

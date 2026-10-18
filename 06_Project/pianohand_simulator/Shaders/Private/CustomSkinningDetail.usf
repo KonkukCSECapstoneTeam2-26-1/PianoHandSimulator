@@ -78,8 +78,72 @@ float CreaseStretchRelief;   // how strongly stretch irons the resting groove fl
 float RelaxCreaseGain;       // cm of extra groove at full relax slack
 float TensionScale;          // strain -> 0..1 colour mapping, same value ResolveCS uses
 
+// ---- Phase 5: mask-driven groove on the PRIMARY crease line only ------------------------------
+// The band-wide trench above reads as a cuff, because the skin-weight band is as wide as the
+// whole joint. The baked wrinkle mask (T_PH_WrinkleMask, see Tools/bake_skin_maps.py) knows the
+// crease LINE: G is the unsigned distance along the bone to the band centre, so a Bando furrow
+// in that coordinate is a groove a millimetre wide sitting exactly under the material's primary
+// crease. Gated like the material (palm deepens with compression, knuckle irons out with stretch)
+// so geometry and shading agree. Only the primary line is grooved - the fine folds stay a
+// normal-map job, where 0.3 mm of real displacement would read as lumps.
+uint  bHasWrinkleMask;
+uint  NumUVChannels;
+float MaskCreaseDepth;       // cm, groove depth at full gate
+float MaskCreaseWidth;       // cm, Bando w
+float MaskCreaseRange;       // cm, S_RANGE of the bake (mask G * this = distance to the band centre)
+float MaskGain;
+float MaskSharpness;
+float MaskPalmSplit;         // cm, half-distance of the palmar PIP double crease
+// one declaration per line: UE's shader parameter parser does not split comma lists
+float MaskPalmarBase;
+float MaskPalmarCompress;
+float MaskPalmarIron;
+float MaskDorsalBase;
+float MaskDorsalIron;
+// Phase 9: gathered skin over an extended knuckle (ridges parallel to the crease, ironed by flexion)
+float DorsalGather;          // cm, ridge height
+float DorsalGatherSpacing;   // cm between ridges
+float DorsalGatherReach;     // cm from the crease where the ridges die out
+float DorsalGatherBase;      // standing gate on an extended knuckle
+float DorsalGatherIron;      // how fast flexion stretch spends it
+Texture2D      WrinkleMask;
+SamplerState   WrinkleMaskSampler;
+Buffer<float2> UVInputBuffer;        // engine texcoord stream, NumUVChannels per vertex
+
+// ---- Phase 7: joint contact + volume-preserving bulge ------------------------------------------
+// Skinning, however good, only interpolates. The inside of a bent finger does something it cannot:
+// the two segments meet, and the tissue caught between them has nowhere to go but out - it rolls
+// up around the fold. Vaillant et al. 2013 ("Implicit Skinning") get this by giving each bone an
+// implicit field and composing neighbours with a gradient-based bulge-in-contact operator whose
+// strength follows the bend angle (union at rest, full bulge from 90 degrees); Brunel, Benard and
+// Guennebaud 2021 ("A Time-Independent Deformer for Elastic Contacts") spread a volume-preserving
+// profile over a deformable region around the contact zone. Here each bone is a capsule (origin,
+// axis end, radius measured from the rest mesh); for a vertex on segment b with the joint partner
+// o, f_o = r_o - dist(x, axis_o) is the partner's field. Inside the fold:
+//   contact  f_o + margin > 0 : the vertex is pushed out of the partner along grad f_o, onto the
+//            contact surface (the margin is the skin thickness that never flattens)
+//   bulge    around the contact zone, u = -(f_o + margin) / reach runs 0..1 outward; a bump profile
+//            in u, peaking at BulgeSpread, lifts the ring along the normal
+// Both are scaled by theta(alpha) = smoothstep(BendStart, BendFull, bend angle) and confined to the
+// fold side (the half-space the two bone axes bend into). The outside of the joint is pulled onto
+// the bone a little instead (DorsalTighten): skin goes taut over a knuckle.
+uint  bContactBulge;
+float ContactMargin;         // cm
+float BulgeGain;             // cm, ring height at a full bend
+float BulgeReach;            // cm, deformable region width
+float BulgeSpread;           // 0..1, where the ring peaks
+float BendStart;             // radians
+float BendFull;              // radians
+float CapsuleRadiusScale;
+float DorsalTighten;         // cm
+StructuredBuffer<FBoneTransform> BoneTransforms;   // animated, section order
+StructuredBuffer<float4>         BoneCapsules;     // 2 per section bone: (rest origin, radius), (rest end, parent section index)
+
 Buffer<float>                    RestPositionBuffer;   // 3 floats per vertex, rest pose
 Buffer<SNORM float4>             RestTangentBuffer;    // 2 per vertex: TangentX, TangentZ (w = sign), rest pose
+uint                             bUseProportionedRest; // Phase 5: read the proportion-scaled rest instead (see CustomSkinningTension.usf)
+Buffer<float>                    ProportionedRestPositionBuffer;
+Buffer<SNORM float4>             ProportionedRestTangentBuffer;
 Buffer<uint>                     InputWeightStream;    // FSkinWeightVertexBuffer data
 StructuredBuffer<FBoneTransform> RefPoseInverses;      // RefBasesInvMatrix in section BoneMap order
 StructuredBuffer<float>          VertexTensor;         // averaged C3, 6 floats per LOD vertex (xx yy zz xy xz yz)
@@ -103,6 +167,171 @@ float TensorForm(float C[6], float3 V, float3 W)
 float3 LoadPosition(Buffer<float> Buf, uint VertexIndex)
 {
 	return float3(Buf[VertexIndex * 3 + 0], Buf[VertexIndex * 3 + 1], Buf[VertexIndex * 3 + 2]);
+}
+
+// Bando, Kuratate, Nishita 2002 furrow section: -1 at the bottom, a low bank at 2w, 0 beyond.
+// Same profile as PianoHandSkin.ush's PH_Furrow so the groove and the shading line up.
+float MaskFurrow(float L, float W)
+{
+	const float X = abs(L) / max(W, 1e-4f);
+	const float S = (X - 1.0f) * exp(-X);
+	return (S > 0.0f) ? S * 0.4f : S;
+}
+
+float3 ClosestOnSegment(float3 P, float3 A, float3 B, out float T)
+{
+	const float3 AB = B - A;
+	T = saturate(dot(P - A, AB) / max(dot(AB, AB), 1e-6f));
+	return A + AB * T;
+}
+
+// Contact push (along the partner's field gradient) and normal-direction bulge for the joint between
+// the dominant bone and its second influence. Returns false when the two bones do not form a joint.
+bool ContactBulge(float3 X, float3 XRest, uint Bone, uint Other, out float3 OutPush, out float OutBulge)
+{
+	OutPush = float3(0, 0, 0);
+	OutBulge = 0.0f;
+	if (Bone == Other || Bone >= NumSectionBones || Other >= NumSectionBones)
+	{
+		return false;
+	}
+	const float4 Cb0 = BoneCapsules[Bone * 2u], Cb1 = BoneCapsules[Bone * 2u + 1u];
+	const float4 Co0 = BoneCapsules[Other * 2u], Co1 = BoneCapsules[Other * 2u + 1u];
+	const int ParentB = (int)Cb1.w;
+	const int ParentO = (int)Co1.w;
+	// which of the two is the parent segment of this joint
+	uint P, C;
+	if (ParentB == (int)Other) { P = Other; C = Bone; }
+	else if (ParentO == (int)Bone) { P = Bone; C = Other; }
+	else { return false; }
+	const float4 Cp0 = BoneCapsules[P * 2u], Cp1 = BoneCapsules[P * 2u + 1u];
+	const float4 Cc0 = BoneCapsules[C * 2u], Cc1 = BoneCapsules[C * 2u + 1u];
+	if (Cp0.w <= 0.0f || Cc0.w <= 0.0f)
+	{
+		return false;   // unmeasured capsule
+	}
+	const FBoneTransform Mp = BoneTransforms[P];
+	const FBoneTransform Mc = BoneTransforms[C];
+	const float3 Op = TransformPosition(Mp, Cp0.xyz), Ep = TransformPosition(Mp, Cp1.xyz);
+	const float3 Oc = TransformPosition(Mc, Cc0.xyz), Ec = TransformPosition(Mc, Cc1.xyz);
+	const float3 Ap = normalize(Ep - Op + 1e-5f);        // parent axis, pointing to the joint
+	const float3 Ac = normalize(Ec - Oc + 1e-5f);        // child axis, pointing away from it
+	const float Bend = acos(clamp(dot(Ap, Ac), -1.0f, 1.0f));
+	const float Theta = smoothstep(BendStart, BendFull, Bend);
+	if (Theta <= 0.0f)
+	{
+		return false;
+	}
+	// The fold's interior is the side the axes bend into. Measured RADIALLY: the vector from the
+	// vertex's own axis to the vertex, against the bend direction with the axis component removed.
+	// (Measured from the joint origin instead, anything distal of the joint counted as "inside" -
+	// the back of every knuckle bulged.)
+	const bool bOnParent = (Bone == P);
+	const float3 Aown = bOnParent ? Ap : Ac;
+	const float3 Oown = bOnParent ? Op : Oc, Eown = bOnParent ? Ep : Ec;
+	float Town;
+	const float3 Qown = ClosestOnSegment(X, Oown, Eown, Town);
+	const float3 Radial = normalize(X - Qown + 1e-5f);
+	float3 Inside = -Ap + Ac;
+	Inside = Inside - Aown * dot(Inside, Aown);
+	Inside = normalize(Inside + 1e-5f);
+	const float Side = dot(Radial, Inside);
+	const float InFold = smoothstep(0.1f, 0.6f, Side);
+	const float Outside = smoothstep(0.1f, 0.6f, -Side);
+	// the squeezed tissue goes SIDEWAYS as much as inward (Brunel's anisotropic spread): the bulge
+	// ring covers the palmar half and the two flanks, and only the back of the joint is excluded
+	const float BulgeSide = smoothstep(-0.35f, 0.45f, Side);
+
+	// the partner's capsule field at X
+	const bool bPartnerIsParent = (Other == P);
+	const float3 Oo = bPartnerIsParent ? Op : Oc, Eo = bPartnerIsParent ? Ep : Ec;
+	const float Ro = (bPartnerIsParent ? Cp0.w : Cc0.w);
+	float T;
+	const float3 Q = ClosestOnSegment(X, Oo, Eo, T);
+	const float3 Away = X - Q;
+	const float D = length(Away);
+	const float3 Grad = Away / max(D, 1e-4f);
+	const float F = Ro - D;                               // > 0 inside the partner
+	// The two capsules of a joint overlap at REST (the skin over a joint is bound to both bones), so
+	// the raw field says "inside the partner" for a ring of skin that is perfectly fine. Only the
+	// penetration the BEND adds counts: the rest-pose field value, measured on the rest capsule, is
+	// the baseline. (Vaillant et al. keep each vertex's own rest iso-value for the same reason.)
+	const float3 OoR = bPartnerIsParent ? Cp0.xyz : Cc0.xyz, EoR = bPartnerIsParent ? Cp1.xyz : Cc1.xyz;
+	float TR;
+	const float3 QR = ClosestOnSegment(XRest, OoR, EoR, TR);
+	const float FRest = Ro - length(XRest - QR);
+	const float Pen = (F - max(FRest, 0.0f)) + ContactMargin * Theta;
+
+	// contact: out of the partner, onto its margin surface
+	const float Push = max(Pen, 0.0f) * Theta * InFold;
+	OutPush = Grad * Push;
+	// bulge: a bump over the deformable ring outside the contact zone, volume rolled up from it
+	const float U = saturate(-Pen / max(BulgeReach, 1e-3f));
+	const float Spread = clamp(BulgeSpread, 0.05f, 0.95f);
+	const float Profile = (U < Spread) ? smoothstep(0.0f, Spread, U) : 1.0f - smoothstep(Spread, 1.0f, U);
+	OutBulge = BulgeGain * Profile * Theta * BulgeSide - DorsalTighten * Theta * Outside;
+	return true;
+}
+
+// Groove depth (cm, negative = inward) on the primary crease line at this vertex.
+float MaskCreaseDisplacement(uint VertexIndex, float CompressionC, float StretchC)
+{
+	const float2 UV = UVInputBuffer[VertexIndex * max(NumUVChannels, 1u)];
+	const float4 M = WrinkleMask.SampleLevel(WrinkleMaskSampler, UV, 0);
+	const float Band = pow(saturate(M.r * MaskGain), max(MaskSharpness, 0.1f));
+	if (Band < 1e-4f)
+	{
+		return 0.0f;
+	}
+	const float S0 = M.g * MaskCreaseRange;                 // cm to the band centre, unsigned
+	const float Dorsal = saturate((M.a * 2.0f - 1.0f) * 1.5f + 0.5f);   // SideSharpness 3, as the material
+	const int JT = (int)round(saturate(M.b) * 5.0f);
+	// the palmar PIP crease is a pair, +-Split; everywhere else a single line on the band centre
+	const float Split = (JT == 2) ? MaskPalmSplit * (1.0f - Dorsal) : 0.0f;
+	const float Furrow = MaskFurrow(S0 - Split, MaskCreaseWidth);
+	const float GatePalm = saturate(MaskPalmarBase + CompressionC * MaskPalmarCompress - StretchC * MaskPalmarIron);
+	const float GateBack = saturate(MaskDorsalBase - StretchC * MaskDorsalIron);
+	return MaskCreaseDepth * Furrow * Band * lerp(GatePalm, GateBack, Dorsal);
+}
+
+// Ridges of gathered skin on the BACK of an extended joint, parallel to the crease on both sides of
+// it (cm, positive = outward). The skin over a knuckle is slack when the finger is straight - it has
+// to be, to cover the knuckle when it bends - and stands in a few parallel folds; flexion pulls it
+// taut. The crease itself (S0 = 0) stays a valley: the ridges peak half a spacing away.
+float DorsalGatherDisplacement(uint VertexIndex, float StretchC, uint Bone, uint Other)
+{
+	if (DorsalGather <= 0.0f)
+	{
+		return 0.0f;
+	}
+	// the actual bend of the joint between the two influences: the skin over a knuckle is slack when
+	// the finger is straight and taut from about 40 degrees on, whatever the local strain says
+	float BendGate = 1.0f;
+	if (Bone != Other && Bone < NumSectionBones && Other < NumSectionBones)
+	{
+		const FBoneTransform Rb = RefPoseInverses[Bone], Ro = RefPoseInverses[Other];
+		const float3 AxisB = normalize(float3(Rb.Row0.x, Rb.Row1.x, Rb.Row2.x));
+		const float3 AxisO = normalize(float3(Ro.Row0.x, Ro.Row1.x, Ro.Row2.x));
+		const float3 AnimB = normalize(TransformVector(BoneTransforms[Bone], AxisB) + 1e-6f);
+		const float3 AnimO = normalize(TransformVector(BoneTransforms[Other], AxisO) + 1e-6f);
+		const float Bend = abs(acos(clamp(dot(AnimB, AnimO), -1.0f, 1.0f)) - acos(clamp(dot(AxisB, AxisO), -1.0f, 1.0f)));
+		BendGate = 1.0f - smoothstep(0.15f, 0.7f, Bend);
+	}
+	const float2 UV = UVInputBuffer[VertexIndex * max(NumUVChannels, 1u)];
+	const float4 M = WrinkleMask.SampleLevel(WrinkleMaskSampler, UV, 0);
+	const float Band = pow(saturate(M.r * MaskGain), max(MaskSharpness, 0.1f));
+	const float Dorsal = saturate((M.a * 2.0f - 1.0f) * 1.5f + 0.5f);
+	if (Band * Dorsal < 1e-3f)
+	{
+		return 0.0f;
+	}
+	const float S0 = M.g * MaskCreaseRange;                  // cm to the crease, unsigned
+	const float Gate = saturate(DorsalGatherBase - StretchC * DorsalGatherIron) * BendGate;
+	const float Ridge = 0.5f - 0.5f * cos(6.2831853f * S0 / DorsalGatherSpacing);   // 0 on the crease, 1 half a spacing out
+	const float Env = exp(-(S0 * S0) / (DorsalGatherReach * DorsalGatherReach));
+	// real folds are not a corrugation: vary the ridge height along and across the crease
+	const float Var = 0.7f + 0.3f * sin(UV.x * 523.0f + UV.y * 311.0f) * sin(UV.y * 437.0f - UV.x * 190.0f);
+	return DorsalGather * Band * Dorsal * Gate * Ridge * Env * Var;
 }
 
 [numthreads(THREADGROUP_SIZE, 1, 1)]
@@ -130,8 +359,8 @@ void DisplaceCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	{
 		C[c] = VertexTensor[VertexIndex * TENSOR_STRIDE + c];
 	}
-	const float4 RestTX = RestTangentBuffer[VertexIndex * 2 + GPUSKIN_VB_OFFSET_TANGENT_X];
-	const float4 RestTZ = RestTangentBuffer[VertexIndex * 2 + GPUSKIN_VB_OFFSET_TANGENT_Z];
+	const float4 RestTX = (bUseProportionedRest != 0u) ? ProportionedRestTangentBuffer[VertexIndex * 2 + GPUSKIN_VB_OFFSET_TANGENT_X] : RestTangentBuffer[VertexIndex * 2 + GPUSKIN_VB_OFFSET_TANGENT_X];
+	const float4 RestTZ = (bUseProportionedRest != 0u) ? ProportionedRestTangentBuffer[VertexIndex * 2 + GPUSKIN_VB_OFFSET_TANGENT_Z] : RestTangentBuffer[VertexIndex * 2 + GPUSKIN_VB_OFFSET_TANGENT_Z];
 	const float3 RestN = normalize(RestTZ.xyz + float3(0, 0, 1e-6f));
 	float3 RestT = RestTX.xyz - RestN * dot(RestN, RestTX.xyz);
 	RestT = (dot(RestT, RestT) > 1e-8f) ? normalize(RestT) : float3(1, 0, 0);
@@ -147,7 +376,10 @@ void DisplaceCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 
 	// ---- volume preservation ------------------------------------------------
 	// thickness factor of an incompressible slab whose area scaled by J is 1/J
-	const float VolumeTerm = VolumeBulge * clamp(1.0f / AreaRatio - 1.0f, -2.0f, 2.0f);
+	// An incompressible slab: thickness scales by 1/J. Clamped to what skin actually does - about
+	// +70% thicker where it is gathered hard (a fist's palmar fold) and -40% where pulled taut -
+	// because past that the strain field is reporting folded-over triangles, not tissue.
+	const float VolumeTerm = VolumeBulge * clamp(1.0f / AreaRatio - 1.0f, -0.4f, 0.7f);
 
 	// ---- joint band from the skin weights -----------------------------------
 	const uint StreamOffset = VertexIndex * (InputWeightStride / 4);
@@ -156,6 +388,7 @@ void DisplaceCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	float LargestWeight = 0.0f;
 	float SecondWeight = 0.0f;
 	uint  DominantBone = 0;
+	uint  SecondBone = 0;
 
 	for (uint g = 0; g < NumGroups; ++g)
 	{
@@ -168,12 +401,14 @@ void DisplaceCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 			if (Weight > LargestWeight)
 			{
 				SecondWeight = LargestWeight;
+				SecondBone = DominantBone;
 				LargestWeight = Weight;
 				DominantBone = (uint)Idx[i];
 			}
 			else if (Weight > SecondWeight)
 			{
 				SecondWeight = Weight;
+				SecondBone = (uint)Idx[i];
 			}
 		}
 	}
@@ -206,13 +441,20 @@ void DisplaceCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	const float CreaseScale = max(
 		1.0f + CreaseCompressionGain * Compression * 10.0f - CreaseStretchRelief * Stretch * 10.0f,
 		0.0f);
-	const float CreaseTerm = -CreaseDepth * JointBand * CreaseScale
-	                       - RelaxCreaseGain * JointBand * Slack;
+	float CreaseTerm = -CreaseDepth * JointBand * CreaseScale
+	                 - RelaxCreaseGain * JointBand * Slack;
+	if (bHasWrinkleMask != 0u)
+	{
+		// the narrow groove replaces the band-wide trench; the relax term still rides on the band
+		CreaseTerm = MaskCreaseDisplacement(VertexIndex, saturate(Compression * TensionScale), saturate(Stretch * TensionScale))
+		           - RelaxCreaseGain * JointBand * Slack
+		           + DorsalGatherDisplacement(VertexIndex, saturate(Stretch * TensionScale), DominantBone, SecondBone);
+	}
 
 	// ---- ripples along the bone axis ----------------------------------------
 	// Driven by along-bone compression while bending, and by the released slack on the way back out -
 	// that second term is what puts folds on the back of a knuckle just after the finger straightens.
-	const float3 RestP = LoadPosition(RestPositionBuffer, VertexIndex);
+	const float3 RestP = (bUseProportionedRest != 0u) ? LoadPosition(ProportionedRestPositionBuffer, VertexIndex) : LoadPosition(RestPositionBuffer, VertexIndex);
 	const float3 BoneLocal = TransformPosition(RefInv, RestP);
 	const float RippleDrive = Compression + Slack;
 	const float WrinkleTerm = WrinkleAmplitude * JointBand * RippleDrive * sin(WrinkleFrequency * BoneLocal.x);
@@ -222,8 +464,17 @@ void DisplaceCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	                            saturate(CompressAcross * TensionScale), Slack);
 	ColorBufferUAV[VertexIndex] = Color FMANUALFETCH_COLOR_COMPONENT_SWIZZLE;
 
-	const float Displacement = VolumeTerm + CreaseTerm + WrinkleTerm;
-	const float3 OutP = SkinnedP + Normal * Displacement;
+	float Displacement = VolumeTerm + CreaseTerm + WrinkleTerm;
+	float3 ContactPush = float3(0, 0, 0);
+	if (bContactBulge != 0u && SecondWeight > 0.02f)
+	{
+		float Bulge;
+		if (ContactBulge(SkinnedP, RestP, DominantBone, SecondBone, ContactPush, Bulge))
+		{
+			Displacement += Bulge;
+		}
+	}
+	const float3 OutP = SkinnedP + Normal * Displacement + ContactPush;
 
 	PositionBufferUAV[VertexIndex * 3 + 0] = OutP.x;
 	PositionBufferUAV[VertexIndex * 3 + 1] = OutP.y;

@@ -1,0 +1,643 @@
+// PianoHand implicit skinning (Vaillant, Barthe, Guennebaud, Cani, Rohmer, Wyvill, Gourmel, Paulin 2013,
+// "Implicit Skinning: Real-Time Skin Deformation with Contact Modeling", SIGGRAPH; and the 2014 /
+// thesis follow-ups for the gradient-based bulge-in-contact operator).
+//
+// Runs right after CustomSkinningDeformer.usf (LBS / DQS = the "initial solution") and before the
+// strain / detail passes, inside the same RDG graph.
+//
+// Per bone (or bone group) the rest mesh part was approximated on the CPU by an HRBF
+//     d_i(u) = sum_k  a_k |u-p_k|^3 + 3 |u-p_k| (b_k . (u-p_k))        (phi(r) = r^3, Hermite data)
+// in NORMALISED bone coordinates u = (x_rest - origin_i) / s_i, with s_i the support radius (the
+// distance from the bone to the farthest sample), so the compact remap tr uses r = 1:
+//     f_i = tr(d_i),   tr(x) = -3/16 x^5 + 5/8 x^3 - 15/16 x + 1/2  on [-1, 1],  1 inside, 0 outside.
+// f_i > 0.5 inside the part, 0.5 on the fitted surface, < 0.5 outside. Each vertex stores its own
+// rest iso-value iso_v = f(v_rest) so the mesh details are kept (it is EMBEDDED in the field, not
+// snapped onto the 0.5 surface).
+//
+// The global field at a vertex is the union (Ricci's max) of its own primitive with each joint
+// partner, plus the gradient-based bulge-in-contact term: with m = max(f1,f2), s = min(f1,f2),
+// rho = s/m, the composed value is
+//     g = m + A * d(alpha) * h(rho) * w(m),   h(rho) = rho (2 - rho),   w(m) = 4 m (1 - m),
+// where alpha is the angle between grad f1 and grad f2 at the point and d(alpha) the controller
+// (0 below BulgeStart, 1 above BulgeFull). On the back and the flanks of a joint the two gradients
+// are collinear (alpha = 0) and the operator is a plain union; inside the fold alpha is close to
+// the bend angle and the lips next to the contact crease are inflated (the thesis' profile points
+// (0.15,0.45), (0.39,0.40): the 0.5 iso-curve leaves the union axes by ~0.05 .. 0.11 next to the
+// diagonal and returns to the corner, which is what h * w reproduces).
+//
+//  ImplicitProjectCS : per LOD vertex, NumSteps Newton iterations along the field gradient
+//                        v <- v - sigma (f(v) - iso_v) grad f / |grad f|^2           (sigma = 0.35)
+//                      stopping at the contact surface: when the gradient turns by more than
+//                      StopAngle (55 deg) between two iterations the vertex has crossed the crease
+//                      between two parts and is frozen there.
+//  ImplicitRelaxCS   : tangential relaxation towards the mean-value-coordinate centroid of the
+//                      one-ring projected on the tangent plane, mu = 1 - (|f - iso| - 1)^4, so a
+//                      vertex far from its iso is redistributed and a converged one is left alone.
+//  ImplicitBetaCS    : diffuses beta (1 on stopped vertices) over the mesh.
+//  ImplicitSmoothCS  : localised Laplacian smoothing  v <- (1 - beta) v + beta centroid.
+
+#include "/Engine/Private/Common.ush"
+#include "/Engine/Private/GpuSkinCommon.ush"
+#include "/PianoHand/Public/SkinningCommon.ush"
+
+#ifndef THREADGROUP_SIZE
+#define THREADGROUP_SIZE 64
+#endif
+
+#define STATE_ACTIVE    0u
+#define STATE_CONVERGED 1u
+#define STATE_STOPPED   2u
+#define STATE_NONE      3u
+
+uint  NumVertices;           // LOD vertices
+uint  NumPrims;              // primitives (bone parts)
+uint  NumSteps;              // Newton steps in this pass
+uint  bFirstPass;            // clears the per-vertex state
+float Sigma;                 // Newton step scale (0.35)
+float IsoTolerance;          // |f - iso| below which the vertex has converged
+float StopCosAngle;          // cos(55 deg)
+float MaxStepCm;             // clamp on a single Newton step
+float BulgeAmount;           // A, field units (0.1 = the thesis' maximal bulge)
+float BulgeStart;            // radians, controller d(alpha) ramp
+float BulgeFull;
+float BendGateStart;         // radians of actual joint bend: below, the pair is a plain union
+float BendGateFull;
+float RelaxScale;            // multiplier on mu
+float ContactDepth;          // cm, how far other parts may push a vertex per frame before it is frozen
+float SmoothBeta;            // multiplier on beta in the Laplacian step
+
+StructuredBuffer<float4>         HrbfSamples;     // 2 per sample: (p.xyz, a), (b.xyz, 0), normalised coordinates
+StructuredBuffer<float4>         PrimInfo;        // origin.xyz (rest component space), support scale s
+StructuredBuffer<float4>         PrimAxis;        // bone direction.xyz (rest component space), segment length
+StructuredBuffer<uint4>          PrimMeta;        // sampleOffset, sampleCount, numNeighbours, neighbourOffset
+StructuredBuffer<int2>           PrimNeighbours;  // (partner prim, op: 0 union, 1 bulge-in-contact)
+StructuredBuffer<FBoneTransform> PrimInverse;     // animated component space -> rest component space, per prim
+StructuredBuffer<float>          PairBend;        // per neighbour entry: joint bend angle this frame (radians)
+StructuredBuffer<int>            VertexPrim;      // primitive per LOD vertex, -1 = not skinned implicitly
+StructuredBuffer<float>          VertexIso;       // rest iso-value per LOD vertex (its own part's field)
+StructuredBuffer<float4>         VertexOverlap;   // 2 per vertex: (prim, c, prim, c) - other parts over the vertex at rest, -1 = none
+StructuredBuffer<float4>         VertexOwn;       // 1 per vertex: (prim, c, prim, c) - the other phalanges the vertex is weighted to, EXACT rest field (10-16)
+StructuredBuffer<float>          VertexBlend;     // 0..1 per vertex: how much of the correction to keep
+
+StructuredBuffer<uint>           AdjOffsets;      // NumVertices + 1
+StructuredBuffer<uint>           AdjIndices;      // one-ring neighbours (cyclic order where closed)
+StructuredBuffer<float>          AdjWeights;      // mean value coordinates of the vertex in its projected one-ring
+
+RWBuffer<float>                  PositionUAV;     // 3 floats per vertex, read + written in place (project / relax / smooth)
+Buffer<float>                    PositionIn;      // snapshot of the positions a gather pass reads
+Buffer<float>                    RestPositionIn;  // rest positions (3 floats per vertex) - ARAP reference edges
+Buffer<float>                    TrackedIn;       // last frame's tracked positions (Phase 11)
+StructuredBuffer<FBoneTransform> PrimPrevInverse; // per primitive: last frame's animated -> rest
+StructuredBuffer<FBoneTransform> PrimNow;         // per primitive: rest -> this frame
+StructuredBuffer<float4>         VertexRot;       // blended skinning rotation per vertex - the a-priori ARAP rotation target (Vaillant 2014 sec. 5.1)
+RWStructuredBuffer<float4>       VertexGrad;      // xyz = last unit gradient (animated space), w = f - iso
+RWStructuredBuffer<uint>         VertexState;
+RWStructuredBuffer<float>        VertexPush;      // cm pushed by other parts so far this frame
+RWStructuredBuffer<float>        BetaOut;
+StructuredBuffer<float>          BetaIn;
+uint                             DebugMode;
+Buffer<float>                    PrePosition;     // positions before the implicit passes
+RWBuffer<UNORM float4>           ColorBufferUAV;  // vertex colour (debug)
+
+float3 LoadP(Buffer<float> Buf, uint V)
+{
+	return float3(Buf[V * 3 + 0], Buf[V * 3 + 1], Buf[V * 3 + 2]);
+}
+
+float3 LoadPU(RWBuffer<float> Buf, uint V)
+{
+	return float3(Buf[V * 3 + 0], Buf[V * 3 + 1], Buf[V * 3 + 2]);
+}
+
+void StoreP(uint V, float3 P)
+{
+	PositionUAV[V * 3 + 0] = P.x;
+	PositionUAV[V * 3 + 1] = P.y;
+	PositionUAV[V * 3 + 2] = P.z;
+}
+
+// (M^-1)^T v for the 3x3 part of a row-major affine transform: columns dotted with v.
+float3 TransformVectorTransposed(FBoneTransform T, float3 V)
+{
+	return T.Row0.xyz * V.x + T.Row1.xyz * V.y + T.Row2.xyz * V.z;
+}
+
+// Compact remap of the HRBF (support radius 1 in normalised units) and its derivative.
+float RemapTr(float X)
+{
+	if (X <= -1.0f) return 1.0f;
+	if (X >=  1.0f) return 0.0f;
+	const float X2 = X * X;
+	return ((-3.0f / 16.0f) * X2 * X2 + (5.0f / 8.0f) * X2 - 15.0f / 16.0f) * X + 0.5f;
+}
+
+float RemapTrPrime(float X)
+{
+	if (abs(X) >= 1.0f) return 0.0f;
+	const float X2 = X * X;
+	return (-15.0f / 16.0f) * X2 * X2 + (15.0f / 8.0f) * X2 - 15.0f / 16.0f;
+}
+
+// f_i(x) and its gradient in animated component space.
+void EvalPrim(uint Prim, float3 X, out float F, out float3 G)
+{
+	const float4 Info = PrimInfo[Prim];
+	const uint4  Meta = PrimMeta[Prim];
+	const FBoneTransform Inv = PrimInverse[Prim];
+	const float InvScale = 1.0f / max(Info.w, 1e-4f);
+	const float3 U = (TransformPosition(Inv, X) - Info.xyz) * InvScale;
+
+	float  D = 0.0f;
+	float3 GD = float3(0, 0, 0);
+	const uint End = Meta.x + Meta.y;
+	for (uint k = Meta.x; k < End; ++k)
+	{
+		const float4 S0 = HrbfSamples[k * 2u];
+		const float4 S1 = HrbfSamples[k * 2u + 1u];
+		const float3 V = U - S0.xyz;
+		const float  R = length(V);
+		const float3 B = S1.xyz;
+		const float  BV = dot(B, V);
+		D  += S0.w * R * R * R + 3.0f * R * BV;
+		// grad: a 3 r v  +  3 ( v (b.v) / r + r b )
+		GD += 3.0f * R * V * S0.w + 3.0f * (V * (BV / max(R, 1e-6f)) + R * B);
+	}
+	F = RemapTr(D);
+	G = TransformVectorTransposed(Inv, GD) * (RemapTrPrime(D) * InvScale);
+}
+
+// Rest-space point / direction of a primitive into animated space (rigid part of its transform).
+float3 PrimPointToAnim(uint Prim, float3 PRest)
+{
+	const FBoneTransform Inv = PrimInverse[Prim];
+	const float3 T = float3(Inv.Row0.w, Inv.Row1.w, Inv.Row2.w);
+	return TransformVectorTransposed(Inv, PRest - T);
+}
+
+float3 PrimDirToAnim(uint Prim, float3 DRest)
+{
+	return normalize(TransformVectorTransposed(PrimInverse[Prim], DRest) + 1e-6f);
+}
+
+// 0..1: is X on the inside of the bend between parent prim P and child prim C? Measured RADIALLY
+// from the vertex's own bone axis (the part it belongs to): the vector from the axis to X, with the
+// axis component removed, against the bend direction (the other bone's axis folded into this
+// one's cross-section). On the back and the flanks of the joint this is 0, so the bulge-in-contact
+// never fires there whatever the HRBF gradients do; along the segment away from the joint the
+// radial measure stays meaningful (a half-space test from the joint would not).
+float FoldSide(uint P, uint C, float3 X, bool bOnChild)
+{
+	const float3 J = PrimPointToAnim(C, PrimInfo[C].xyz);
+	const float3 A = PrimDirToAnim(P, PrimAxis[P].xyz);   // parent axis, towards the joint
+	const float3 B = PrimDirToAnim(C, PrimAxis[C].xyz);   // child axis, away from the joint
+	const float3 Own = bOnChild ? B : A;
+	const float3 Rel = X - J;
+	float3 Radial = Rel - Own * dot(Rel, Own);
+	const float RL = length(Radial);
+	if (RL < 1e-4f)
+	{
+		return 0.0f;
+	}
+	Radial /= RL;
+	// the concave side: the other segment's direction, seen in this segment's cross-section
+	float3 Inside = bOnChild ? (-A) : B;
+	Inside = Inside - Own * dot(Inside, Own);
+	const float IL = length(Inside);
+	if (IL < 0.1f)
+	{
+		return 0.0f;   // straight joint: no fold
+	}
+	const float Side = dot(Radial, Inside / IL);
+	return smoothstep(0.1f, 0.5f, Side);
+}
+
+// f_p at X when X is inside p's support (within ~2 support radii of its bone segment), else false.
+bool EvalPrimBounded(uint Prim, float3 X, out float F, out float3 G)
+{
+	F = 0.0f;
+	G = float3(0, 0, 0);
+	const float4 Info = PrimInfo[Prim];
+	const float4 Axis = PrimAxis[Prim];
+	const float InvScale = 1.0f / max(Info.w, 1e-4f);
+	const float3 U = (TransformPosition(PrimInverse[Prim], X) - Info.xyz) * InvScale;
+	const float3 B = Axis.xyz * (Axis.w * InvScale);
+	const float T = saturate(dot(U, B) / max(dot(B, B), 1e-6f));
+	const float3 D = U - B * T;
+	if (dot(D, D) > 2.2f * 2.2f)
+	{
+		return false;
+	}
+	EvalPrim(Prim, X, F, G);
+	return true;
+}
+
+// Composed field at X for vertex V (own primitive Prim, rest iso IsoP):
+//     F = max( f_P(x),  max_o [ f_o(x) - c_o + IsoP ] )        c_o = max(f_o(v_rest), 0.5)
+// Every other part in range is an obstacle RELATIVE TO REST: it pushes the vertex only once it comes
+// closer than it was at rest or past its own surface (the paper's union, made identity at rest even
+// where a neighbouring field overlaps the vertex), never pulls it when the joint opens. The crease
+// between the terms is the contact surface the projection stops at. Plus the bulge-in-contact term
+// of the joint partners.
+void EvalField(uint Prim, uint V, float3 X, float IsoP, bool bContactMode, out float F, out float3 G, out bool bObstacle)
+{
+	float  F0; float3 G0;
+	EvalPrim(Prim, X, F0, G0);
+	F = F0;
+	G = G0;
+	bObstacle = false;
+	float  Bulge = 0.0f;
+	float3 BulgeGrad = float3(0, 0, 0);
+	const uint4  Meta = PrimMeta[Prim];
+	const float4 Ov0 = VertexOverlap[V * 2u];
+	const float4 Ov1 = VertexOverlap[V * 2u + 1u];
+	const float4 Own = VertexOwn[V];
+	for (uint p = 0; p < NumPrims; ++p)
+	{
+		if (p == Prim)
+		{
+			continue;
+		}
+		float  Fp; float3 Gp;
+		if (!EvalPrimBounded(p, X, Fp, Gp) || Fp <= 1e-4f)
+		{
+			continue;
+		}
+		// 10-16: a phalanx this vertex is also weighted to is part of its OWN surface: union with the exact
+		// rest value (no 0.5 clamp, no obstacle freeze). Across a ragged weight boundary both neighbours then
+		// evaluate the same composed field max(f_a - f_a(rest), f_b - f_b(rest)) + iso - continuous skin.
+		if ((int)Own.x == (int)p || (int)Own.z == (int)p)
+		{
+			const float Co = ((int)Own.x == (int)p) ? Own.y : Own.w;
+			const float Gu = Fp - Co + IsoP;
+			if (Gu > F)
+			{
+				F = Gu;
+				G = Gp;
+			}
+			continue;
+		}
+		float C = 0.5f;
+		if ((int)Ov0.x == (int)p) C = Ov0.y;
+		else if ((int)Ov0.z == (int)p) C = Ov0.w;
+		else if ((int)Ov1.x == (int)p) C = Ov1.y;
+		else if ((int)Ov1.z == (int)p) C = Ov1.w;
+		const float Gv = Fp - C + IsoP;
+		if (Gv > F)
+		{
+			F = Gv;
+			G = Gp;
+			bObstacle = true;
+		}
+
+		// bulge-in-contact if p is a joint partner (op 1: p is my parent, op 2: p is my child)
+		for (uint n = 0; n < Meta.z; ++n)
+		{
+			const int2 NB = PrimNeighbours[Meta.w + n];
+			if (NB.x != (int)p || NB.y == 0 || BulgeAmount <= 0.0f)
+			{
+				continue;
+			}
+			float BendGate = smoothstep(BendGateStart, BendGateFull, PairBend[Meta.w + n]);
+			if (BendGate <= 0.0f)
+			{
+				continue;
+			}
+			BendGate *= (NB.y == 1) ? FoldSide(p, Prim, X, true) : FoldSide(Prim, p, X, false);
+			const float M = max(F0, Fp), S = min(F0, Fp);
+			if (BendGate <= 0.0f || S <= 1e-3f || M <= 1e-3f)
+			{
+				continue;
+			}
+			const float L0 = length(G0), L1 = length(Gp);
+			if (L0 < 1e-8f || L1 < 1e-8f)
+			{
+				continue;
+			}
+			const float Alpha = acos(clamp(dot(G0, Gp) / (L0 * L1), -1.0f, 1.0f));
+			const float Dc = smoothstep(BulgeStart, BulgeFull, Alpha) * BendGate;
+			if (Dc <= 0.0f)
+			{
+				continue;
+			}
+			const float3 GM = (F0 >= Fp) ? G0 : Gp;
+			const float3 GS = (F0 >= Fp) ? Gp : G0;
+			const float Rho = S / M;
+			const float H  = Rho * (2.0f - Rho);
+			const float Hp = 2.0f - 2.0f * Rho;
+			const float W  = 4.0f * M * (1.0f - M);
+			const float Wp = 4.0f - 8.0f * M;
+			const float A  = BulgeAmount * Dc;
+			Bulge += A * H * W;
+			const float dBdS = A * Hp / M * W;
+			const float dBdM = A * (-Hp * S / (M * M) * W + H * Wp);
+			BulgeGrad += dBdM * GM + dBdS * GS;
+		}
+	}
+	// 10-16: two contact formulations were tried here and reverted - projecting to the surface where the two
+	// shifted fields are equal (Vaillant 2014 g_dc, the bisector). Free-running it oscillated between modes and
+	// left lumps; locked per pass it pulled the two skins apart and opened see-through gaps between the fingers.
+	// The plain rest-relative obstacle push stays (bContactMode is unused). A real g_dc needs the C1 operator
+	// baked on a (f1, f2) grid as in the paper.
+	F += Bulge;
+	G += BulgeGrad;
+}
+
+// ---------------------------------------------------------------------------
+// Newton projection (per LOD vertex, in place)
+// ---------------------------------------------------------------------------
+[numthreads(THREADGROUP_SIZE, 1, 1)]
+void ImplicitProjectCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	const uint V = DispatchThreadId.x;
+	if (V >= NumVertices)
+	{
+		return;
+	}
+	const int Prim = VertexPrim[V];
+	if (Prim < 0)
+	{
+		if (bFirstPass != 0u)
+		{
+			VertexState[V] = STATE_NONE;
+			VertexGrad[V] = float4(0, 0, 0, 0);
+		}
+		return;
+	}
+
+	uint State = (bFirstPass != 0u) ? STATE_ACTIVE : VertexState[V];
+	float4 Prev = (bFirstPass != 0u) ? float4(0, 0, 0, 0) : VertexGrad[V];
+	float Pushed = (bFirstPass != 0u) ? 0.0f : VertexPush[V];
+	bool bHavePrev = (bFirstPass == 0u) && dot(Prev.xyz, Prev.xyz) > 0.5f;
+	float3 X = LoadPU(PositionUAV, V);
+	const float Iso = VertexIso[V];
+
+	bool bContact = false;
+	for (uint Step = 0; Step < NumSteps && State == STATE_ACTIVE; ++Step)
+	{
+		float F; float3 G; bool bObstacle;
+		EvalField((uint)Prim, V, X, Iso, bContact, F, G, bObstacle);
+		const bool bEntered = bObstacle && !bContact;   // first contact this pass: the gradient turns by design
+		bContact = bContact || bObstacle;
+		const float Res = F - Iso;
+		const float G2 = dot(G, G);
+		Prev.w = Res;
+		if (G2 < 1e-10f)
+		{
+			State = STATE_CONVERGED;   // outside every support (or on a plateau): nothing to march along
+			break;
+		}
+		const float3 Gn = G * rsqrt(G2);
+		if (bHavePrev && !bEntered && dot(Gn, Prev.xyz) < StopCosAngle)
+		{
+			State = STATE_STOPPED;     // the gradient turned: we crossed the crease between two parts
+			Prev.xyz = Gn;
+			break;
+		}
+		Prev.xyz = Gn;
+		bHavePrev = true;
+		if (abs(Res) < IsoTolerance)
+		{
+			State = STATE_CONVERGED;
+			break;
+		}
+		float3 Delta = -Sigma * Res * G / G2;
+		float Len = length(Delta);
+		if (Len > MaxStepCm)
+		{
+			Delta *= MaxStepCm / Len;
+			Len = MaxStepCm;
+		}
+		if (bObstacle)
+		{
+			// another part is pushing this vertex out of itself: only up to the contact depth, then it is
+			// a contact vertex (frozen, smoothed) - deeper interpenetration of the initial pose is left alone
+			if (Pushed + Len > ContactDepth)
+			{
+				const float Remain = max(ContactDepth - Pushed, 0.0f);
+				X += Delta * (Len > 1e-6f ? Remain / Len : 0.0f);
+				Pushed = ContactDepth;
+				State = STATE_STOPPED;
+				break;
+			}
+			Pushed += Len;
+		}
+		X += Delta;
+	}
+
+	StoreP(V, X);
+	VertexGrad[V] = Prev;
+	VertexState[V] = State;
+	VertexPush[V] = Pushed;
+}
+
+// ---------------------------------------------------------------------------
+// Tangential relaxation (gather from the snapshot, write in place)
+// ---------------------------------------------------------------------------
+[numthreads(THREADGROUP_SIZE, 1, 1)]
+void ImplicitRelaxCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	// Elastic tangential relaxation (Vaillant et al. 2014, "Robust iso-surface tracking", eq. 3-4): one Jacobi
+	// step of the as-rigid-as-possible energy  sum_j w_ij |(p^_i - p^_j) - R_i (p_i - p_j)|^2  with the rotation
+	// R_i fixed a priori to the vertex's blended skinning rotation (DQS), the step constrained to the current
+	// tangent plane of the iso-surface, interleaved with the Newton projection. The 2013 mean-value relaxation
+	// only pulled a vertex towards the centroid of its ring: with ragged skinning weights the projected
+	// vertices bunched up along the folds and the skin there read as crumpled paper (10-16).
+	const uint V = DispatchThreadId.x;
+	if (V >= NumVertices)
+	{
+		return;
+	}
+	if (VertexPrim[V] < 0)
+	{
+		return;
+	}
+	const uint State = VertexState[V];
+	if (State == STATE_NONE)
+	{
+		return;
+	}
+	const uint Begin = AdjOffsets[V], End = AdjOffsets[V + 1];
+	if (End <= Begin)
+	{
+		return;
+	}
+	const float4 Gr = VertexGrad[V];
+	const float NLen = length(Gr.xyz);
+	if (NLen < 0.5f)
+	{
+		return;
+	}
+	const float3 N = Gr.xyz / NLen;
+	// 2014: every tracked vertex takes the Jacobi step (the 2013 weight 1 - (|f - iso| - 1)^4 is 0 exactly at
+	// convergence, so it never relaxed the vertices that had already landed - the bunched ones). The Newton pass
+	// that follows puts them back on the iso-surface; VertexBlend fades the whole correction at the palm.
+	const float Mu = saturate(RelaxScale) * saturate(VertexBlend[V]);
+	if (Mu <= 0.0f)
+	{
+		return;
+	}
+	const float3 X  = LoadP(PositionIn, V);
+	const float3 Xr = LoadP(RestPositionIn, V);
+	const float4 Qr = VertexRot[V];
+	float3 Target = float3(0, 0, 0);
+	float  WSum = 0.0f;
+	for (uint k = Begin; k < End; ++k)
+	{
+		const uint J = AdjIndices[k];
+		const float W = max(AdjWeights[k], 1e-4f);
+		const float3 E = Xr - LoadP(RestPositionIn, J);                             // rest edge p_i - p_j
+		const float3 RE = E + 2.0f * cross(Qr.xyz, cross(Qr.xyz, E) + Qr.w * E);   // R_i (p_i - p_j)
+		Target += W * (LoadP(PositionIn, J) + RE);
+		WSum += W;
+	}
+	Target /= max(WSum, 1e-6f);
+	float3 D = Target - X;
+	D -= N * dot(N, D);                                                            // stay in the tangent plane (eq. 4)
+	StoreP(V, X + Mu * D);
+	if (State == STATE_CONVERGED)
+	{
+		VertexState[V] = STATE_ACTIVE;                                             // moved: the next Newton pass re-projects it
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Beta diffusion (stopped vertices seed 1)
+// ---------------------------------------------------------------------------
+[numthreads(THREADGROUP_SIZE, 1, 1)]
+void ImplicitBetaCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	const uint V = DispatchThreadId.x;
+	if (V >= NumVertices)
+	{
+		return;
+	}
+	// 10-16: every vertex another part pushed this frame seeds the smoothing too, not only the frozen ones
+	const float Seed = (VertexState[V] == STATE_STOPPED || VertexPush[V] > 1e-5f) ? 1.0f : 0.0f;
+	if (bFirstPass != 0u)
+	{
+		BetaOut[V] = Seed;
+		return;
+	}
+	const uint Begin = AdjOffsets[V], End = AdjOffsets[V + 1];
+	float Sum = BetaIn[V];
+	float Cnt = 1.0f;
+	for (uint k = Begin; k < End; ++k)
+	{
+		Sum += BetaIn[AdjIndices[k]];
+		Cnt += 1.0f;
+	}
+	BetaOut[V] = max(Seed, Sum / Cnt);
+}
+
+// ---------------------------------------------------------------------------
+// Localised Laplacian smoothing (gather from the snapshot, write in place)
+// ---------------------------------------------------------------------------
+[numthreads(THREADGROUP_SIZE, 1, 1)]
+void ImplicitSmoothCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	const uint V = DispatchThreadId.x;
+	if (V >= NumVertices)
+	{
+		return;
+	}
+	const float Beta = saturate(BetaIn[V] * SmoothBeta);
+	if (Beta <= 1e-4f || VertexPrim[V] < 0)
+	{
+		return;
+	}
+	const uint Begin = AdjOffsets[V], End = AdjOffsets[V + 1];
+	if (End <= Begin)
+	{
+		return;
+	}
+	// 10-16: smooth the implicit CORRECTION d = x - x_skinned, not the positions. A Laplacian on positions
+	// flattens the real fold it is supposed to clean; on the correction it only removes the high-frequency
+	// bunching of the projection (the crumpled-paper look along a closing fold) and keeps the skinned shape
+	// and the low-frequency contact push.
+	float3 C = float3(0, 0, 0);
+	for (uint k = Begin; k < End; ++k)
+	{
+		const uint J = AdjIndices[k];
+		C += LoadP(PositionIn, J) - LoadP(PrePosition, J);
+	}
+	C /= (float)(End - Begin);
+	const float3 Pre = LoadP(PrePosition, V);
+	const float3 D = LoadP(PositionIn, V) - Pre;
+	StoreP(V, Pre + lerp(D, C, Beta));
+}
+
+// ---------------------------------------------------------------------------
+// Debug colour: R = stopped at a contact, G = |displacement| / 0.3 cm, B = |f - iso| * 20
+//   mode 2: R = converged, G = still active, B = none;   mode 3: RGB = displacement direction
+// ---------------------------------------------------------------------------
+[numthreads(THREADGROUP_SIZE, 1, 1)]
+void ImplicitDebugCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	const uint V = DispatchThreadId.x;
+	if (V >= NumVertices)
+	{
+		return;
+	}
+	const uint State = VertexState[V];
+	const float4 Gr = VertexGrad[V];
+	const float3 D = LoadP(PositionIn, V) - LoadP(PrePosition, V);
+	float4 C;
+	if (DebugMode == 2u)
+	{
+		C = float4(State == STATE_CONVERGED ? 1.0f : 0.0f, State == STATE_ACTIVE ? 1.0f : 0.0f, State == STATE_NONE ? 1.0f : 0.0f, 1.0f);
+	}
+	else if (DebugMode == 3u)
+	{
+		C = float4(normalize(D + 1e-6f) * 0.5f + 0.5f, 1.0f);
+	}
+	else
+	{
+		C = float4(State == STATE_STOPPED ? 1.0f : 0.0f, saturate(length(D) / 0.3f), saturate(abs(Gr.w) * 20.0f), 1.0f);
+	}
+	ColorBufferUAV[V] = C FMANUALFETCH_COLOR_COMPONENT_SWIZZLE;
+}
+
+// ---------------------------------------------------------------------------
+// Finalize: fade the correction out towards the palm
+// ---------------------------------------------------------------------------
+[numthreads(THREADGROUP_SIZE, 1, 1)]
+void ImplicitFinalizeCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	const uint V = DispatchThreadId.x;
+	if (V >= NumVertices || VertexPrim[V] < 0)
+	{
+		return;
+	}
+	const float W = saturate(VertexBlend[V]);
+	if (W >= 1.0f)
+	{
+		return;
+	}
+	const float3 Pre = LoadP(PrePosition, V);
+	const float3 Cur = LoadPU(PositionUAV, V);
+	StoreP(V, lerp(Pre, Cur, W));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Phase 11: incremental tracking (Vaillant 2014 sec. 5, step 1). Carry last frame's skin by the
+// transform difference of the vertex's own primitive: x0 = M_now * M_prev^-1 * x_prev. The Newton
+// projection and the ARAP relaxation then only have to absorb one frame of motion, so a closing
+// fold meets itself gradually instead of starting deep inside the other part.
+// ---------------------------------------------------------------------------------------------
+[numthreads(THREADGROUP_SIZE, 1, 1)]
+void ImplicitAdvectCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	const uint V = DispatchThreadId.x;
+	if (V >= NumVertices)
+	{
+		return;
+	}
+	const int Prim = VertexPrim[V];
+	if (Prim < 0)
+	{
+		return;
+	}
+	const float3 Xp = LoadP(TrackedIn, V);
+	const float3 Xr = TransformPosition(PrimPrevInverse[(uint)Prim], Xp);
+	StoreP(V, TransformPosition(PrimNow[(uint)Prim], Xr));
+}

@@ -1,7 +1,7 @@
 """Cut the right hand out of the MetaHuman template body and build a dense skeletal mesh for the
 Phase 3 skinning pipeline.
 
-    exec(open(r'C:/Git/PianoHandSimulator/06_Project/pianohand_simulator/Scripts/extract_metahuman_hand.py').read())
+    exec(open('<project>/Scripts/extract_metahuman_hand.py').read())      # Windows or macOS
 
 Why MetaHuman rather than MannyXR: the MetaHuman hand chain carries per-joint helper bones
 (_bulge, _half, _side_out, _side_inn, _pip, _dip, _mcp, _palm, _palmMid), so the joint band we
@@ -19,10 +19,17 @@ Pipeline
      covered 10% of the texture). Repacking moves and rotates whole islands without touching their
      internal parametrisation, so no new distortion and no new seams; nothing authored is lost
      because MetaHuman ships no baked body colour/normal to stay aligned with.
-  6. cap the open wrist with a triangle fan - an open boundary there renders as a crumpled hole
-     because the cut edge has no interior surface
-  7. PN tessellate to give the geometric wrinkles vertices to live on
-  8. write a new skeletal mesh asset on the same metahuman_base_skel
+  6. PLANE-CUT the wrist (2026-10-13). The weight threshold in step 2 leaves a stair-stepped
+     boundary of whole triangles that wanders 0.7 cm along the arm, and the PN tessellation then
+     turns every step into a tooth - the "jagged wrist cap" visible in every screenshot since
+     Phase 3b. A plane perpendicular to the hand bone, WRIST_CUT_CM proximal of hand_r, replaces
+     that boundary with a straight one; the hole is filled flat.
+  7. the cap is an interior surface nobody should see: its triangles get one constant UV (a single
+     texel of the wrinkle mask, flat normal) and a rigid hand_r weight
+  8. PN tessellate to give the geometric wrinkles vertices to live on. (A second plane cut after
+     tessellation was tried and dropped: it leaves sliver triangles whose strain tensor explodes in
+     the deformer, a fringe of spikes along the wrist.)
+  9. write a new skeletal mesh asset on the same metahuman_base_skel
 
 Why collapse the helper bones: the joint band both the compute shader and the offline baker use is
 4*w0*w1 over the two largest influences - 0 on a rigid segment, 1 on the 50/50 blend line between
@@ -54,6 +61,9 @@ PRIMARY = set(['hand_r', 'thumb_01_r', 'thumb_02_r', 'thumb_03_r'] +
 TESS_LEVEL = 3           # PN tessellation level; N => (N+1)^2 triangles per source triangle
 PACK_RESOLUTION = 2048   # gutter width the UV repacker leaves between islands
 CAP_UV = 0.02            # the single texel the wrist cap samples
+SLIVER_EDGE_CM = 0.12    # edges shorter than this on the cut ring are collapsed (dense mesh edge ~0.15 cm)
+WRIST_CUT_CM = 0.35      # cm proximal of the hand_r origin where the wrist is cut flat (the ragged
+                         # weight boundary lies 0.5-1.2 cm proximal, so this takes all of it off)
 
 Q = unreal.GeometryScript_MeshQueries
 BW = unreal.GeometryScript_BoneWeights
@@ -113,8 +123,16 @@ def collapse_helper_bones(mesh):
     _, bones = BW.get_all_bones_info(mesh)
     parent = [b.parent_index for b in bones]
     names = [str(b.name) for b in bones]
+    hand_index = names.index('hand' + SIDE)
     target = {}
     for i, name in enumerate(names):
+        if not is_hand_bone(name):
+            # forearm bones (lowerarm, its twist helpers): 30% of the wrist ring's weight. There is
+            # no forearm in this mesh, and the cap is rigid on hand_r, so any wrist rotation in the
+            # animation opened a strain step across the cut ring - the volume term turned it into a
+            # fringe of spikes. The cut region is rigid with the hand.
+            target[i] = hand_index
+            continue
         walk = i
         while walk >= 0 and names[walk] not in PRIMARY:
             walk = parent[walk]
@@ -168,20 +186,86 @@ def _uv_islands(mesh):
     return int(r[1]) if isinstance(r, tuple) else int(r)
 
 
-def cap_wrist(mesh):
-    """Close the cut with a triangle fan. Runs AFTER the repack: the fill projects fresh UVs for
-    the cap, and those land far outside 0..1, which would drag the repacker's scale down and cost
-    the hand most of its texel density. The cap is an interior surface nobody should see, so its
-    triangles get one constant UV - a single texel, hence a flat constant normal."""
-    # the cut left holes in the triangle ID space, and the fill reuses those IDs, so "everything
-    # past the old count" does not find the new triangles - diff the valid IDs instead
-    before_verts = Q.get_num_vertex_i_ds(mesh)
-    before_ids = set(tid for tid in range(Q.get_num_triangle_i_ds(mesh))
-                     if Q.is_valid_triangle_id(mesh, tid))
-    mesh, filled, failed = unreal.GeometryScript_MeshRepair.fill_all_mesh_holes(
-        mesh, unreal.GeometryScriptFillHolesOptions())
+def normalize_weights(mesh, label):
+    """Make every vertex's influences sum to 1. The plane cut interpolates weights onto the new
+    ring vertices WITHOUT renormalising, so they skin to a fraction of the pose while their
+    neighbours skin fully - a 0.2 cm step every other vertex along the ring, which the strain
+    tensor reads as a huge deformation and the volume term turns into a fringe of spikes."""
+    fixed = 0
+    for vid in range(Q.get_num_vertex_i_ds(mesh)):
+        _, weights, ok = BW.get_vertex_bone_weights(mesh, vid)
+        if not ok or not weights:
+            continue
+        total = sum(e.weight for e in weights)
+        if abs(total - 1.0) < 1e-4 or total <= 0.0:
+            continue
+        out = []
+        for e in weights:
+            entry = unreal.GeometryScriptBoneWeight()
+            entry.set_editor_property('bone_index', e.bone_index)
+            entry.set_editor_property('weight', e.weight / total)
+            out.append(entry)
+        BW.set_vertex_bone_weights(mesh, vid, out)
+        fixed += 1
+    log('%s: renormalised %d vertices' % (label, fixed))
+    return mesh
+
+
+def wrist_plane(mesh):
+    """(point, distal direction) of the wrist cut plane, from the hand_r bone of the mesh."""
+    _, bones = BW.get_all_bones_info(mesh)
+    hand = next(b for b in bones if str(b.name) == 'hand_r')
+    t = hand.world_transform
+    fwd = unreal.MathLibrary.get_forward_vector(t.rotation.rotator())
+    distal = unreal.MathLibrary.multiply_vector_float(fwd, -1.0)       # bones run down local -X
+    point = t.translation + unreal.MathLibrary.multiply_vector_float(distal, -WRIST_CUT_CM)
+    return point, distal
+
+
+def plane_cut_wrist(mesh, fill, plane):
+    """Cut everything proximal of the wrist plane. The frame's +Z is the side that is deleted.
+    `plane` comes from wrist_plane() on the base mesh: the tessellated copy has no bone table."""
+    point, distal = plane
+    proximal = unreal.MathLibrary.multiply_vector_float(distal, -1.0)
+    frame = unreal.Transform(point, unreal.MathLibrary.make_rot_from_z(proximal), unreal.Vector(1, 1, 1))
+    opts = unreal.GeometryScriptMeshPlaneCutOptions()
+    opts.set_editor_property('fill_holes', fill)
+    opts.set_editor_property('fill_spans', False)
+    before = Q.get_vertex_count(mesh)
+    before_ids = set(tid for tid in range(Q.get_num_triangle_i_ds(mesh)) if Q.is_valid_triangle_id(mesh, tid))
+    mesh = unreal.GeometryScript_MeshBooleans.apply_mesh_plane_cut(mesh, frame, opts)
+    # The cut splits the boundary triangles into slivers; PN tessellation turns every sliver into a
+    # spike (the "fur" along the wrist). Collapse edges shorter than SLIVER_EDGE_CM and recompute
+    # the normals PN will interpolate from.
+    dopts = unreal.GeometryScriptDegenerateTriangleOptions()
+    dopts.set_editor_property('min_edge_length', SLIVER_EDGE_CM)
+    dopts.set_editor_property('min_triangle_area', SLIVER_EDGE_CM * SLIVER_EDGE_CM * 0.1)
+    dopts.set_editor_property('compact_on_completion', True)
+    mesh = unreal.GeometryScript_MeshRepair.repair_mesh_degenerate_geometry(mesh, dopts)
+    try:
+        mesh = unreal.GeometryScript_Normals.recompute_normals(mesh, unreal.GeometryScriptCalculateNormalsOptions())
+    except Exception as exc:
+        log('recompute_normals skipped: %s' % exc)
+    after = Q.get_vertex_count(mesh)
+    if after < before * 0.5:
+        raise RuntimeError('plane cut removed the hand (%d -> %d verts): the kept side is wrong' % (before, after))
     cap = [tid for tid in range(Q.get_num_triangle_i_ds(mesh))
-           if Q.is_valid_triangle_id(mesh, tid) and tid not in before_ids]
+           if Q.is_valid_triangle_id(mesh, tid) and tid not in before_ids] if fill else []
+    if fill and not cap:
+        # the plane cut's own fill gives up on a boundary with more than one loop (the tessellated
+        # cap ring); the generic hole filler does not
+        ids = set(tid for tid in range(Q.get_num_triangle_i_ds(mesh)) if Q.is_valid_triangle_id(mesh, tid))
+        mesh, filled, failed = unreal.GeometryScript_MeshRepair.fill_all_mesh_holes(mesh, unreal.GeometryScriptFillHolesOptions())
+        cap = [tid for tid in range(Q.get_num_triangle_i_ds(mesh)) if Q.is_valid_triangle_id(mesh, tid) and tid not in ids]
+        log('  hole filler: %d filled, %d failed' % (filled, failed))
+    log('wrist plane cut %.2f cm proximal of hand_r: %d -> %d verts, %d cap tris' % (WRIST_CUT_CM, before, after, len(cap)))
+    return mesh, cap
+
+
+def flatten_cap(mesh, cap):
+    """The cap is an interior surface nobody should see: one constant UV (a single mask texel,
+    flat normal) and a rigid hand_r weight for any vertex the fill created."""
+    before_verts = Q.get_num_vertex_i_ds(mesh)
 
     flat = unreal.Vector2D(CAP_UV, CAP_UV)
     tri_uv = unreal.GeometryScriptUVTriangle()
@@ -191,8 +275,12 @@ def cap_wrist(mesh):
     for tid in cap:
         UVS.set_mesh_triangle_u_vs(mesh, 0, tid, tri_uv)
 
-    _, bones = BW.get_all_bones_info(mesh)
-    hand_index = next(b.index for b in bones if str(b.name) == 'hand_r')
+    try:
+        _, bones = BW.get_all_bones_info(mesh)
+        hand_index = next(b.index for b in bones if str(b.name) == 'hand_r')
+    except Exception:
+        hand_index = flatten_cap.hand_index
+    flatten_cap.hand_index = hand_index
     rigid = unreal.GeometryScriptBoneWeight()
     rigid.set_editor_property('bone_index', hand_index)
     rigid.set_editor_property('weight', 1.0)
@@ -202,8 +290,7 @@ def cap_wrist(mesh):
         if ok and not weights:
             BW.set_vertex_bone_weights(mesh, vid, [rigid])
             fixed += 1
-    log('capped %d hole(s) (%d failed): %d cap tris, +%d verts, %d weighted to hand_r'
-        % (filled, failed, len(cap), Q.get_num_vertex_i_ds(mesh) - before_verts, fixed))
+    log('cap flattened: %d cap tris, %d vertices weighted to hand_r' % (len(cap), fixed))
     return mesh
 
 
@@ -252,12 +339,22 @@ def run():
     mesh = cut_to_hand(mesh, hand_vertex_mask(mesh))
     stats('hand', mesh)
     mesh = collapse_helper_bones(mesh)
-    mesh = repack_uvs(mesh)
-    mesh = cap_wrist(mesh)
+    plane = wrist_plane(mesh)
+    mesh, _ = plane_cut_wrist(mesh, False, plane)      # straight open boundary
+    mesh = normalize_weights(mesh, 'after cut')
+    mesh = repack_uvs(mesh)                            # the cap is not part of the packing
+    mesh, cap = plane_cut_wrist(mesh, True, plane)     # no-op cut, fills the hole flat
+    mesh = flatten_cap(mesh, cap)
+    mesh = normalize_weights(mesh, 'base')
+    stats('base', mesh)
     write_asset(src, mesh, BASE_NAME)
 
     mesh = unreal.GeometryScript_MeshSubdivide.apply_pn_tessellation(
         mesh, unreal.GeometryScriptPNTessellateOptions(), TESS_LEVEL)
+    # No second cut: slicing the tessellated ring leaves sliver triangles whose strain tensor explodes
+    # in the deformer (a fringe of spikes along the wrist). The PN bulge on the cap ring is a smooth
+    # bevel and is left alone.
+    mesh = normalize_weights(mesh, 'dense')
     stats('dense', mesh)
     write_asset(src, mesh, DENSE_NAME)
     log('done in %.1fs' % (time.time() - start))

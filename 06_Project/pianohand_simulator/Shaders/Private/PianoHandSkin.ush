@@ -7,13 +7,20 @@
 // `RecompileShaders changed` in the console. UE has no GLSL path - material shaders are authored in
 // HLSL and cross-compiled per platform - so HLSL is both the only option and the right one.
 //
-// Three layers:
-//   detail  T_SkinMicroNormal    tiling tangent-space micro relief, always on, made ANISOTROPIC by
-//                                the strain (Nagano et al. 2015): grooves bunch up across the
-//                                compressed axis and flatten along a stretched one
+// v3 (2026-10-12). Three layers of relief, then the surface response that makes it read as skin:
+//   detail  tiling tangent-space micro relief, always on, ANISOTROPIC under strain (Nagano et al.
+//           2015), and now REGIONAL: coarse wide mesh over the knuckles, fine mesh on the sides of
+//           the fingers, and papillary ridges (T_PH_PalmRidge_N) on the palmar side
 //   crease  procedural furrows whose POSITION, DIRECTION and PER-JOINT PATTERN come from the baked
-//                                wrinkle map, with Bando et al. 2002's furrow cross-section
-//   veins   T_PH_Vein_N          tiling ridges, gated by STRETCH (the opposite of creases)
+//           wrinkle map, with Bando et al. 2002's furrow cross-section. v3 bends the line around
+//           the finger, tapers it towards the sides, forks it at the ends, and seeds every joint
+//           differently
+//   palm    the distal / proximal palmar and thenar creases, from a distance field baked off the
+//           rig's own landmarks (mask 2), drawn with the same furrow profile
+//   veins   T_PH_Vein_N  tiling ridges, gated by STRETCH (the opposite of creases)
+//   surface cavity (darker, rougher, less specular inside a furrow), blanching over a stretched
+//           knuckle and flushing where skin is compressed, and a distance fade that stops the
+//           procedural lines from aliasing into shimmer at a distance
 //
 // T_PH_WrinkleMask, baked from the rig by Tools/bake_skin_maps.py (mesh UV space, not tiling):
 //   R = weighted joint band   0 on rigid parts, 1 on a joint's 50/50 skin-weight blend line,
@@ -24,14 +31,24 @@
 //       metacarpal, palm). Anatomically the three finger joints do not wrinkle alike: the back of
 //       the PIP carries 3-6 irregular transverse folds that are deepest with the finger straight,
 //       the DIP one or two clean lines, the MCP only faint ones; on the palm side the PIP has a
-//       double crease and the DIP a single one. One pattern for all three is what made the old
-//       version read as "stripes" rather than knuckles.
+//       double crease and the DIP a single one.
 //   A = 0.5 + 0.5 * dorsality - which SIDE of the joint this texel is on. +1 is the side that
 //       STRETCHES when the joint flexes (the back of the hand), -1 the side that COMPRESSES (the
 //       palm). The band from skin weights wraps all the way AROUND a joint, so without a side
-//       signal one gate has to serve both, and it can only ever be right on one of them. Skin is
-//       not symmetric here: the palm folds as the hand closes, while the loose skin over a knuckle
-//       gathers as the hand OPENS and pulls taut as it closes. Two gates, blended by A.
+//       signal one gate has to serve both. Two gates, blended by A. The same value is also the
+//       cosine of the angle AROUND the finger, which is what the bow / taper / fork use.
+//
+// T_PH_WrinkleMask2 (v3), same space:
+//   R = joint seed: a per-joint hash (categorical, nearest vertex, constant over a joint's band).
+//       It makes every joint's fold count / phase / fork direction its own.
+//   G = d / PalmRange, d = distance (cm) to the nearest major palm crease, 1 = far / not palm
+//   B = that crease's depth at the nearest point (tapers towards its ends), 0 off the palm
+//   A = along-hand coordinate L (wrist 0 -> fingertips), continuous. Only its GRADIENT is used:
+//       dot(grad s, grad L) > 0 means s grows towards the fingertip, i.e. this texel is DISTAL of
+//       the nearest band centre. That restores the sign mask 1 threw away, exactly where it is
+//       needed (inside the primary furrow, where s is small) and with no seam: both fields are
+//       smooth, so the sign flips on the s = 0 line itself. A baked per-vertex side bit does not -
+//       it flips on vertex borders, and sign * |s| then jumps inside the triangles (zig-zag lines).
 //
 // Why G stores a coordinate and not a direction: the obvious encoding is the crease angle, with the
 // shader rotating UV space to match. That shatters. Rotating a global coordinate by a per-pixel
@@ -40,15 +57,14 @@
 // whole problem to a periodic function of s: the iso-lines of s are perpendicular to the bone
 // already, so creases run across the finger by construction, and s is smooth, so nothing shatters.
 // The same reasoning is why the micro-relief is never UV-rotated either: its anisotropy is applied
-// to the sampled SLOPE, not to the lookup.
+// to the sampled SLOPE, not to the lookup, and why the regional micro relief is three FIXED
+// tilings blended by weight rather than one tiling that varies per pixel (a varying tiling drags
+// the lookup and swirls).
 //
 // Strain arrives as vertex colour from the deformer (CustomSkinningDetail.usf rewrites it with the
 // bone-relative values from the strain tensor):
 //   R = stretch (lambda_max - 1)     G = compression ALONG the bone     B = compression ACROSS it
 //   A = relax slack - stretch that has just been RELEASED, decaying over ~RelaxTau seconds.
-//       Strain alone is memoryless, so without this channel a finger that has just straightened
-//       looks exactly like one that was never bent. The knuckle folds you see right after a hand
-//       opens come from here.
 
 #ifndef PIANOHAND_SKIN_USH
 #define PIANOHAND_SKIN_USH
@@ -64,7 +80,7 @@
 #define PH_JT_OTHER 5
 
 // ---------------------------------------------------------------------------------------------
-// all the scalar knobs, so the entry points do not take 30 arguments each
+// all the scalar knobs, so the entry points do not take 60 arguments each
 // ---------------------------------------------------------------------------------------------
 
 struct FPHSkinParams
@@ -73,7 +89,8 @@ struct FPHSkinParams
 	float CreaseSharpness;    // legacy knob: narrows the furrow (maps onto the Bando width)
 	float CreaseWarp;         // fbm meander of the furrows, in cm
 	float CreaseRange;        // MUST match S_RANGE in the baker (cm)
-	float FurrowWidth;        // Bando w, as a fraction of the furrow spacing
+	float FurrowWidth;        // Bando w of the FINE folds, as a fraction of their spacing
+	float PrimaryWidth;       // cm, Bando w of the primary crease (a real knuckle crease is ~0.1-0.15cm)
 	float Irregularity;       // how unevenly the secondary folds are spaced and weighted
 	float SecondaryDepth;     // depth of the fine fold family relative to the primary crease (~0.3)
 	float JointReach;         // cm from the band centre beyond which the folds have faded out
@@ -87,6 +104,26 @@ struct FPHSkinParams
 	float DorsalBase, DorsalIron, DorsalRelax;
 	float SideSharpness, SideFlip;
 	float MaskGain, MaskSharpness;
+
+	// ---- v3: the shape of the line
+	float CreaseBow;          // cm the ENDS of a knuckle crease drift along the bone (+ distal, - proximal)
+	float PalmBow;            // same for the palmar digital creases
+	float SideTaper;          // |cos| around the finger below which the primary crease has faded out
+	float ForkStrength;       // depth of the short branch at each end of the primary crease, relative
+	float ForkAngle;          // cm the branch drifts along the bone per unit of circumference
+	float SeedVariation;      // 0..1 how far the per-joint seed moves fold count / phase / bow
+	float FoldFlattenStart;   // 10-16: compression at which a deep fold starts pressing the fine folds / micro relief flat
+	float FoldFlattenFull;    // ... and where they are gone (the skin inside a closed fold is pressed smooth, not crumpled)
+
+	// ---- v3: the major palm creases
+	float PalmRange;          // MUST match PALM_RANGE in the baker (cm)
+	float PalmLineDepth;      // depth relative to the primary knuckle crease
+	float PalmLineWidth;      // cm, Bando w of the palm creases (they are wider than finger creases)
+	float PalmLineBase, PalmLineCompress, PalmLineIron;
+
+	// ---- v3: distance fade (cm of skin per screen pixel)
+	float FadeStartCm;        // the fine folds begin to fade here
+	float FadeEndCm;          // and are gone here; the primary crease and palm lines last 2.5x longer
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -103,6 +140,11 @@ float3 PH_UnpackNormal(float3 Packed)
 	float2 XY = Packed.xy * 2.0f - 1.0f;
 	float Z = sqrt(saturate(1.0f - dot(XY, XY)));
 	return normalize(float3(XY, max(Z, 1e-3f)));
+}
+
+float2 PH_Slope(float3 N)
+{
+	return N.xy / max(N.z, 1e-3f);
 }
 
 // Whiteout blend: keeps both layers' slopes instead of letting the stronger one win outright.
@@ -172,7 +214,7 @@ float PH_FurrowFamily(float S, float Freq, float WidthFrac)
 }
 
 // ---------------------------------------------------------------------------------------------
-// crease height at one UV, from one tap of the baked mask
+// mask decoding
 // ---------------------------------------------------------------------------------------------
 
 float PH_Band(float MaskR, float MaskGain, float MaskSharpness)
@@ -192,10 +234,37 @@ float PH_DorsalSide(float MaskA, float SideSharpness, float SideFlip)
 	return saturate(D * SideSharpness * 0.5f + 0.5f);
 }
 
+// -1 palm centre .. 0 sides .. +1 back centre: the cosine around the finger, before squeezing.
+float PH_Around(float MaskA, float SideFlip)
+{
+	return clamp((MaskA * 2.0f - 1.0f) * SideFlip, -1.0f, 1.0f);
+}
+
 int PH_JointType(float MaskB)
 {
 	return (int)round(saturate(MaskB) * 5.0f);
 }
+
+// Mask 2 R -> per-joint hash in 0..1. See encode_seed() in the baker.
+float PH_DecodeSeed(float M2R)
+{
+	return saturate((M2R - 0.05f) / 0.9f);
+}
+
+// Distal (+1) or proximal (-1) of the nearest joint band, from the UV gradients of the unsigned
+// along-bone distance (mask 1 G) and of the along-hand coordinate (mask 2 A). Smooth across the
+// band centre: the result is only ever multiplied by s, which is 0 there.
+float PH_SideSign(float2 GradS, float2 GradL)
+{
+	// A HARD sign, never a soft one. Where the dot is unreliable (UV seams, the s = 0 line, flat
+	// spots of L) a soft sign would shrink |s| and the primary furrow would balloon into a dark
+	// wedge there; a wrong hard sign only mirrors the bow, which the taper hides at the sides.
+	return (dot(GradS, GradL) >= 0.0f) ? 1.0f : -1.0f;
+}
+
+// ---------------------------------------------------------------------------------------------
+// gates
+// ---------------------------------------------------------------------------------------------
 
 // The two regimes, kept apart so each can be tuned on its own:
 //
@@ -207,22 +276,54 @@ int PH_JointType(float MaskB)
 //            (DorsalIron). This is the case a single compression-driven gate gets backwards.
 //
 // Both sides get a relax term: slack is stretch that has just been RELEASED and has not settled
-// yet, so it outlives the strain that produced it and briefly deepens the folds. On the back of a
-// knuckle that IS the effect you see when a fist opens, which is why DorsalRelax is the larger of
-// the two by default.
+// yet, so it outlives the strain that produced it and briefly deepens the folds.
 //
 // Compress here is the compression ALONG the bone - a bend shortens the palm side of the finger
-// along its length, and that is the only strain that should make transverse creases. Sideways
-// squash (vertex colour B) drives the oblique side folds instead, below.
-float2 PH_CreaseGates(
-	float Compress, float Stretch, float Relax, FPHSkinParams P)
+// along its length, and that is the only strain that should make transverse creases.
+// 10-16: inside a closing fold the compression goes to 1 and every compression-gated family saturated at once -
+// secondary folds, fine lattice, micro anisotropy - and the fold read as crumpled paper. Real skin pressed into a
+// deep fold is smooth between the one big crease and the contact. This takes those families down again past
+// FoldFlattenStart (the primary crease keeps its gate).
+float PH_FoldFlatten(float Compress, FPHSkinParams P)
+{
+	return 1.0f - smoothstep(P.FoldFlattenStart, P.FoldFlattenFull, Compress);
+}
+
+float2 PH_CreaseGates(float Compress, float Stretch, float Relax, FPHSkinParams P)
 {
 	float Palm = P.PalmarBase + Compress * P.PalmarCompress + Relax * P.PalmarRelax - Stretch * P.PalmarIron;
 	float Back = P.DorsalBase + Relax * P.DorsalRelax - Stretch * P.DorsalIron;
 	return float2(saturate(Palm), saturate(Back));
 }
 
-float PH_CreaseHeightAt(float2 UV, float4 M, float3 Strain, float Relax, FPHSkinParams P)
+// Distance fade. The procedural furrows are a few hundredths of a cm wide; once a pixel covers
+// more skin than that they alias into shimmer, so their amplitude is taken down with the screen
+// footprint of the texel. CmPerPixel comes from the UV derivatives (DDX / DDY nodes in the graph)
+// times the mesh's cm-per-UV scale. Three bands: fine folds and micro relief go first, the primary
+// crease and the palm lines last 2.5x longer, the ridges (finest of all) go earliest.
+// 10-15: the fine lattice (graph levels 2+) is 0.04-0.055 cm wide and low in contrast; at arm's
+// length a real one is not visible at all, and ours read as a crumpled texture over the whole back
+// of the hand. It goes out well before the folds: gone once a pixel spans ~0.035 cm.
+float PH_LatticeFade(float CmPerPixel)
+{
+	return 1.0f - smoothstep(0.012f, 0.035f, CmPerPixel);   // 10-16: the earlier 0.008-0.022 made the back of the fingers look bald at play distance
+}
+
+float3 PH_FadeWeights(float CmPerPixel, FPHSkinParams P)
+{
+	float Fine    = 1.0f - smoothstep(P.FadeStartCm, P.FadeEndCm, CmPerPixel);
+	float Coarse  = 1.0f - smoothstep(P.FadeStartCm * 2.5f, P.FadeEndCm * 2.5f, CmPerPixel);
+	// papillary ridges are ~0.05cm apart: at a quarter of that per pixel they are already a
+	// sparkle, not a texture, so they go out well before the folds
+	float Ridges  = 1.0f - smoothstep(P.FadeStartCm * 0.25f, P.FadeEndCm * 0.3f, CmPerPixel);
+	return float3(Fine, Coarse, Ridges);
+}
+
+// ---------------------------------------------------------------------------------------------
+// knuckle crease height at one UV, from one tap of each mask
+// ---------------------------------------------------------------------------------------------
+
+float PH_CreaseHeightAt(float2 UV, float4 M, float4 M2, float SideSign, float3 Strain, float Relax, float2 Fade, FPHSkinParams P)
 {
 	float Band = PH_Band(M.r, P.MaskGain, P.MaskSharpness);
 	if (Band < 1e-4f)
@@ -235,7 +336,15 @@ float PH_CreaseHeightAt(float2 UV, float4 M, float3 Strain, float Relax, FPHSkin
 
 	int JT = PH_JointType(M.b);
 	float Dorsal = PH_DorsalSide(M.a, P.SideSharpness, P.SideFlip);
+	float Around = PH_Around(M.a, P.SideFlip);          // cosine around the finger
+	float AbsAround = abs(Around);                        // 1 on the centre lines, 0 at the sides
 	float2 Gate = PH_CreaseGates(Compress, Stretch, Relax, P);
+
+	float Seed = PH_DecodeSeed(M2.r);
+	float Seed2 = frac(Seed * 7.31f + 0.17f);
+	float Seed3 = frac(Seed * 3.77f + 0.59f);
+	// how much the seed is allowed to move things; 0 makes every joint identical again
+	float Var = saturate(P.SeedVariation);
 
 	// ---- per-joint pattern -------------------------------------------------------------------
 	float Folds = 1.0f, Depth = 1.0f, Irreg = 0.25f, Split = 0.0f;
@@ -262,44 +371,88 @@ float PH_CreaseHeightAt(float2 UV, float4 M, float3 Strain, float Relax, FPHSkin
 		Folds = 0.6f; Depth = 0.4f; Irreg = 0.3f;
 	}
 	Irreg *= P.Irregularity;
+	// every joint gets its own fold count (+-25%), unevenness and depth (+-10%)
+	Folds *= 1.0f + Var * 0.5f * (Seed - 0.5f);
+	Irreg *= 1.0f + Var * 0.6f * (Seed2 - 0.5f);
+	Depth *= 1.0f + Var * 0.2f * (Seed3 - 0.5f);
 
-	// s in cm along the bone, zero on the joint band; the warp is added in the SAME units, so it
-	// just nudges each furrow sideways instead of rotating anything. The warp scales with the
-	// furrow spacing - a meander larger than the spacing turns the family into noise.
+	// ---- the coordinates ---------------------------------------------------------------------
+	// S0: unsigned distance to the band centre in cm, continuous everywhere (mask 1). The fine fold
+	// family lives on this; being periodic, it must never see a seam.
+	// Ss: SIGNED s, bowed around the finger, for the PRIMARY crease only. The sign (from the two
+	// gradients) lets the crease be shifted asymmetrically: its ends (the sides of the finger,
+	// |Around| -> 0) drift by Bow while its middle stays put - the arc a knuckle crease actually
+	// draws, where a straight iso-line of s cuts the finger like a rubber band. Ss is discontinuous
+	// at the mid-phalanx hand-over (|s| peaks there, so the sign flips), which is harmless for the
+	// primary crease - it is zero that far from the band - but would put a visible phase jump into
+	// a periodic family. Hence two coordinates.
+	float Bow = lerp(P.PalmBow, P.CreaseBow, Dorsal) * (1.0f + Var * 0.5f * (Seed2 - 0.5f));
+	float S0 = M.g * P.CreaseRange;
+	// 10-15: within ~2 mask texels of the band centre the gradient of |s| is noise, so the hard sign
+	// flips texel to texel and the finite difference drew a stair-stepped hairline along every
+	// palmar PIP. A dead band of 0.03 cm makes Ss exactly 0 on both sides of the line (continuous);
+	// the primary furrows move outward by that much, which nothing can see.
+	float Ss = SideSign * max(S0 - 0.03f, 0.0f) - Bow * (1.0f - AbsAround * AbsAround);
+
+	// the warp is added in the SAME units, so it just nudges each furrow sideways instead of
+	// rotating anything. The warp scales with the furrow spacing - a meander larger than the
+	// spacing turns the family into noise. The seeded phase shift is a constant per joint, so the
+	// folds of neighbouring fingers do not line up.
 	float Spacing = 1.0f / max(P.CreaseFrequency * Folds, 1e-3f);
 	float Warp = P.CreaseWarp * Spacing * (1.0f + 0.5f * Irreg);
-	float S0 = M.g * P.CreaseRange;   // unsigned distance to the nearest band centre, cm
-	float S = S0 + PH_Fbm(UV * 90.0f) * Warp;
+	float S = S0 + PH_Fbm(UV * 90.0f) * Warp + Var * Seed * Spacing;
 
 	// ---- furrow width: Bando w as a fraction of the spacing, coupled to the strain across the
 	// furrow (Weiss et al. 2024, "Fast Dynamic Facial Wrinkles"): a wrinkle is a reserve of skin,
 	// so compression along the bone makes it narrower and stretch makes it wider and flatter.
-	// The legacy CreaseSharpness still narrows it (3.2 -> x1).
-	float W = P.FurrowWidth / max(P.CreaseSharpness * 0.3125f, 0.5f);
-	W *= (1.0f + P.StretchWiden * Stretch) / (1.0f + P.CompressNarrow * Compress);
+	float StrainW = (1.0f + P.StretchWiden * Stretch) / (1.0f + P.CompressNarrow * Compress);
+	float W = P.FurrowWidth / max(P.CreaseSharpness * 0.3125f, 0.5f) * StrainW;
+	// the primary crease has its own width in cm: tied to the fold spacing it came out ~0.27cm, a
+	// trench a quarter of the finger wide that read as a dark wedge wherever the band met the side
+	// of the finger at an angle
+	float Wp = P.PrimaryWidth * StrainW;
 
 	// ---- two scales, not one (skin topography: a few deep creases over a shallow line network;
 	// Pierard / Lagarde classify primary lines at tens of um and expression creases at hundreds).
 	//   primary    one crease on the band centre (the PIP a pair, +-Split), full depth
 	//   secondary  the per-joint family of fine folds, SecondaryDepth of that
-	// The old version gave every fold in the family the primary depth - that is what read as
-	// a knuckle carved out of plaster.
-	float Sp = S0 + PH_Fbm(UV * 60.0f + 7.0f) * P.CreaseWarp * 0.5f;
-	float Primary = PH_Furrow(abs(Sp) - Split, W / max(P.CreaseFrequency, 1e-3f) * 1.4f);
+	float Sp = Ss + PH_Fbm(UV * 60.0f + 7.0f) * P.CreaseWarp * 0.5f;
+	float Primary = PH_Furrow(abs(Sp) - Split, Wp);
+
+	// taper: a real crease does not run all the way round; it dies out towards the sides of the
+	// finger, where the skin is neither stretched nor compressed by a bend
+	float Taper = smoothstep(P.SideTaper, P.SideTaper + 0.3f, AbsAround);
+	Primary *= Taper;
+
+	// fork: at each end the line splits into a short branch that veers off along the bone and
+	// outlives the main crease by a little. Which way it veers is a per-joint choice.
+	{
+		float U = saturate((P.SideTaper + 0.35f - AbsAround) / 0.35f);   // 0 at the fork point, 1 at the end
+		float Dir = (Seed3 > 0.5f) ? 1.0f : -1.0f;
+		float Sb = Sp - Dir * P.ForkAngle * U;
+		float BranchTaper = smoothstep(P.SideTaper - 0.2f, P.SideTaper + 0.05f, AbsAround);
+		float Branch = PH_Furrow(abs(Sb) - Split, Wp * 0.8f) * (1.0f - U * 0.6f) * BranchTaper
+		             * step(1e-3f, U) * (1.0f - Taper);
+		Primary += Branch * P.ForkStrength;
+	}
 
 	float Secondary = PH_FurrowFamily(S, P.CreaseFrequency * Folds, W);
 	// per-fold weight varies smoothly along s, and fades smoothly along the fold - never clipped
 	// to on/off, which is what made the folds look lumpy
-	Secondary *= 0.7f + 0.3f * PH_Fbm(float2(S * 2.5f, 3.1f)) * 2.0f;
+	Secondary *= 0.7f + 0.3f * PH_Fbm(float2(S * 2.5f, 3.1f + Seed * 5.0f)) * 2.0f;
 	Secondary *= lerp(1.0f, 0.65f + 0.35f * PH_Fbm(UV * 24.0f) * 2.0f, saturate(Irreg));
-	// no secondary fold ON the primary crease
-	Secondary *= saturate(abs(abs(Sp) - Split) / max(Spacing * 0.5f, 1e-3f));
+	// no secondary fold ON the primary crease (judged on the unsigned, un-bowed distance: close enough)
+	Secondary *= saturate(abs(S0 - Split) / max(Spacing * 0.5f, 1e-3f));
+	// the fine folds taper too, but more gently - they are what is left at the sides
+	Secondary *= lerp(0.5f, 1.0f, Taper);
 
 	// ---- amplitude vs strain: the primary crease scales with its gate; the fine folds are a
 	// buckling pattern whose amplitude grows like sqrt(compression) (Cerda & Mahadevan 2003), so
 	// they come in fast at small strain and then saturate instead of deepening without limit.
-	float Back = Primary * Gate.y + Secondary * P.SecondaryDepth * sqrt(Gate.y);
-	float Palm = Primary * Gate.x + Secondary * P.SecondaryDepth * 0.5f * sqrt(Gate.x);
+	// Fade.x takes the fine folds out with distance, Fade.y the primary crease.
+	Secondary *= PH_FoldFlatten(Compress, P);
+	float Back = Primary * Gate.y * Fade.y + Secondary * P.SecondaryDepth * sqrt(Gate.y) * Fade.x;
+	float Palm = Primary * Gate.x * Fade.y + Secondary * P.SecondaryDepth * 0.5f * sqrt(Gate.x) * Fade.x;
 	float H = lerp(Palm, Back, Dorsal) * Depth;
 	// Folds cluster around the joint: fade them out with the distance to the band centre, in cm.
 	// This also keeps the per-joint pattern seams (where the nearest joint changes, mid-phalanx)
@@ -311,14 +464,36 @@ float PH_CreaseHeightAt(float2 UV, float4 M, float3 Strain, float Relax, FPHSkin
 	// folds there run at an angle, converging on the joint. We use the dorsality itself as the
 	// across-finger coordinate (it is the cosine of the angle around the finger), so these lines
 	// need nothing extra baked. They never show on a straight finger. Secondary scale.
-	float SideW = pow(saturate(1.0f - abs(M.a * 2.0f - 1.0f)), 2.0f);
-	float Tacross = asin(clamp(M.a * 2.0f - 1.0f, -1.0f, 1.0f)) * 0.8f;   // ~cm, finger radius 0.8
+	float SideW = pow(saturate(1.0f - AbsAround), 2.0f);
+	float Tacross = asin(Around) * 0.8f;   // ~cm, finger radius 0.8
 	float Q1 = S * 0.5f + Tacross * 0.866f;
 	float Q2 = S * 0.5f - Tacross * 0.866f;
 	float Side = min(PH_FurrowFamily(Q1, P.CreaseFrequency * 0.9f, W), PH_FurrowFamily(Q2, P.CreaseFrequency * 0.9f, W));
-	H += Side * SideW * P.SideFolds * P.SecondaryDepth * sqrt(saturate(Compress * 2.0f + Across + Relax * 0.5f)) * Depth;
+	H += Side * SideW * P.SideFolds * P.SecondaryDepth * sqrt(saturate(Compress * 2.0f + Across + Relax * 0.5f)) * Depth * Fade.x;
 
 	return H * Band;
+}
+
+// ---------------------------------------------------------------------------------------------
+// the major palm creases (mask 2 G/B), same furrow profile
+// ---------------------------------------------------------------------------------------------
+
+// They stand at rest (PalmLineBase), deepen as the palm cups / closes (compression) and open up a
+// little when the hand is spread flat (stretch). Unlike the knuckle creases they do not sit on a
+// joint band, so no band gate: the baked depth profile (B) is the amplitude.
+float PH_PalmLineHeightAt(float4 M2, float3 Strain, float Fade, FPHSkinParams P)
+{
+	float Amp = M2.b;
+	if (Amp < 1e-4f)
+	{
+		return 0.0f;
+	}
+	float Stretch  = saturate(Strain.r);
+	float Compress = saturate(max(Strain.g, Strain.b));
+	float Gate = saturate(P.PalmLineBase + Compress * P.PalmLineCompress - Stretch * P.PalmLineIron);
+	float D = M2.g * P.PalmRange;                  // cm to the nearest palm crease
+	float W = P.PalmLineWidth / (1.0f + P.CompressNarrow * 0.5f * Compress);
+	return PH_Furrow(D, W) * Amp * Gate * P.PalmLineDepth * Fade;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -330,13 +505,12 @@ float PH_CreaseHeightAt(float2 UV, float4 M, float3 Strain, float Relax, FPHSkin
 // is the gradient of the baked s coordinate - taken in UV space, which is also the normal map's own
 // xy space, so no tangent-frame bookkeeping is involved.
 // ---------------------------------------------------------------------------------------------
-float3 PH_AnisoDetail(float3 Detail, float2 GradS, float3 Strain, float MicroAniso, float MicroFlatten, float VSign)
+float2 PH_AnisoSlope(float2 Slope, float2 GradS, float3 Strain, float MicroAniso, float MicroFlatten, float VSign, float FoldKeep)
 {
 	float Stretch  = saturate(Strain.r);
-	float Compress = saturate(Strain.g);
-	float Across   = saturate(Strain.b);
+	float Compress = saturate(Strain.g) * FoldKeep;   // 10-16: a closed fold presses the micro relief flat instead of bunching it
+	float Across   = saturate(Strain.b) * FoldKeep;
 
-	float2 Slope = Detail.xy / max(Detail.z, 1e-3f);
 	float GLen = length(GradS);
 	float2 Dir = (GLen > 1e-6f) ? GradS / GLen * float2(1.0f, VSign) : float2(1.0f, 0.0f);
 	// where s is not baked (rigid skin) the gradient is noise: fall back to isotropic
@@ -348,8 +522,197 @@ float3 PH_AnisoDetail(float3 Detail, float2 GradS, float3 Strain, float MicroAni
 	float2 Perp  = Slope - Along;
 	float2 Aniso = Along * KAlong + Perp * KPerp;
 	float2 Iso   = Slope * (0.5f * (KAlong + KPerp));
-	float2 Out = lerp(Iso, Aniso, Have);
-	return normalize(float3(Out, 1.0f));
+	return lerp(Iso, Aniso, Have);
+}
+
+// ---------------------------------------------------------------------------------------------
+// regional micro relief: which relief, and how much of it, this bit of skin carries
+// ---------------------------------------------------------------------------------------------
+//
+// The back of the hand is not one texture. Over the knuckles the mesh of micro lines is wide and
+// deep (the skin there is loose and has to fold), along the sides of the fingers it is fine and
+// shallow, and the palmar side carries papillary ridges, not a mesh at all. Three lookups of the
+// same relief map at FIXED tilings (coarse / base / fine) plus the ridge map are blended by region
+// weight. Tiling is never varied per pixel: that would stretch the lookup and swirl.
+//
+//   Knuckle  back of a joint band (coarse, strong)
+//   Side     |cos around| small (fine, faint)
+//   Palmar   cos around < 0 (ridges)
+float3 PH_RegionWeights(float4 M, float MaskGain, float SideFlip)
+{
+	float Around = PH_Around(M.a, SideFlip);
+	float LooseBand = pow(saturate(M.r * MaskGain), 1.2f);      // broader than the crease band
+	int JT = PH_JointType(M.b);
+	float IsFingerJoint = (JT == PH_JT_MCP || JT == PH_JT_PIP || JT == PH_JT_DIP || JT == PH_JT_THUMB) ? 1.0f : 0.0f;
+	float Knuckle = LooseBand * smoothstep(0.2f, 0.8f, Around) * IsFingerJoint;
+	float Side = (1.0f - smoothstep(0.15f, 0.55f, abs(Around))) * (1.0f - Knuckle);
+	float Palmar = smoothstep(0.05f, 0.45f, -Around);
+	return float3(Knuckle, Side, Palmar);
+}
+
+// ---------------------------------------------------------------------------------------------
+// graph creases (Weiss et al. 2023 / 2024): the creases as line segments, evaluated per pixel
+// ---------------------------------------------------------------------------------------------
+//
+// Tools/simulate_wrinkle_graph.py grows the crease network as trails on a graph over the hand's UV
+// space (nodes = pores, edges = candidate wrinkles, a trail-formation walk deposits weight where
+// the joint band / palm fields say creases belong, following the across-bone orientation prior).
+// The surviving edges are packed into two lookup tables plus a cell index:
+//   Cells   (GraphGrid^2)        R,G,A = start index (3 bytes), B = count, of this cell's entries
+//   Edges0  (GraphTableWidth x N) endpoints relative to the cell centre in cell units, [-RelRange, RelRange] -> [0,1]
+//   Edges1                        (weight, width_cm / WidthRange, angle / pi, level)
+// These are tables of vector primitives, not an image: every pixel measures its distance to the
+// segments in its cell and draws the Bando profile analytically, with an analytic gradient. There
+// is no texel resolution, no finite difference, no seam, and the lines start, branch and end only
+// where the trail did.
+//
+// Per edge the width and depth follow Weiss et al. 2024 ("Fast Dynamic Facial Wrinkles", EG):
+// only wrinkles perpendicular to a stretch axis respond to it. With the two principal axes (here:
+// along the bone and across it, from the gradient of the baked s) and their log stretch ratios,
+//   d_i = 1 - |cos(theta_e - theta_i)|,  r = (d_1 log rho_1 + d_2 log rho_2) / (d_1 + d_2 + eps)
+//   sigma_w = exp(r)^alpha_w  (wider when stretched),  sigma_d = exp(-r)^alpha_d  (deeper when compressed)
+// Overlapping segments are blended with the paper's mellow-max (soft maximum of the valleys and of
+// the banks separately), whose softmax weights also give the blended gradient.
+
+struct FPHGraphSample
+{
+	float H;        // height in cm (negative in a valley)
+	float2 GradUV;  // dH / dUV, cm per UV unit
+};
+
+// Section of a graph line on x = L / w. The reference photos (Commons, closed fist, back of the
+// fingers) show the knuckle lines as shallow, ROUNDED grooves with next to no raised bank - unlike
+// a facial expression furrow. So this is Bando's section with the V bottom rounded off over the
+// inner third (a smooth blend into -1 instead of a cusp) and the bank held at a fifth.
+float PH_GraphProfile(float X)
+{
+	float S = (X - 1.0f) * exp(-X);
+	S = (S > 0.0f) ? S * 0.2f : S;
+	// round the bottom: for X < 0.5 blend towards the parabola -1 + X^2 that shares value and slope at 0.5
+	float R = -1.0f + 0.45f * X * X;              // -0.8875 at 0.5, matching S(0.5) = -0.303 is not needed: we blend
+	float T = smoothstep(0.0f, 0.5f, X);
+	return lerp(R * (1.0f - 0.0f), S, T);
+}
+
+float PH_GraphProfileD(float X)
+{
+	float D = (2.0f - X) * exp(-X);
+	D = ((X - 1.0f) > 0.0f) ? D * 0.2f : D;
+	float RD = 0.9f * X;
+	float T = smoothstep(0.0f, 0.5f, X);
+	float dT = (X > 0.0f && X < 0.5f) ? 6.0f * (X / 0.5f) * (1.0f - X / 0.5f) / 0.5f : 0.0f;
+	float S = (X - 1.0f) * exp(-X); S = (S > 0.0f) ? S * 0.2f : S;
+	float R = -1.0f + 0.45f * X * X;
+	return lerp(RD, D, T) + dT * (S - R);
+}
+
+FPHGraphSample PH_GraphCreases(
+	float2 UV, float2 GradS, float3 Strain, float Relax, float4 M,
+	Texture2D CellsTex, Texture2D Edges0Tex, Texture2D Edges1Tex,
+	float Grid, float TableWidth, float RelRange, float WidthRange, float UVScaleCm,
+	float Depth, float SecondaryDepth, float FineDepth, float AlphaW, float AlphaD, float Beta, FPHSkinParams P)
+{
+	FPHGraphSample Out;
+	Out.H = 0.0f;
+	Out.GradUV = float2(0, 0);
+
+	int2 Cell = (int2)floor(UV * Grid);
+	float4 C = CellsTex.Load(int3(Cell, 0));
+	uint Start = (uint)round(C.r * 255.0f) + ((uint)round(C.g * 255.0f) << 8) + ((uint)round(C.a * 255.0f) << 16);
+	uint Count = min((uint)round(C.b * 255.0f), 64u);
+	if (Count == 0u)
+	{
+		return Out;
+	}
+	float CellUV = 1.0f / Grid;
+	float2 Centre = ((float2)Cell + 0.5f) * CellUV;
+
+	// gates and strain axes, once per pixel
+	float Stretch  = saturate(Strain.r);
+	float Compress = saturate(Strain.g);
+	float Across   = saturate(Strain.b);
+	float Dorsal = PH_DorsalSide(M.a, P.SideSharpness, P.SideFlip);
+	float2 Gate = PH_CreaseGates(Compress, Stretch, Relax, P);
+	float GatePrimary = lerp(Gate.x, Gate.y, Dorsal);
+	float GateSecondary = lerp(0.5f * sqrt(Gate.x), sqrt(Gate.y), Dorsal);   // buckling amplitude ~ sqrt (Cerda & Mahadevan)
+	GateSecondary *= PH_FoldFlatten(Compress, P);
+	// principal axes in UV: along the bone (gradient of s) and across it
+	float GLen = length(GradS);
+	float2 Along = (GLen > 1e-6f) ? GradS / GLen : float2(1, 0);
+	float Have = saturate(GLen / 0.01f);
+	float ThetaAlong = atan2(Along.y, Along.x);
+	// log stretch ratios on the two axes: along the bone it is the stretch (R) or the along-bone
+	// compression (G), across it the across-bone compression (B)
+	float LogRhoAlong = (Stretch - Compress) * 0.25f;        // colour 1 ~ 25% strain
+	float LogRhoAcross = -Across * 0.25f;
+
+	float SumV = 0.0f, SumB = 0.0f;          // p-norm accumulators (valley, bank): sum |s|^p
+	float2 GradV = float2(0, 0), GradB = float2(0, 0);
+	float Scale = UVScaleCm;
+
+	LOOP
+	for (uint i = 0u; i < Count; ++i)
+	{
+		uint Idx = Start + i;
+		int2 T = int2(Idx % (uint)TableWidth, Idx / (uint)TableWidth);
+		float4 E0 = Edges0Tex.Load(int3(T, 0));
+		float4 E1 = Edges1Tex.Load(int3(T, 0));
+		float2 P0 = Centre + (E0.xy * 2.0f * RelRange - RelRange) * CellUV;
+		float2 P1 = Centre + (E0.zw * 2.0f * RelRange - RelRange) * CellUV;
+		float Wgt = E1.x;
+		float WidthCm = E1.y * WidthRange;
+		float Theta = E1.z * PH_TWO_PI * 0.5f;
+		float Level = E1.w * 4.0f;             // packer stores level / 4
+		bool bSecondary = Level > 0.5f;
+		bool bFine = Level > 1.5f;             // levels 2+: the fine transverse / diagonal network
+
+		// Weiss 2024: per-wrinkle width / depth from the strain axes vs the wrinkle direction
+		float D1 = 1.0f - abs(cos(Theta - ThetaAlong));
+		float D2 = 1.0f - abs(sin(Theta - ThetaAlong));
+		float R = (D1 * LogRhoAlong + D2 * LogRhoAcross) / (D1 + D2 + 1e-3f) * Have;
+		float SigmaW = exp(R * AlphaW);
+		float SigmaD = exp(-R * AlphaD);
+
+		float2 Seg = P1 - P0;
+		float SegLen2 = max(dot(Seg, Seg), 1e-12f);
+		float Tt = saturate(dot(UV - P0, Seg) / SegLen2);
+		float2 DVec = (UV - (P0 + Tt * Seg)) * Scale;       // cm, from the segment to the pixel
+		float L = length(DVec);
+		float W = max(WidthCm * SigmaW, 1e-4f);
+		float X = L / W;
+		if (X > 3.5f)
+		{
+			continue;
+		}
+		float A = Wgt * SigmaD * (bSecondary ? SecondaryDepth * GateSecondary * (bFine ? FineDepth : 1.0f) : GatePrimary) * Depth;
+		float Sv = A * PH_GraphProfile(X);                                   // cm
+		float2 G = A * PH_GraphProfileD(X) / W * (DVec / max(L, 1e-5f)) * Scale;   // d(Sv)/dUV
+		// p-norm smooth max over the overlapping fragments (Beta = p): one fragment comes out at its
+		// exact depth, two coincident ones (the shared end of two chain segments) at 2^(1/p) of it -
+		// 9% at p = 8 - and a crossing takes the deeper of the two. The earlier fixed-slot mellow-max
+		// (log((16 + sum e^(beta x)) / 16) / beta) diluted every fragment by its 16 empty slots: a
+		// 0.05 cm fine line came out at 0.008 cm, and any fragment in range added a 0.003 cm step
+		// whatever its depth (10-15, why the fine network stayed invisible at GraphFineDepth 12).
+		float Sa = abs(Sv);
+		float Spm1 = pow(Sa, Beta - 1.0f);
+		if (Sv < 0.0f)
+		{
+			SumV += Spm1 * Sa; GradV += Spm1 * (-G);
+		}
+		else
+		{
+			SumB += Spm1 * Sa; GradB += Spm1 * G;
+		}
+	}
+	float InvP = 1.0f / Beta;
+	float Valley = (SumV > 0.0f) ? pow(SumV, InvP) : 0.0f;
+	float Bank   = (SumB > 0.0f) ? pow(SumB, InvP) : 0.0f;
+	// d/dUV (sum |s|^p)^(1/p) = (sum)^(1/p - 1) * sum |s|^(p-1) d|s|/dUV
+	float2 GradValley = (SumV > 0.0f) ? GradV * pow(SumV, InvP - 1.0f) : float2(0, 0);
+	float2 GradBank   = (SumB > 0.0f) ? GradB * pow(SumB, InvP - 1.0f) : float2(0, 0);
+	Out.H = Bank - Valley;
+	Out.GradUV = GradBank - GradValley;
+	return Out;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -357,78 +720,232 @@ float3 PH_AnisoDetail(float3 Detail, float2 GradS, float3 Strain, float MicroAni
 // ---------------------------------------------------------------------------------------------
 
 float3 PH_SkinNormal(
-	float2 UV,
+	float2 UV, float2 DUVx, float2 DUVy,
 	float3 Tension,          // vertex colour RGB: stretch, along-bone compression, across-bone compression
 	float Relax,             // vertex colour ALPHA - released-stretch slack from the tension pass
 	Texture2D MaskTex,   SamplerState MaskSmp,
+	Texture2D Mask2Tex,  SamplerState Mask2Smp,
 	Texture2D DetailTex, SamplerState DetailSmp,
+	Texture2D RidgeTex,  SamplerState RidgeSmp,
 	Texture2D VeinTex,   SamplerState VeinSmp,
+	Texture2D GraphCellsTex, Texture2D GraphEdges0Tex, Texture2D GraphEdges1Tex,
 	float DetailTiling, float DetailStrength, float MicroAniso, float MicroFlatten, float VSign,
+	float KnuckleTilingMul, float KnuckleStrengthMul, float SideTilingMul, float SideStrengthMul,
+	float RidgeTiling, float RidgeStrength,
 	float CreaseDepth, float UVScaleCm, float VeinTiling, float VeinStrength, float Eps,
+	float GraphCreases, float GraphDepth, float GraphSecondaryDepth, float GraphFineDepth, float GraphAlphaW, float GraphAlphaD, float GraphBeta,
+	float GraphGrid, float GraphTableWidth, float GraphRelRange, float GraphWidthRange,
 	FPHSkinParams P)
 {
 	float Stretch = saturate(Tension.r);
 	float Slack   = saturate(Relax);
 
-	// Three taps of the mask: one for the value, two for the finite difference. Eps is in UV and
+	float CmPerPixel = max(length(DUVx), length(DUVy)) * UVScaleCm;
+	float3 Fade = PH_FadeWeights(CmPerPixel, P);
+
+	// Three taps of each mask: one for the value, two for the finite difference. Eps is in UV and
 	// has to be well under the furrow width (0.08cm = 0.003 UV for the fine PIP folds), which is
 	// only 1-2 texels of the 2k mask - fine now that the mask is 16-bit and bilinear.
 	// Texture2DSample rather than Tex.Sample: implicit derivatives are undefined inside non-uniform
 	// flow control and outright illegal in a ray-tracing hit shader, which every UE material also
 	// gets compiled into. Common.ush's macro falls back to SampleLevel on exactly those stages.
+	float2 UVx = UV + float2(Eps, 0);
+	float2 UVy = UV + float2(0, Eps);
 	float4 M0 = Texture2DSample(MaskTex, MaskSmp, UV);
-	float4 MX = Texture2DSample(MaskTex, MaskSmp, UV + float2(Eps, 0));
-	float4 MY = Texture2DSample(MaskTex, MaskSmp, UV + float2(0, Eps));
+	float4 MX = Texture2DSample(MaskTex, MaskSmp, UVx);
+	float4 MY = Texture2DSample(MaskTex, MaskSmp, UVy);
+	float4 N0 = Texture2DSample(Mask2Tex, Mask2Smp, UV);
+	float4 NX = Texture2DSample(Mask2Tex, Mask2Smp, UVx);
+	float4 NY = Texture2DSample(Mask2Tex, Mask2Smp, UVy);
 
 	float Band = PH_Band(M0.r, P.MaskGain, P.MaskSharpness);
 
-	// --- creases
-	float H0 = PH_CreaseHeightAt(UV, M0, Tension, Slack, P);
-	float HX = PH_CreaseHeightAt(UV + float2(Eps, 0), MX, Tension, Slack, P);
-	float HY = PH_CreaseHeightAt(UV + float2(0, Eps), MY, Tension, Slack, P);
-	// Slope of a groove CreaseDepth cm deep: dH/ds with s in cm, so the UV step is converted with
-	// the mesh's cm-per-UV scale (about 25 for the repacked hand). Clamped at ~72 degrees.
-	float2 G = float2(HX - H0, HY - H0) / max(Eps, 1e-6f) * CreaseDepth / max(UVScaleCm, 1e-3f);
+	// which side of the nearest joint: from the gradients of |s| and of the along-hand coordinate.
+	// One sign for all three taps - it only matters inside the primary furrow, where it is uniform.
+	float2 GradS = float2(MX.g - M0.g, MY.g - M0.g);
+	float2 GradL = float2(NX.a - N0.a, NY.a - N0.a);
+	float SideSign = PH_SideSign(GradS, GradL);
+
+	float2 G;
+	if (GraphCreases > 0.5f)
+	{
+		// --- creases as graph trails: analytic height and gradient, no finite difference
+		FPHGraphSample GS = PH_GraphCreases(UV, GradS, Tension, Slack, M0, GraphCellsTex, GraphEdges0Tex, GraphEdges1Tex,
+			GraphGrid, GraphTableWidth, GraphRelRange, GraphWidthRange, UVScaleCm,
+			GraphDepth * lerp(Fade.y, 1.0f, 0.0f), GraphSecondaryDepth * Fade.x / max(Fade.y, 1e-3f), GraphFineDepth * PH_LatticeFade(CmPerPixel), GraphAlphaW, GraphAlphaD, GraphBeta, P);
+		// GradUV is cm per UV; divide by cm per UV to get the slope (cm per cm)
+		G = GS.GradUV / max(UVScaleCm, 1e-3f);
+		// 10-15: the PALMAR finger creases come from the distance-field furrow, not the graph. The
+		// trail formation chops the palmar joint lines into short tapered chains (one or two Poisson
+		// steps each), which rendered as rows of beads across the PIP; the dorsal side keeps the graph
+		// (its chains run the finger width, and it carries the secondary lines and the fine lattice).
+		float DorsalMix = PH_DorsalSide(M0.a, P.SideSharpness, P.SideFlip);
+		if (DorsalMix < 0.999f)
+		{
+			float H0 = PH_CreaseHeightAt(UV,  M0, N0, SideSign, Tension, Slack, Fade.xy, P);
+			float HX = PH_CreaseHeightAt(UVx, MX, NX, SideSign, Tension, Slack, Fade.xy, P);
+			float HY = PH_CreaseHeightAt(UVy, MY, NY, SideSign, Tension, Slack, Fade.xy, P);
+			float2 GA = float2(HX - H0, HY - H0) / max(Eps, 1e-6f) * CreaseDepth / max(UVScaleCm, 1e-3f);
+			G = lerp(GA, G, DorsalMix);
+		}
+		// the major palm creases stay on the continuous distance field (mask 2): a trail chopped into
+		// short chains read as a string of beads there, a distance field never breaks
+		float PL0 = PH_PalmLineHeightAt(N0, Tension, Fade.y, P);
+		float PLX = PH_PalmLineHeightAt(NX, Tension, Fade.y, P);
+		float PLY = PH_PalmLineHeightAt(NY, Tension, Fade.y, P);
+		G += float2(PLX - PL0, PLY - PL0) / max(Eps, 1e-6f) * CreaseDepth / max(UVScaleCm, 1e-3f);
+	}
+	else
+	{
+		// --- creases: knuckle furrows + palm lines, one height field, one finite difference
+		float H0 = PH_CreaseHeightAt(UV,  M0, N0, SideSign, Tension, Slack, Fade.xy, P) + PH_PalmLineHeightAt(N0, Tension, Fade.y, P);
+		float HX = PH_CreaseHeightAt(UVx, MX, NX, SideSign, Tension, Slack, Fade.xy, P) + PH_PalmLineHeightAt(NX, Tension, Fade.y, P);
+		float HY = PH_CreaseHeightAt(UVy, MY, NY, SideSign, Tension, Slack, Fade.xy, P) + PH_PalmLineHeightAt(NY, Tension, Fade.y, P);
+		// Slope of a groove CreaseDepth cm deep: dH/ds with s in cm, so the UV step is converted with
+		// the mesh's cm-per-UV scale (about 25 for the repacked hand).
+		G = float2(HX - H0, HY - H0) / max(Eps, 1e-6f) * CreaseDepth / max(UVScaleCm, 1e-3f);
+	}
 	G = clamp(G, -2.0f, 2.0f);   // ~63 degrees: anything steeper reads as a cut, not a fold
 	float3 Crease = normalize(float3(-G.x, -G.y, 1.0f));
 
-	// --- detail: tiling relief, no rotation, but anisotropic in slope under strain
-	float3 Detail = PH_UnpackNormal(Texture2DSample(DetailTex, DetailSmp, UV * DetailTiling).rgb);
-	float2 GradS = float2(MX.g - M0.g, MY.g - M0.g);
-	Detail = PH_AnisoDetail(Detail, GradS, Tension, MicroAniso, MicroFlatten, VSign);
-	Detail = PH_ScaleNormal(Detail, DetailStrength);
+	// --- detail: regional tiling relief, no rotation, anisotropic in slope under strain
+	float3 Region = PH_RegionWeights(M0, P.MaskGain, P.SideFlip);
+	float2 SlopeBase    = PH_Slope(PH_UnpackNormal(Texture2DSample(DetailTex, DetailSmp, UV * DetailTiling).rgb));
+	float2 SlopeKnuckle = PH_Slope(PH_UnpackNormal(Texture2DSample(DetailTex, DetailSmp, UV * DetailTiling * KnuckleTilingMul + 0.37f).rgb)) * KnuckleStrengthMul;
+	float2 SlopeSide    = PH_Slope(PH_UnpackNormal(Texture2DSample(DetailTex, DetailSmp, UV * DetailTiling * SideTilingMul + 0.71f).rgb)) * SideStrengthMul;
+	float2 SlopeRidge   = PH_Slope(PH_UnpackNormal(Texture2DSample(RidgeTex, RidgeSmp, UV * RidgeTiling).rgb)) * (RidgeStrength / max(DetailStrength, 1e-3f));
+	float2 Slope = SlopeBase;
+	Slope = lerp(Slope, SlopeKnuckle, Region.x);
+	Slope = lerp(Slope, SlopeSide, Region.y);
+	Slope = lerp(Slope * Fade.x, SlopeRidge * Fade.z, Region.z);
+	Slope = PH_AnisoSlope(Slope, GradS, Tension, MicroAniso, MicroFlatten, VSign, PH_FoldFlatten(saturate(Tension.g), P));
+	float3 Detail = normalize(float3(Slope * DetailStrength, 1.0f));
 
 	// --- veins: ride on stretch, stay off the joint bands where the creases live, and stay on the
 	// back of the hand - palms do not show veins, and before the side channel existed they did.
 	float DorsalSide = PH_DorsalSide(M0.a, P.SideSharpness, P.SideFlip);
-	float VeinAmount = Stretch * VeinStrength * (1.0f - 0.7f * Band) * lerp(0.1f, 1.0f, DorsalSide);
+	// Veins live on the DORSUM of the hand (wrist to the knuckle row), not on the fingers, and they show
+	// at rest; stretch only raises them a little. On a bent knuckle the old stretch-only gate lit the
+	// vein ridges up like cracks in a glaze.
+	float AlongHandCm = N0.a * 24.0f;                                   // 0 at the wrist, ~8-9 at the MCP row
+	float Dorsum = 1.0f - smoothstep(7.5f, 9.5f, AlongHandCm);
+	float VeinAmount = (0.35f + 0.65f * Stretch) * VeinStrength * (1.0f - Band) * Dorsum * lerp(0.0f, 1.0f, DorsalSide) * Fade.y;
 	float3 Vein = PH_ScaleNormal(PH_UnpackNormal(Texture2DSample(VeinTex, VeinSmp, UV * VeinTiling).rgb), VeinAmount);
 
 	return PH_BlendNormals(PH_BlendNormals(Detail, Crease), Vein);
 }
 
-// Vein coverage, for tinting base colour. Same gating as the normal so the two agree.
-float PH_VeinMask(
-	float2 UV, float3 Tension,
+// ---------------------------------------------------------------------------------------------
+// surface response: what the relief does to colour, roughness, specular and occlusion
+// ---------------------------------------------------------------------------------------------
+//
+// Returns
+//   .x  cavity   0..1 how deep inside a furrow (knuckle or palm) this texel is - darker, rougher,
+//                less specular, occluded. The height field is already a "depth below the banks",
+//                so cavity is just its negative part, with the same gates as the normal so the two
+//                agree.
+//   .y  blanch   0..1 skin pulled taut over a knuckle: the dermal capillaries empty and the skin
+//                goes pale. Stretch on the back of a joint band, with a little of the relax slack
+//                (it fades back over the same time the folds return).
+//   .z  flush    0..1 skin compressed: blood is pushed into the folds between the fingers and the
+//                palm lines, and the creases themselves read redder. Compression, weighted towards
+//                the palmar side and the creases.
+//   .w  vein     0..1 vein coverage, for tinting (same gating as the vein normal)
+float4 PH_SkinSurface(
+	float2 UV, float2 DUVx, float2 DUVy,
+	float3 Tension, float Relax,
 	Texture2D MaskTex, SamplerState MaskSmp,
+	Texture2D Mask2Tex, SamplerState Mask2Smp,
 	Texture2D VeinTex, SamplerState VeinSmp,
-	float VeinTiling, float SideSharpness, float SideFlip, float MaskGain, float MaskSharpness)
-{
-	float4 M = Texture2DSample(MaskTex, MaskSmp, UV);
-	float Band = PH_Band(M.r, MaskGain, MaskSharpness);
-	float Side = lerp(0.1f, 1.0f, PH_DorsalSide(M.a, SideSharpness, SideFlip));
-	return Texture2DSample(VeinTex, VeinSmp, UV * VeinTiling).a * saturate(Tension.r)
-		 * (1.0f - 0.7f * Band) * Side;
-}
-
-// Crease coverage, for darkening base colour inside the folds.
-float PH_CreaseMask(
-	float2 UV, float3 Tension, float Relax,
-	Texture2D MaskTex, SamplerState MaskSmp,
+	Texture2D GraphCellsTex, Texture2D GraphEdges0Tex, Texture2D GraphEdges1Tex,
+	float UVScaleCm, float VeinTiling, float Eps,
+	float GraphCreases, float GraphDepth, float GraphSecondaryDepth, float GraphFineDepth, float GraphAlphaW, float GraphAlphaD, float GraphBeta,
+	float GraphGrid, float GraphTableWidth, float GraphRelRange, float GraphWidthRange, float CreaseDepth,
 	FPHSkinParams P)
 {
+	float Stretch  = saturate(Tension.r);
+	float Compress = saturate(Tension.g);
+	float Across   = saturate(Tension.b);
+	float Slack    = saturate(Relax);
+	float CmPerPixel = max(length(DUVx), length(DUVy)) * UVScaleCm;
+	float3 Fade = PH_FadeWeights(CmPerPixel, P);
+
 	float4 M = Texture2DSample(MaskTex, MaskSmp, UV);
-	return saturate(-PH_CreaseHeightAt(UV, M, Tension, saturate(Relax), P));
+	float4 N = Texture2DSample(Mask2Tex, Mask2Smp, UV);
+	float4 MX = Texture2DSample(MaskTex, MaskSmp, UV + float2(Eps, 0));
+	float4 MY = Texture2DSample(MaskTex, MaskSmp, UV + float2(0, Eps));
+	float4 NX = Texture2DSample(Mask2Tex, Mask2Smp, UV + float2(Eps, 0));
+	float4 NY = Texture2DSample(Mask2Tex, Mask2Smp, UV + float2(0, Eps));
+	float SideSign = PH_SideSign(float2(MX.g - M.g, MY.g - M.g), float2(NX.a - N.a, NY.a - N.a));
+	float Band = PH_Band(M.r, P.MaskGain, P.MaskSharpness);
+	float Dorsal = PH_DorsalSide(M.a, P.SideSharpness, P.SideFlip);
+	float Around = PH_Around(M.a, P.SideFlip);
+
+	float Cavity;
+	if (GraphCreases > 0.5f)
+	{
+		FPHGraphSample GS = PH_GraphCreases(UV, float2(MX.g - M.g, MY.g - M.g), Tension, Slack, M, GraphCellsTex, GraphEdges0Tex, GraphEdges1Tex,
+			GraphGrid, GraphTableWidth, GraphRelRange, GraphWidthRange, UVScaleCm,
+			GraphDepth * Fade.y, GraphSecondaryDepth * Fade.x / max(Fade.y, 1e-3f), GraphFineDepth * PH_LatticeFade(CmPerPixel), GraphAlphaW, GraphAlphaD, GraphBeta, P);
+		// the graph height is in cm; the procedural one was 0..1 - normalise by the primary depth.
+		// Palmar side: the distance-field furrow, as in the normal (10-15)
+		float HA = PH_CreaseHeightAt(UV, M, N, SideSign, Tension, Slack, Fade.xy, P);
+		float HG = lerp(HA, GS.H / max(GraphDepth, 1e-3f), Dorsal);
+		Cavity = saturate(-HG - PH_PalmLineHeightAt(N, Tension, Fade.y, P));
+	}
+	else
+	{
+		float H = PH_CreaseHeightAt(UV, M, N, SideSign, Tension, Slack, Fade.xy, P) + PH_PalmLineHeightAt(N, Tension, Fade.y, P);
+		Cavity = saturate(-H);
+	}
+
+	float Blanch = saturate(Stretch * 1.4f - Slack * 0.3f) * Band * Dorsal;
+	float Flush = saturate(Compress * 1.2f + Across * 0.5f) * lerp(1.0f, 0.5f, Dorsal) * (0.35f + 0.65f * Cavity + 0.4f * Band);
+
+	// 10-15: the tint stays on the dorsum (wrist .. MCP row) like the vein normal; on a fist the
+	// knuckle stretch lit the tint up as pale worms over the fingers
+	float VeinDorsum = 1.0f - smoothstep(7.5f, 9.5f, N.a * 24.0f);
+	float Vein = Texture2DSample(VeinTex, VeinSmp, UV * VeinTiling).a * (0.35f + 0.65f * Stretch)
+	           * (1.0f - Band) * Dorsal * VeinDorsum * Fade.y;
+
+	return float4(Cavity, Blanch, saturate(Flush), Vein);
+}
+
+// Base colour from the surface response. Kept in HLSL so the colour layers are one function of the
+// same gates as the relief; the graph just feeds the colour parameters in.
+float3 PH_SkinBaseColor(float4 Surface, float3 SkinColor, float3 FlushColor, float3 BlanchColor,
+                        float3 VeinColor, float3 CreaseColor,
+                        float BlanchGain, float FlushGain, float CavityDarken)
+{
+	float3 C = SkinColor;
+	C = lerp(C, BlanchColor, saturate(Surface.y * BlanchGain));
+	C = lerp(C, FlushColor, saturate(Surface.z * FlushGain));
+	C = lerp(C, VeinColor, Surface.w);
+	// a furrow is darker for two reasons: it is occluded (AO handles the lighting half of that) and
+	// its skin is thinner and bloodier (this is the pigment half). Multiply rather than lerp so it
+	// stays a shade of the skin and never a painted-on line.
+	C *= lerp(1.0f, 1.0f - CavityDarken, Surface.x);
+	C = lerp(C, CreaseColor, Surface.x * 0.35f);
+	return C;
+}
+
+// Roughness / specular / AO / subsurface amount from the surface response.
+//   .x roughness  the banks of a furrow and taut skin are smoother (sebum spreads, stratum corneum
+//                 flattens); the bottom of a furrow is rough and matte
+//   .y specular   down inside the furrow
+//   .z AO         the furrow bottom sees less of the sky
+//   .w opacity    subsurface amount for the profile shading model: a little less where the skin is
+//                 stretched thin over a knuckle (bone shows through) - subtle, 0.85..1
+float4 PH_SkinResponse(float4 Surface, float3 Tension,
+                       float Roughness, float Specular,
+                       float CavityRough, float StretchSmooth, float CavitySpecLoss, float CavityAO, float StretchThin)
+{
+	float Stretch = saturate(Tension.r);
+	float R = Roughness + Surface.x * CavityRough - Stretch * StretchSmooth;
+	float S = Specular * (1.0f - Surface.x * CavitySpecLoss);
+	float AO = 1.0f - Surface.x * CavityAO;
+	float O = 1.0f - Surface.y * StretchThin;
+	return float4(saturate(R), saturate(S), saturate(AO), saturate(O));
 }
 
 #endif // PIANOHAND_SKIN_USH

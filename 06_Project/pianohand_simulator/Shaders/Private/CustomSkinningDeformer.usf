@@ -31,9 +31,11 @@ Buffer<float>                     PositionInputBuffer;   // 3 floats per vertex,
 Buffer<SNORM float4>              TangentInputBuffer;    // 2 per vertex: TangentX, TangentZ (w = sign)
 Buffer<uint>                      InputWeightStream;     // FSkinWeightVertexBuffer data (section-local bone indices)
 StructuredBuffer<FBoneTransform>  BoneTransforms;        // RefPoseInverse * ComponentSpace, indexed by section BoneMap
+StructuredBuffer<FBoneTransform>  BoneNormalTransforms;  // inverse-transpose of the above (3x3), for normals; == BoneTransforms unless a bone is non-uniformly scaled (proportions)
 
 RWBuffer<float>                   PositionBufferUAV;
 RWBuffer<TANGENT_RWBUFFER_FORMAT> TangentBufferUAV;
+RWStructuredBuffer<float4>        VertexRotUAV;          // blended rotation quaternion per vertex (ARAP target of the implicit relaxation)
 
 [numthreads(THREADGROUP_SIZE, 1, 1)]
 void DeformCS(uint3 DispatchThreadId : SV_DispatchThreadID)
@@ -62,6 +64,7 @@ void DeformCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 
 #if SKIN_MODE == 0
 	// ---------------- LBS ----------------
+	float BestW = -1.0f; uint BestB = 0;
 	for (uint g = 0; g < NumGroups; ++g)
 	{
 		const int4   Idx = GetBlendIndices(InputWeightStream, StreamOffset, g);
@@ -72,13 +75,17 @@ void DeformCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 			const float Weight = W[i];
 			if (Weight > 0.0f)
 			{
-				const FBoneTransform T = BoneTransforms[min((uint)Idx[i], NumSectionBones - 1)];
+				const uint B = min((uint)Idx[i], NumSectionBones - 1);
+				if (Weight > BestW) { BestW = Weight; BestB = B; }
+				const FBoneTransform T = BoneTransforms[B];
+				const FBoneTransform N = BoneNormalTransforms[B];
 				SkinnedP  += Weight * TransformPosition(T, RestP);
-				SkinnedTX += Weight * TransformVector(T, RestTX.xyz);
-				SkinnedTZ += Weight * TransformVector(T, RestTZ.xyz);
+				SkinnedTX += Weight * TransformVector(T, RestTX.xyz);   // tangent: covariant, goes with the surface
+				SkinnedTZ += Weight * TransformVector(N, RestTZ.xyz);   // normal: contravariant, inverse-transpose
 			}
 		}
 	}
+	VertexRotUAV[VertexIndex] = DualQuatFromTransform(BoneTransforms[BestB]).Real;   // LBS has no single rotation: the heaviest bone's
 #else
 	// ---------------- DQS ----------------
 	FDualQuat Blend;
@@ -114,10 +121,31 @@ void DeformCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	const float Len = max(length(Blend.Real), 1e-8f);
 	Blend.Real /= Len;
 	Blend.Dual /= Len;
+	VertexRotUAV[VertexIndex] = Blend.Real;
 
 	SkinnedP  = DualQuatTransformPosition(Blend, RestP);
 	SkinnedTX = DualQuatTransformVector(Blend, RestTX.xyz);
 	SkinnedTZ = DualQuatTransformVector(Blend, RestTZ.xyz);
+#endif
+
+#if SKIN_MODE == 0
+	// Weights are expected to sum to 1; a mesh tool that interpolates them without renormalising
+	// (a plane cut, a weld) leaves vertices that skin to a fraction of the pose. Normalise here so
+	// the strain field never sees that step.
+	{
+		float WeightSum = 0.0f;
+		for (uint g2 = 0; g2 < NumGroups; ++g2)
+		{
+			const float4 W2 = GetBlendWeights(InputWeightStream, StreamOffset, g2, NumBoneInfluences);
+			WeightSum += W2.x + W2.y + W2.z + W2.w;
+		}
+		if (WeightSum > 1e-4f && abs(WeightSum - 1.0f) > 1e-3f)
+		{
+			SkinnedP  /= WeightSum;
+			SkinnedTX /= WeightSum;
+			SkinnedTZ /= WeightSum;
+		}
+	}
 #endif
 
 	PositionBufferUAV[VertexIndex * 3 + 0] = SkinnedP.x;

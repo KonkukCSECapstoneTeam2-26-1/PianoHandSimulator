@@ -39,6 +39,7 @@
 // (lambda up to 8) before packing, so up to ~1000 incident triangles cannot overflow int32.
 #define TENSOR_FIXED_SCALE 32768.0f
 #define TENSOR_STRIDE 6u   // xx, yy, zz, xy, xz, yz
+#define MAX_SKIN_TRIANGLE_AREA 0.05f   // cm^2; the dense hand's triangles are ~0.003, the wrist cap's ~0.3
 
 // ---------------------------------------------------------------------------
 // Accumulate (per triangle)
@@ -50,13 +51,31 @@ uint BaseIndex;            // first index of this section inside the LOD index b
 Buffer<uint>  IndexBuffer;             // LOD index buffer (16 or 32 bit typed SRV, both read as uint)
 Buffer<float> RestPositionBuffer;      // 3 floats per vertex (engine position vertex buffer)
 Buffer<float> SkinnedPositionBuffer;   // 3 floats per vertex (output of DeformCS)
+// Phase 5 (proportions): the rest pose skinned with the per-bone proportion scales. The strain is
+// taken against THIS when bUseProportionedRest, so a finger made longer by the proportions is not
+// read as stretched skin.
+uint          bUseProportionedRest;
+Buffer<float> ProportionedRestPositionBuffer;
 
 RWStructuredBuffer<int>  TensorAccum;  // 6 fixed point tensor components per LOD vertex
 RWStructuredBuffer<uint> TensorCount;  // number of triangle contributions per LOD vertex
+// Sum of the rest face normals' outer products n n^T, 6 fixed point components per vertex.
+// A rigid triangle contributes C3 = I - n n^T (the projector onto its plane). Averaged over a
+// vertex's fan and projected onto the vertex's OWN tangent plane that is the identity only if all
+// the faces share that plane; at a crease (the wrist cap ring, a nail edge) the projected area
+// ratio drops by cos^2 of the normal tilt and the kernel reports compression that is not there -
+// a fringe of volume-term spikes along the ring, at rest. Adding the averaged n n^T back
+// (ResolveCS) makes a rigid vertex exactly the identity whatever its crease angle.
+RWStructuredBuffer<int>  NormalOuterAccum;
 
 float3 LoadPos(Buffer<float> Buf, uint VertexIndex)
 {
 	return float3(Buf[VertexIndex * 3 + 0], Buf[VertexIndex * 3 + 1], Buf[VertexIndex * 3 + 2]);
+}
+
+float3 LoadRestPos(uint VertexIndex)
+{
+	return (bUseProportionedRest != 0u) ? LoadPos(ProportionedRestPositionBuffer, VertexIndex) : LoadPos(RestPositionBuffer, VertexIndex);
 }
 
 void AccumulateTensor(uint V, float C[6])
@@ -82,9 +101,9 @@ void AccumulateCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	const uint V1 = IndexBuffer[I + 1];
 	const uint V2 = IndexBuffer[I + 2];
 
-	const float3 R0 = LoadPos(RestPositionBuffer, V0);
-	const float3 R1 = LoadPos(RestPositionBuffer, V1);
-	const float3 R2 = LoadPos(RestPositionBuffer, V2);
+	const float3 R0 = LoadRestPos(V0);
+	const float3 R1 = LoadRestPos(V1);
+	const float3 R2 = LoadRestPos(V2);
 	const float3 P0 = LoadPos(SkinnedPositionBuffer, V0);
 	const float3 P1 = LoadPos(SkinnedPositionBuffer, V1);
 	const float3 P2 = LoadPos(SkinnedPositionBuffer, V2);
@@ -95,8 +114,15 @@ void AccumulateCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	float3 N = cross(U1, U2);
 	const float NLen = length(N);
 	const float U1Len = length(U1);
-	// Degenerate rest triangle (duplicated vertices, zero area) contributes nothing.
-	if (NLen < 1e-10f || U1Len < 1e-5f)
+	// Degenerate rest triangle (duplicated vertices, zero area) contributes nothing. Neither does a
+	// SLIVER: a plane cut or a UV seam leaves triangles a few microns tall whose deformation
+	// gradient is ill-conditioned, and they show up as a fringe of spikes wherever the strain is
+	// read. Altitude = 2 * area / longest edge, in cm.
+	// Nor does a CAP triangle: the wrist is closed with a fan of ~0.3 cm^2 triangles, a hundred times
+	// the size of a skin triangle. Their strain (the fan spokes pivot with the ring) is not skin
+	// strain, and spread onto the ring vertices it displaced them into a fringe of spikes.
+	const float LongestEdge = max(U1Len, max(length(U2), length(R2 - R1)));
+	if (NLen < 1e-10f || U1Len < 1e-5f || NLen / max(LongestEdge, 1e-6f) < 0.012f || NLen > 2.0f * MAX_SKIN_TRIANGLE_AREA)
 	{
 		return;
 	}
@@ -135,6 +161,18 @@ void AccumulateCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	AccumulateTensor(V0, C);
 	AccumulateTensor(V1, C);
 	AccumulateTensor(V2, C);
+
+	float NN[6];
+	NN[0] = N.x * N.x; NN[1] = N.y * N.y; NN[2] = N.z * N.z;
+	NN[3] = N.x * N.y; NN[4] = N.x * N.z; NN[5] = N.y * N.z;
+	UNROLL
+	for (uint k = 0; k < TENSOR_STRIDE; ++k)
+	{
+		const int Packed = (int)round(NN[k] * TENSOR_FIXED_SCALE);
+		InterlockedAdd(NormalOuterAccum[V0 * TENSOR_STRIDE + k], Packed);
+		InterlockedAdd(NormalOuterAccum[V1 * TENSOR_STRIDE + k], Packed);
+		InterlockedAdd(NormalOuterAccum[V2 * TENSOR_STRIDE + k], Packed);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -144,16 +182,18 @@ void AccumulateCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 uint  NumVertices;         // vertices in the LOD
 float TensionScale;        // strain -> 0..1 mapping (e.g. 4 => 25% stretch saturates)
 float DeltaTime;           // seconds since the last dispatch, clamped on the CPU side
-float RelaxGain;           // slack gained per unit of released stretch
-float RelaxTau;            // seconds for that slack to decay to ~37%
+float RelaxGain;           // log-strain -> 0..1 slack colour gain
+float RelaxTau;            // seconds, viscoelastic relaxation time constant (Montes Maestre 2026: 1/12 s)
 uint  bResetRelax;         // 1 on the first frame / after a LOD change: start from a clean state
 
 Buffer<SNORM float4>   RestTangentBuffer;   // 2 per vertex: TangentX, TangentZ (w = bitangent sign)
+Buffer<SNORM float4>   ProportionedRestTangentBuffer;   // Phase 5: same, from the proportion-scaled rest skinning (bUseProportionedRest)
 StructuredBuffer<int>  TensorAccumIn;
 StructuredBuffer<uint> TensorCountIn;
+StructuredBuffer<int>  NormalOuterAccumIn;  // see NormalOuterAccum above
 RWBuffer<UNORM float4> ColorBufferUAV;      // passthrough vertex factory colour buffer (RGBA8)
 RWStructuredBuffer<float> VertexTensorOut;  // averaged C3, 6 floats per vertex, consumed by CustomSkinningDetail.usf
-RWStructuredBuffer<float2> RelaxState;      // PERSISTS between frames: .x = last stretch, .y = slack
+RWStructuredBuffer<float2> RelaxState;      // PERSISTS between frames: .x = last total log-strain, .y = viscous log-strain E_v
 
 // v^T C3 w for a symmetric 3x3 stored as (xx, yy, zz, xy, xz, yz)
 float TensorForm(float C[6], float3 V, float3 W)
@@ -176,8 +216,8 @@ void ResolveCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 
 	// Rest tangent frame of the vertex. The tensor is projected onto this plane, which is also the
 	// material's tangent space, so anything derived here lines up with the normal map.
-	const float4 TX = RestTangentBuffer[V * 2 + GPUSKIN_VB_OFFSET_TANGENT_X];
-	const float4 TZ = RestTangentBuffer[V * 2 + GPUSKIN_VB_OFFSET_TANGENT_Z];
+	const float4 TX = (bUseProportionedRest != 0u) ? ProportionedRestTangentBuffer[V * 2 + GPUSKIN_VB_OFFSET_TANGENT_X] : RestTangentBuffer[V * 2 + GPUSKIN_VB_OFFSET_TANGENT_X];
+	const float4 TZ = (bUseProportionedRest != 0u) ? ProportionedRestTangentBuffer[V * 2 + GPUSKIN_VB_OFFSET_TANGENT_Z] : RestTangentBuffer[V * 2 + GPUSKIN_VB_OFFSET_TANGENT_Z];
 	const float3 N = normalize(TZ.xyz + float3(0, 0, 1e-6f));
 	float3 T = TX.xyz - N * dot(N, TX.xyz);
 	T = (dot(T, T) > 1e-8f) ? normalize(T) : float3(1, 0, 0);
@@ -189,7 +229,8 @@ void ResolveCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		UNROLL
 		for (uint i = 0; i < TENSOR_STRIDE; ++i)
 		{
-			C[i] = ((float)TensorAccumIn[V * TENSOR_STRIDE + i] / TENSOR_FIXED_SCALE) / (float)Count;
+			C[i] = ((float)TensorAccumIn[V * TENSOR_STRIDE + i] / TENSOR_FIXED_SCALE) / (float)Count
+			     + ((float)NormalOuterAccumIn[V * TENSOR_STRIDE + i] / TENSOR_FIXED_SCALE) / (float)Count;
 		}
 	}
 	else
@@ -216,28 +257,98 @@ void ResolveCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	const float Compress = max(1.0f - LambdaMin, 0.0f);
 
 	// ---------------------------------------------------------------------------
-	// Relax slack - the only history this pipeline keeps
+	// Viscoelastic strain memory - the only history this pipeline keeps
 	//
 	// Strain alone is memoryless: a finger held straight looks identical whether it has been straight
-	// all along or has just come back from a hard bend. Real skin does not. Stretched skin pays out
-	// slack, and that slack takes a moment to settle, which is why the back of a knuckle wrinkles
-	// just AFTER the finger straightens. So we track the stretch that was released and let it decay.
+	// all along or has just come back from a hard bend. Real skin is viscoelastic. Following Montes
+	// Maestre et al. 2026 ("Physics-Based Simulation of Contact-Induced Facial Wrinkling", SCA), the
+	// log-strain is split into an elastic part and a viscous (damper) part, E = E_e + E_v, and the
+	// damper relaxes towards the total strain with time constant tau:
+	//     E_v <- E_v + (1 - alpha) (E - E_v),   alpha = exp(-dt / tau)
+	// so the elastic part E_e = E - E_v is what the skin "feels" right now. Hold a stretch and E_v
+	// catches up with it, E_e decays, the skin accommodates. Release it and E drops to zero while E_v
+	// is still positive: E_e goes NEGATIVE - a transient compression - which is exactly the slack that
+	// gathers into folds on the back of a knuckle just after the finger straightens, and it then
+	// decays with the same tau. One law, both directions, instead of the ad-hoc "released stretch"
+	// counter this used to be. The paper's tau is 1/12 s for a face; RelaxTau is that knob.
+	// E here is the signed AREA log-strain in the tangent plane, log(lambda_1) + log(lambda_2):
+	// positive when the skin is pulled taut, negative when it is gathered.
 	// ---------------------------------------------------------------------------
-	const float2 PrevState = (bResetRelax != 0u) ? float2(Stretch, 0.0f) : RelaxState[V];
-	const float PrevStretch = max(PrevState.x, 0.0f);
-	const float NowStretch = Stretch;
+	const float E_total = log(max(LambdaMax, 1e-3f)) + log(max(LambdaMin, 1e-3f));
+	const float2 PrevState = (bResetRelax != 0u) ? float2(E_total, E_total) : RelaxState[V];
+	const float Alpha = exp(-DeltaTime / max(RelaxTau, 1e-3f));
+	const float E_v = PrevState.y + (1.0f - Alpha) * (E_total - PrevState.y);
+	const float E_e = E_total - E_v;
+	// the material reads "slack" = transient compression beyond what the skin has accommodated,
+	// RelaxGain maps log-strain to the 0..1 colour range (6 => 17% transient compression saturates)
+	const float Slack = saturate(-E_e * RelaxGain);
 
-	float Slack = PrevState.y;
-	// Stretch coming off pays slack out; stretch going back on irons it straight back in, so the
-	// effect only shows on release and does not build up over a held pose.
-	Slack += max(PrevStretch - NowStretch, 0.0f) * RelaxGain;
-	Slack -= max(NowStretch - PrevStretch, 0.0f) * RelaxGain;
-	Slack = saturate(Slack) * exp(-DeltaTime / max(RelaxTau, 1e-3f));
-
-	RelaxState[V] = float2(Stretch, Slack);
+	RelaxState[V] = float2(E_total, E_v);
 
 	// A carries the slack to the material - the colour buffer's alpha was a constant 1 before.
 	const float4 Color = float4(saturate(Stretch * TensionScale), saturate(Compress * TensionScale), 0.0f, Slack);
 	// Same swizzle the engine's own deformer writer uses so the vertex factory reads RGBA back correctly.
 	ColorBufferUAV[V] = Color FMANUALFETCH_COLOR_COMPONENT_SWIZZLE;
+}
+
+
+// ---------------------------------------------------------------------------
+// Tensor smoothing (Phase 7b) - 1-ring Laplacian on the averaged tensor
+//
+// The per-vertex tensor is the mean over the incident triangles only. In a fist, where the LBS
+// mesh folds onto itself and triangles collapse, that mean swings from vertex to vertex and every
+// consumer - the volume bulge, the crease gates, the fold ripples - turns into cobblestones. Two
+// passes of Laplacian smoothing (scatter each vertex's tensor to its triangle neighbours, then blend
+// the neighbour mean back in) leave the field physically the same at the scale of a joint and take
+// the vertex-to-vertex noise out. Same fixed-point atomics as AccumulateCS.
+// ---------------------------------------------------------------------------
+
+StructuredBuffer<float> SmoothTensorIn;          // 6 floats per LOD vertex (VertexTensorOut of the previous step)
+RWStructuredBuffer<float> SmoothTensorOut;
+float SmoothLambda;                              // 0..1 blend towards the neighbour mean
+
+[numthreads(THREADGROUP_SIZE, 1, 1)]
+void SmoothScatterCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	const uint Tri = DispatchThreadId.x;
+	if (Tri >= NumTriangles)
+	{
+		return;
+	}
+	const uint I = BaseIndex + Tri * 3;
+	const uint V[3] = { IndexBuffer[I + 0], IndexBuffer[I + 1], IndexBuffer[I + 2] };
+	UNROLL
+	for (uint a = 0; a < 3; ++a)
+	{
+		UNROLL
+		for (uint b = 0; b < 3; ++b)
+		{
+			if (a == b) continue;
+			UNROLL
+			for (uint c = 0; c < TENSOR_STRIDE; ++c)
+			{
+				const float X = clamp(SmoothTensorIn[V[b] * TENSOR_STRIDE + c], -64.0f, 64.0f);
+				InterlockedAdd(TensorAccum[V[a] * TENSOR_STRIDE + c], (int)round(X * TENSOR_FIXED_SCALE));
+			}
+			InterlockedAdd(TensorCount[V[a]], 1u);
+		}
+	}
+}
+
+[numthreads(THREADGROUP_SIZE, 1, 1)]
+void SmoothResolveCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	const uint V = DispatchThreadId.x;
+	if (V >= NumVertices)
+	{
+		return;
+	}
+	const uint Count = TensorCountIn[V];
+	UNROLL
+	for (uint c = 0; c < TENSOR_STRIDE; ++c)
+	{
+		const float Own = SmoothTensorIn[V * TENSOR_STRIDE + c];
+		const float Mean = (Count > 0u) ? ((float)TensorAccumIn[V * TENSOR_STRIDE + c] / TENSOR_FIXED_SCALE) / (float)Count : Own;
+		SmoothTensorOut[V * TENSOR_STRIDE + c] = lerp(Own, Mean, SmoothLambda);
+	}
 }

@@ -25,6 +25,17 @@ struct FSkinBoneTransform
 		T.Row2 = FVector4f(M.M[0][2], M.M[1][2], M.M[2][2], M.M[3][2]);
 		return T;
 	}
+
+	/** Back to the UE row-vector matrix (inverse of FromMatrix). */
+	FMatrix44f ToMatrix() const
+	{
+		FMatrix44f M = FMatrix44f::Identity;
+		M.M[0][0] = Row0.X; M.M[1][0] = Row0.Y; M.M[2][0] = Row0.Z; M.M[3][0] = Row0.W;
+		M.M[0][1] = Row1.X; M.M[1][1] = Row1.Y; M.M[2][1] = Row1.Z; M.M[3][1] = Row1.W;
+		M.M[0][2] = Row2.X; M.M[1][2] = Row2.Y; M.M[2][2] = Row2.Z; M.M[3][2] = Row2.W;
+		M.M[0][3] = 0.0f;   M.M[1][3] = 0.0f;   M.M[2][3] = 0.0f;   M.M[3][3] = 1.0f;
+		return M;
+	}
 };
 static_assert(sizeof(FSkinBoneTransform) == 48, "FSkinBoneTransform must be 48 bytes to match HLSL");
 
