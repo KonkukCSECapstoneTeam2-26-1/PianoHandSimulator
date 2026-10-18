@@ -11,6 +11,8 @@
 #include <iostream>
 #include <fstream>
 #include <sstream>
+#include <filesystem>
+#include <cmath>
 #include <string>
 #include <stdexcept>
 #include <algorithm>
@@ -136,23 +138,150 @@ struct NoteEvent {
     float duration_ms;
     int hand;
     int finger;
+    // 손가락이 실제로 건반을 누르는 시간. 페달로 늘어난 소리 길이(duration_ms)와 달리
+    // 손가락은 이 시점에 건반에서 떨어지므로, 눌림 판정은 반드시 이 값을 기준으로 한다.
+    float key_hold_ms;
 };
 
+// 손가락 뼈대 전체 길이(1.0 + 0.5 + 0.25 = 1.75)에 맞춰 건반 폭을 잡아야 손과 비율이 맞음.
+// getKeyLayout()과 initPianoKeyboard()가 반드시 이 값을 공유해야 건반 메시와 타겟 좌표가 어긋나지 않음.
+const float kWhiteKeyWidth = 0.45f;
+
+struct KeyLayout {
+    bool isBlack;
+    float z; // 건반의 중심 Z 위치 (getKeyPosition의 손끝 목표 Z와 동일한 좌표계)
+};
+
+KeyLayout getKeyLayout(int pitch) {
+    // 옥타브 내 반음 인덱스(0=C, 1=C#, ... 11=B)와 옥타브 번호(Middle C=60 기준 0)
+    int semitoneFromC4 = pitch - 60;
+    int octave = (int)std::floor(semitoneFromC4 / 12.0f);
+    int noteInOctave = semitoneFromC4 - octave * 12; // 0~11
+
+    // 반음 인덱스별 흰 건반 여부
+    static const bool isBlackKey[12] = { false, true, false, true, false, false, true, false, true, false, true, false };
+    // 반음 인덱스가 속하는(또는 바로 왼쪽에 있는) 흰 건반의 옥타브 내 순서(0~6: C D E F G A B)
+    static const float whiteKeyIndex[12] = { 0.0f, 0.0f, 1.0f, 1.0f, 2.0f, 3.0f, 3.0f, 4.0f, 4.0f, 5.0f, 5.0f, 6.0f };
+    // 검은 건반이 인접한 두 흰 건반의 정중앙이 아니라 한쪽으로 치우쳐 있는 실제 피아노 형태 반영
+    static const float blackKeyBias[12] = { 0.0f, -0.15f, 0.0f, 0.15f, 0.0f, 0.0f, -0.15f, 0.0f, 0.0f, 0.0f, 0.15f, 0.0f };
+
+    // 한 옥타브에는 흰 건반이 7개뿐이므로, 반음 12개를 균등 배치하지 않고 흰 건반 폭 기준으로 배치
+    float whiteKeyWidth = kWhiteKeyWidth;
+    float octaveOffset = octave * 7.0f * whiteKeyWidth;
+    float zPos = octaveOffset + whiteKeyIndex[noteInOctave] * whiteKeyWidth;
+
+    bool isBlack = isBlackKey[noteInOctave];
+    if (isBlack) {
+        // 왼쪽 흰 건반과 다음 흰 건반 사이의 중간 지점에서 치우침(bias)만큼 이동
+        zPos += whiteKeyWidth * (0.5f + blackKeyBias[noteInOctave]);
+    }
+
+    return { isBlack, zPos };
+}
+
 glm::vec3 getKeyPosition(int pitch) {
-    // 예시: MIDI 60 (Middle C)를 Z = 0.0f 기준으로 잡고 넓이를 계산
-    float keyWidth = 0.2f;
-    float zPos = (pitch - 60) * keyWidth;
+    KeyLayout layout = getKeyLayout(pitch);
 
-    // 검은 건반(샵/플랫)인지 판별하여 X(건반 깊이) 및 Y(건반 높이) 차이를 두면 더 현실적입니다.
-    // 여기서는 단순화된 위치를 반환합니다.
-    float pressX = 1.3f;
-    float pressY = -0.5f;
+    // 흰 건반은 손목 쪽 가까운 앞부분을 누르고, 검은 건반은 안쪽 깊숙히(손목에서 먼 쪽) 위치해 더 뻗어야 함
+    // 검은 건반은 흰 건반보다 짧고 높게 솟아있어, 더 높은 위치(Y)에서 눌림
+    float pressX = layout.isBlack ? 1.3f : 0.8f;
+    float pressY = layout.isBlack ? -0.35f : -0.5f;
 
-    return glm::vec3(pressX, pressY, zPos);
+    return glm::vec3(pressX, pressY, layout.z);
 }
 
 // 전체 MIDI 노트 데이터를 담아둘 멤버 변수 (클래스 멤버로 선언)
 std::vector<NoteEvent> parsedMidiData;
+
+// 재생 루프 길이와 건반 표시 범위 (로드한 데이터에 맞춰 갱신됨)
+float songLengthMs = 8000.0f;
+int dataLowestPitch = 48;
+int dataHighestPitch = 72;
+
+// 01_Fingering 이 생성한 UE5 DataTable CSV (이 소스 파일 위치 기준 상대 경로)
+const std::string kFingeringCsvPath =
+    (std::filesystem::path(__FILE__).parent_path() /
+     "../../01_Fingering/results/ue5/deb_clai_polyphonic_result_datatable.csv").lexically_normal().string();
+
+// 로드한 노트들로 재생 길이와 음역을 계산
+void updateSongInfo() {
+    if (parsedMidiData.empty()) return;
+
+    float endMs = 0.0f;
+    int lo = 127, hi = 0;
+    for (const auto& note : parsedMidiData) {
+        endMs = std::max(endMs, note.time_ms + note.duration_ms);
+        lo = std::min(lo, note.pitch);
+        hi = std::max(hi, note.pitch);
+    }
+    songLengthMs = endMs + 500.0f; // 루프 직전에 손을 쉬는 여유
+
+    // 88건반(A0~C8) 범위로 제한하고, 양 끝이 검은 건반이면 옆 흰 건반까지 넓혀 건반 모양을 마무리
+    static const bool isBlackPc[12] = { false, true, false, true, false, false, true, false, true, false, true, false };
+    lo = std::clamp(lo, 21, 108);
+    hi = std::clamp(hi, 21, 108);
+    if (isBlackPc[lo % 12]) lo--;
+    if (isBlackPc[hi % 12]) hi++;
+    dataLowestPitch = lo;
+    dataHighestPitch = hi;
+}
+
+// 01_Fingering 의 UE5 DataTable CSV 를 읽어 parsedMidiData 를 채움
+// 열 순서: Name,Pitch,StartMs,DurationMs,Hand,Role,Finger,Pressure,KeyDepth,IsBlack,WristPosNormalized,WristYawDeg,WristRollDeg,
+//          KeyHoldMs,PedalDown,TargetXMm,TargetYMm,TargetZMm,BoneName,FrameIndex,ReleaseFrameIndex
+bool loadFingeringCsv(const std::string& path) {
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        std::cerr << "[Fingering] Failed to open CSV: " << path << std::endl;
+        return false;
+    }
+
+    std::string line;
+    if (!getValidLine(file, line)) return false; // 헤더 스킵
+
+    std::vector<NoteEvent> notes;
+    int skipped = 0;
+    while (getValidLine(file, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+
+        std::stringstream ss(line);
+        std::vector<std::string> cols;
+        std::string cell;
+        while (std::getline(ss, cell, ',')) cols.push_back(cell);
+        if (cols.size() < 14) { skipped++; continue; }
+
+        try {
+            NoteEvent note;
+            note.pitch = std::stoi(cols[1]);
+            note.time_ms = std::stof(cols[2]);
+            note.duration_ms = std::stof(cols[3]);
+            note.hand = (cols[4] == "Left") ? 0 : 1;
+            note.finger = std::stoi(cols[6]);
+            note.velocity = static_cast<int>(std::round(std::stof(cols[7]) * 127.0f));
+            note.key_hold_ms = std::stof(cols[13]);
+
+            // 6음 이상 화음에서 운지 엔진이 손가락을 배정하지 못한 음(finger=0)은 제외
+            if (note.finger < 1 || note.finger > 5) { skipped++; continue; }
+            notes.push_back(note);
+        }
+        catch (const std::exception&) {
+            skipped++;
+        }
+    }
+
+    if (notes.empty()) {
+        std::cerr << "[Fingering] No valid notes in CSV: " << path << std::endl;
+        return false;
+    }
+
+    std::sort(notes.begin(), notes.end(), [](const NoteEvent& a, const NoteEvent& b) { return a.time_ms < b.time_ms; });
+    parsedMidiData = std::move(notes);
+    updateSongInfo();
+
+    std::cout << "[Fingering] " << parsedMidiData.size() << " notes loaded (skipped " << skipped << "), length "
+              << songLengthMs / 1000.0f << "s, keys " << dataLowestPitch << "~" << dataHighestPitch << std::endl;
+    return true;
+}
 
 // 가짜 MIDI 파싱 데이터를 생성하는 초기화 함수 (10손가락 양손 버전)
 void initMockMidiData() {
@@ -161,51 +290,70 @@ void initMockMidiData() {
     // duration_ms를 450.0f로 주어, 음과 음 사이에 살짝 손을 떼는(50ms) 디테일을 추가했습니다.
 
     // =================================================================
-    // [파트 1] 양손 스케일 상행 (0.0초 ~ 2.5초)
+    // [파트 1] 양손 반음계(크로매틱) 상행 - 흰/검은 건반 12개 모두 연주 (0.0초 ~ 5.95초, 원본과 동일한 500ms 간격)
     // =================================================================
 
-    // 🖐️ 오른손: C4(도) ~ G4(솔) 상행 (엄지 -> 새끼)
-    parsedMidiData.push_back({ 0.0f,    60, 80, 450.0f, 1, 1 }); // C4 - 엄지
-    parsedMidiData.push_back({ 500.0f,  62, 85, 450.0f, 1, 2 }); // D4 - 검지
-    parsedMidiData.push_back({ 1000.0f, 64, 80, 450.0f, 1, 3 }); // E4 - 중지
-    parsedMidiData.push_back({ 1500.0f, 65, 80, 450.0f, 1, 4 }); // F4 - 약지
-    parsedMidiData.push_back({ 2000.0f, 67, 85, 450.0f, 1, 5 }); // G4 - 새끼
+    // 🖐️ 오른손: C4 ~ B4 반음계 12음 상행, 손가락은 1~5번을 순환 사용
+    {
+        for (int i = 0; i < 12; i++) {
+            int pitch = 60 + i; // C4(60) ~ B4(71)
+            int finger = (i % 5) + 1; // 1,2,3,4,5 순환
+            parsedMidiData.push_back({ i * 500.0f, pitch, 80, 450.0f, 1, finger });
+        }
+    }
 
-    // 🤚 왼손: C3(낮은 도) ~ G3(낮은 솔) 상행 (새끼 -> 엄지)
+    // 🤚 왼손: C3 ~ B3 반음계 12음 상행, 손가락은 5~1번을 순환 사용
     // 주의: 피아노에서 왼손은 새끼손가락(5번)이 가장 낮은 음을 칩니다!
-    parsedMidiData.push_back({ 0.0f,    48, 80, 450.0f, 0, 5 }); // C3 - 새끼
-    parsedMidiData.push_back({ 500.0f,  50, 85, 450.0f, 0, 4 }); // D3 - 약지
-    parsedMidiData.push_back({ 1000.0f, 52, 80, 450.0f, 0, 3 }); // E3 - 중지
-    parsedMidiData.push_back({ 1500.0f, 53, 80, 450.0f, 0, 2 }); // F3 - 검지
-    parsedMidiData.push_back({ 2000.0f, 55, 85, 450.0f, 0, 1 }); // G3 - 엄지
+    {
+        for (int i = 0; i < 12; i++) {
+            int pitch = 48 + i; // C3(48) ~ B3(59)
+            int finger = 5 - (i % 5); // 5,4,3,2,1 순환
+            parsedMidiData.push_back({ i * 500.0f, pitch, 80, 450.0f, 0, finger });
+        }
+    }
 
 
     // =================================================================
-    // [파트 2] 양손 웅장한 C Major 화음 동시 타건 (3.0초 ~ 4.5초)
+    // [파트 2] 양손 웅장한 C Major 화음 동시 타건 (6.0초 ~ 7.5초, 파트 1이 끝난 뒤 시작)
     // =================================================================
 
     // 🤚 왼손 C3, E3, G3 (새끼, 중지, 엄지)
-    parsedMidiData.push_back({ 3000.0f, 48, 90, 1500.0f, 0, 5 });
-    parsedMidiData.push_back({ 3000.0f, 52, 90, 1500.0f, 0, 3 });
-    parsedMidiData.push_back({ 3000.0f, 55, 90, 1500.0f, 0, 1 });
+    parsedMidiData.push_back({ 6000.0f, 48, 90, 1500.0f, 0, 5 });
+    parsedMidiData.push_back({ 6000.0f, 52, 90, 1500.0f, 0, 3 });
+    parsedMidiData.push_back({ 6000.0f, 55, 90, 1500.0f, 0, 1 });
 
     // 🖐️ 오른손 C4, E4, G4 (엄지, 중지, 새끼)
-    parsedMidiData.push_back({ 3000.0f, 60, 90, 1500.0f, 1, 1 });
-    parsedMidiData.push_back({ 3000.0f, 64, 90, 1500.0f, 1, 3 });
-    parsedMidiData.push_back({ 3000.0f, 67, 90, 1500.0f, 1, 5 });
+    parsedMidiData.push_back({ 6000.0f, 60, 90, 1500.0f, 1, 1 });
+    parsedMidiData.push_back({ 6000.0f, 64, 90, 1500.0f, 1, 3 });
+    parsedMidiData.push_back({ 6000.0f, 67, 90, 1500.0f, 1, 5 });
+
+    // 모의 데이터는 페달이 없으므로 누르는 시간 = 소리 길이
+    for (auto& note : parsedMidiData) note.key_hold_ms = note.duration_ms;
+
+    songLengthMs = 8000.0f;
+    dataLowestPitch = 48;
+    dataHighestPitch = 72;
+}
+
+// 운지 CSV 를 우선 로드하고, 실패하면 모의 데이터로 대체
+void initNoteData() {
+    if (!loadFingeringCsv(kFingeringCsvPath)) {
+        std::cerr << "[Fingering] Falling back to mock MIDI data." << std::endl;
+        initMockMidiData();
+    }
 }
 
 // 2. 현재 시뮬레이션 시간에 맞춰 활성화된(눌려있는) 노트만 걸러내는 함수
 std::vector<NoteEvent> getActiveNotesForCurrentTime(float currentTimeSec) {
     std::vector<NoteEvent> activeNotes;
 
-    // 현재 시간을 밀리초(ms)로 변환 (루프 테스트를 위해 6초 단위로 반복되게 설정)
-    float loopTimeSec = std::fmod(currentTimeSec, 6.0f);
-    float currentTimeMs = loopTimeSec * 1000.0f;
+    // 현재 시간을 밀리초(ms)로 변환 (곡 길이 단위로 반복)
+    float currentTimeMs = std::fmod(currentTimeSec * 1000.0f, songLengthMs);
 
     for (const auto& note : parsedMidiData) {
-        // 노트의 시작 시간 <= 현재 시간 <= 노트의 종료 시간(시작 + 지속시간)
-        if (currentTimeMs >= note.time_ms && currentTimeMs <= (note.time_ms + note.duration_ms)) {
+        // 노트의 시작 시간 <= 현재 시간 < 건반 해제 시간(시작 + key_hold_ms)
+        // 끝을 포함하면 같은 손가락의 앞 음 해제 시각 = 다음 음 시작 시각인 프레임에서 두 음이 동시에 눌린 것으로 판정됨
+        if (currentTimeMs >= note.time_ms && currentTimeMs < (note.time_ms + note.key_hold_ms)) {
             activeNotes.push_back(note);
         }
     }
@@ -219,7 +367,8 @@ public:
         initWindow();
         //initFinger();
         initHand();
-        initMockMidiData();
+        initNoteData();
+        initPianoKeyboard();
         initVulkan();
         mainLoop();
         cleanup();
@@ -255,12 +404,18 @@ private:
     VkDescriptorSetLayout descriptorSetLayout;
     VkPipelineLayout pipelineLayout;
     VkPipeline graphicsPipeline;
+    VkPipeline pianoKeyPipeline;
 
     VkCommandPool commandPool;
 
     std::vector<Joint> joints;
 	std::vector<Finger> hand;
     std::vector<Vertex> vertices;
+    uint32_t pianoKeyVertexOffset = 0;
+    uint32_t pianoKeyVertexCount = 0;
+
+    // 카메라가 따라갈 두 손목의 중간 Z (updateJacobianKinematics 에서 갱신)
+    float wristCenterZ = 0.0f;
 
     VkBuffer vertexBuffer;
     VkDeviceMemory vertexBufferMemory;
@@ -354,24 +509,81 @@ private:
                 float zOff = (h == 0) ? zOffsetsL[f] : zOffsetsR[f];
 
                 if (f == 0) {
-                    // [엄지]
+                    // [엄지] 신전(펴는 방향) 여유를 넓혀 짧은 거리 타겟에서 베이스 관절이
+                    // 과도하게 젖혀지지 않고도 자연스럽게 펴진 자세를 취할 수 있게 함.
+                    // DIP(joint2)는 실제 연주 시 거의 펴진 채로 유지되므로 굽힘 범위를 좁힘
                     hand[i].joints[0].limits = deg2rad(50.0f, 50.0f, -40.0f, 40.0f, 0.0f, 15.0f);
-                    hand[i].joints[1].limits = deg2rad(60.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-                    hand[i].joints[2].limits = deg2rad(80.0f, 5.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+                    hand[i].joints[1].limits = deg2rad(110.0f, 15.0f, 0.0f, 0.0f, 0.0f, 0.0f); // [실험] PIP는 문제삼지 않았으니 여유를 더 줌
+                    hand[i].joints[2].limits = deg2rad(32.0f, 15.0f, 0.0f, 0.0f, 0.0f, 0.0f); // DIP는 요청대로 좁게 유지
                     hand[i].joints[3].limits = deg2rad(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
                     hand[i].rootOffset = glm::vec3(0.0f, -0.2f, zOff);
                 }
                 else {
-                    // [일반 손가락]
-                    hand[i].joints[0].limits = deg2rad(90.0f, 20.0f, -20.0f, 20.0f, 0.0f, 0.0f);
-                    hand[i].joints[1].limits = deg2rad(100.0f, 10.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-                    hand[i].joints[2].limits = deg2rad(80.0f, 5.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+                    // [일반 손가락] 마찬가지로 신전 여유를 넓히고, DIP(joint2) 굽힘 범위를 좁힘.
+                    // 검은 건반 대부분을 검지/약지(일반 손가락)가 담당하는데 외전(Y) 한계가
+                    // ±20도로 너무 좁아 옆으로 충분히 못 뻗어 검은 건반을 못 맞추는 문제가 있었음
+                    hand[i].joints[0].limits = deg2rad(90.0f, 20.0f, -35.0f, 35.0f, 0.0f, 0.0f);
+                    hand[i].joints[1].limits = deg2rad(110.0f, 20.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+                    hand[i].joints[2].limits = deg2rad(32.0f, 15.0f, 0.0f, 0.0f, 0.0f, 0.0f);
                     hand[i].joints[3].limits = deg2rad(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
                     hand[i].rootOffset = glm::vec3(0.0f, 0.0f, zOff);
                 }
             }
         }
         vertices.resize(80);
+    }
+
+    void initPianoKeyboard() {
+        const int lowestPitch = dataLowestPitch;   // 로드한 데이터의 최저음 (updateSongInfo 에서 계산)
+        const int highestPitch = dataHighestPitch; // 로드한 데이터의 최고음
+
+        const float whiteKeyWidth = kWhiteKeyWidth; // getKeyLayout()과 반드시 동일해야 함
+        const float whiteKeyGap = 0.04f;
+        const float blackKeyWidthRatio = 0.5f; // 실제 피아노 비율(흰 건반 대비 약 55%)에 가깝게
+
+        const float whiteTopY = -0.5f; // getKeyPosition()의 흰 건반 pressY와 동일
+        const float blackTopY = -0.35f; // getKeyPosition()의 검은 건반 pressY와 동일
+        // getKeyPosition()의 pressX(흰 0.8 / 검은 1.3)가 건반 안쪽에 들어오도록 여유를 0.1로 맞춤.
+        // 흰 건반은 손목 쪽 앞부분(작은 X)까지 길게, 검은 건반은 안쪽 깊은 부분(큰 X)에서 짧게 배치.
+        const float whiteFrontX = 1.6f, whiteBackX = 0.5f;   // 길이 1.1
+        const float blackFrontX = 1.4f, blackBackX = 0.9f;   // 길이 0.5, 흰 건반 뒤쪽 절반 안에 위치
+
+        const glm::vec3 whiteColor(0.9f, 0.9f, 0.9f);
+        const glm::vec3 blackColor(0.05f, 0.05f, 0.05f);
+
+        auto addKeyQuad = [&](float centerZ, float halfWidth, float frontX, float backX, float y, const glm::vec3& color) {
+            glm::vec3 p0(frontX, y, centerZ - halfWidth);
+            glm::vec3 p1(frontX, y, centerZ + halfWidth);
+            glm::vec3 p2(backX, y, centerZ + halfWidth);
+            glm::vec3 p3(backX, y, centerZ - halfWidth);
+
+            // 사각형 하나를 삼각형 2개로 구성 (Triangle List)
+            vertices.push_back({ p0, color });
+            vertices.push_back({ p1, color });
+            vertices.push_back({ p2, color });
+
+            vertices.push_back({ p0, color });
+            vertices.push_back({ p2, color });
+            vertices.push_back({ p3, color });
+            };
+
+        pianoKeyVertexOffset = static_cast<uint32_t>(vertices.size());
+
+        // 흰 건반을 먼저 깔고 검은 건반을 위에 얹는다 (깊이 테스트로 자연스럽게 겹쳐 보임)
+        for (int pitch = lowestPitch; pitch <= highestPitch; pitch++) {
+            KeyLayout layout = getKeyLayout(pitch);
+            if (!layout.isBlack) {
+                addKeyQuad(layout.z, (whiteKeyWidth - whiteKeyGap) * 0.5f, whiteFrontX, whiteBackX, whiteTopY, whiteColor);
+            }
+        }
+        for (int pitch = lowestPitch; pitch <= highestPitch; pitch++) {
+            KeyLayout layout = getKeyLayout(pitch);
+            if (layout.isBlack) {
+                addKeyQuad(layout.z, whiteKeyWidth * blackKeyWidthRatio * 0.5f, blackFrontX, blackBackX, blackTopY, blackColor);
+            }
+        }
+
+        pianoKeyVertexCount = static_cast<uint32_t>(vertices.size()) - pianoKeyVertexOffset;
     }
 
     void initVulkan() {
@@ -421,6 +633,7 @@ private:
         cleanupSwapChain();
 
         vkDestroyPipeline(device, graphicsPipeline, nullptr);
+        vkDestroyPipeline(device, pianoKeyPipeline, nullptr);
         vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
         vkDestroyRenderPass(device, renderPass, nullptr);
 
@@ -955,6 +1168,21 @@ private:
             throw std::runtime_error("failed to create graphics pipeline!");
         }
 
+        // 피아노 건반용 파이프라인: 선(Line) 대신 채워진 삼각형으로 렌더링
+        VkPipelineInputAssemblyStateCreateInfo keyInputAssembly = inputAssembly;
+        keyInputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+        VkPipelineRasterizationStateCreateInfo keyRasterizer = rasterizer;
+        keyRasterizer.cullMode = VK_CULL_MODE_NONE; // 와인딩 순서와 무관하게 항상 보이도록
+
+        VkGraphicsPipelineCreateInfo keyPipelineInfo = pipelineInfo;
+        keyPipelineInfo.pInputAssemblyState = &keyInputAssembly;
+        keyPipelineInfo.pRasterizationState = &keyRasterizer;
+
+        if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &keyPipelineInfo, nullptr, &pianoKeyPipeline) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create piano key pipeline!");
+        }
+
         vkDestroyShaderModule(device, fragShaderModule, nullptr);
         vkDestroyShaderModule(device, vertShaderModule, nullptr);
     }
@@ -1181,9 +1409,6 @@ private:
 
         vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
-
-
         VkViewport viewport{};
         viewport.x = 0.0f;
         viewport.y = 0.0f;
@@ -1204,7 +1429,13 @@ private:
 
         // Descriptor set 바인딩 (MVP 매트릭스용)
         vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
-        
+
+        // 0. 피아노 건반(흰/검은 건반) 그리기
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pianoKeyPipeline);
+        vkCmdDraw(commandBuffer, pianoKeyVertexCount, 1, pianoKeyVertexOffset, 0);
+
+        vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+
         // 1. 손가락 10개 그리기 (각 4개의 정점 선으로 연결)
         for (int i = 0; i < 10; i++) {
             vkCmdDraw(commandBuffer, 4, 1, i * 4, 0);
@@ -1259,10 +1490,19 @@ private:
         //ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
         ubo.model = glm::mat4(1.0f);
         //ubo.view = glm::lookAt(glm::vec3(0.0f, 0.0f, -4.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+        // 카메라를 두 손목의 중간 Z로 따라가게 함. 손목 자체가 이미 보간되어 움직이지만,
+        // 한 손만 크게 도약할 때 화면이 덜 흔들리도록 한 번 더 부드럽게 보간
+        static float lastCamTime = time;
+        static float cameraZ = wristCenterZ;
+        float camDt = glm::clamp(time - lastCamTime, 0.0f, 0.1f);
+        lastCamTime = time;
+        const float cameraFollowRate = 3.0f;
+        cameraZ = glm::mix(cameraZ, wristCenterZ, 1.0f - std::exp(-cameraFollowRate * camDt));
+
         ubo.view = glm::lookAt(
-            glm::vec3(-3.5f, 3.0f, 0.0f),  // 카메라 위치 (Eye): X축 뒤쪽, Y축 위쪽
-            glm::vec3(1.0f, 0.0f, 0.0f),   // 바라보는 곳 (Center): 손가락들이 뻗어있는 중심
-            glm::vec3(0.0f, 1.0f, 0.0f)    // 위쪽 방향 (Up)
+            glm::vec3(-3.5f, 3.0f, cameraZ),  // 카메라 위치 (Eye): X축 뒤쪽, Y축 위쪽
+            glm::vec3(1.0f, 0.0f, cameraZ),   // 바라보는 곳 (Center): 손가락들이 뻗어있는 중심
+            glm::vec3(0.0f, 1.0f, 0.0f)       // 위쪽 방향 (Up)
         );
         //float camRadius = 3.5f;
         //float camX = 1.0f + sin(time * 0.5f) * camRadius;
@@ -1363,42 +1603,92 @@ private:
     }
 
     void updateJacobianKinematics(float time, const std::vector<NoteEvent>& activeNotes) {
-        // 1. 시간에 따른 C코드와 F코드 블렌딩 비율 계산 (0.0 ~ 1.0 반복)
-        // 이 t 값은 타겟 이동뿐만 아니라 베지어 곡선의 매개변수로도 사용됩니다.
-        float t = (std::sin(time * 3.141592f) + 1.0f) * 0.5f;
+        // 프레임레이트와 무관한 보간을 위한 dt 계산 (긴 멈춤 후 손목이 순간이동하지 않도록 상한을 둠)
+        static float lastTime = time;
+        float dt = glm::clamp(time - lastTime, 0.0f, 0.1f);
+        lastTime = time;
 
         // --- [손목 트래킹 로직 (포물선 움직임 추가)] ---
         static glm::vec3 targetLeftWrist = glm::vec3(0.0f, 0.3f, -1.2f);
         static glm::vec3 targetRightWrist = glm::vec3(0.0f, 0.3f, 1.2f);
+        // 검은 건반 보정도 X/Z 타겟처럼 유지하여, 음 사이 짧은 틈에 손목이 꺼졌다 올라오지 않게 함
+        static float leftBlackBias = 0.0f;
+        static float rightBlackBias = 0.0f;
 
+        float leftXSum = 0.0f, rightXSum = 0.0f;
         float leftZSum = 0.0f, rightZSum = 0.0f;
+        float leftYSum = 0.0f, rightYSum = 0.0f;
         int leftCount = 0, rightCount = 0;
 
         for (const auto& note : activeNotes) {
             glm::vec3 keyPos = getKeyPosition(note.pitch);
-            if (note.hand == 0) { leftZSum += keyPos.z; leftCount++; }
-            else { rightZSum += keyPos.z; rightCount++; }
+
+            // 손목을 건반 중앙이 아니라 "이 손가락의 뿌리가 건반 바로 위에 오는 위치"에 둠.
+            // (건반 Z 평균에 두면 해당 손가락이 자기 rootOffset(최대 0.8)만큼 옆으로 뻗어야 했음)
+            float rootOffsetZ = 0.0f;
+            if (note.finger >= 1 && note.finger <= 5) {
+                int fingerIdx = (note.hand * 5) + (note.finger - 1);
+                rootOffsetZ = hand[fingerIdx].rootOffset.z;
+            }
+            float wristZForThisFinger = keyPos.z - rootOffsetZ;
+
+            if (note.hand == 0) { leftXSum += keyPos.x; leftZSum += wristZForThisFinger; leftYSum += keyPos.y; leftCount++; }
+            else { rightXSum += keyPos.x; rightZSum += wristZForThisFinger; rightYSum += keyPos.y; rightCount++; }
         }
+
+        // 손목이 누르는 건반 쪽으로 미리 다가가야 손가락이 거의 다 펴지지 않고 자연스럽게 굽혀짐
+        // (손가락에게는 wristReachMargin 만큼의 거리만 남겨서 뻗도록 함)
+        // 검은 건반은 더 안쪽(X+)에 있지만, 음마다 손목 전체가 0.5씩 앞뒤로 튀지 않도록
+        // 흰 건반 기준 위치 대비 차이의 일부만 손목에 반영하고 나머지는 손가락이 뻗어서 처리
+        const float wristReachMargin = 0.8f; // 손목이 건반에 너무 붙어 보이지 않도록 여유를 늘림
+        const float whiteKeyPressX = 0.8f;
+        const float blackKeyWristReach = 0.3f;
+        auto wristXFromAvgKeyX = [&](float avgKeyX) {
+            return whiteKeyPressX + (avgKeyX - whiteKeyPressX) * blackKeyWristReach - wristReachMargin;
+        };
+        if (leftCount > 0) targetLeftWrist.x = wristXFromAvgKeyX(leftXSum / leftCount);
+        if (rightCount > 0) targetRightWrist.x = wristXFromAvgKeyX(rightXSum / rightCount);
 
         if (leftCount > 0) targetLeftWrist.z = (leftZSum / leftCount);
         if (rightCount > 0) targetRightWrist.z = (rightZSum / rightCount);
 
+        // 검은 건반 비중이 높을수록 손목을 아주 살짝 들어올리는 작은 보정치
+        // (getKeyPosition의 흰 건반 기준 pressY 대비 얼마나 높은 위치인지로 계산)
+        const float whiteKeyPressY = -0.5f;
+        const float blackKeyWristLift = 0.3f; // 작은 오프셋 가중치 (건반 높이차 0.15의 30%만 반영)
+        if (leftCount > 0) leftBlackBias = (leftYSum / leftCount - whiteKeyPressY) * blackKeyWristLift;
+        if (rightCount > 0) rightBlackBias = (rightYSum / rightCount - whiteKeyPressY) * blackKeyWristLift;
+
         static glm::vec3 currentLeftWrist = targetLeftWrist;
         static glm::vec3 currentRightWrist = targetRightWrist;
 
-        // 1. Z축(좌우) 이동 보간
-        float wristLerpSpeed = 0.12f;
-        currentLeftWrist.z = glm::mix(currentLeftWrist.z, targetLeftWrist.z, wristLerpSpeed);
-        currentRightWrist.z = glm::mix(currentRightWrist.z, targetRightWrist.z, wristLerpSpeed);
+        // 지수 감쇠 보간: alpha = 1 - exp(-rate * dt)
+        // (rate 값은 기존 60FPS 기준 프레임당 0.12 / 0.15 와 같은 체감 속도가 되도록 맞춤)
+        const float wristMoveRate = 7.7f;
+        const float wristLiftRate = 9.75f;
+        float wristMoveAlpha = 1.0f - std::exp(-wristMoveRate * dt);
+        float wristLiftAlpha = 1.0f - std::exp(-wristLiftRate * dt);
 
-        // 2. Y축(상하) 아치형 곡선 추가: 타겟과의 거리가 멀수록 손목을 위로 들어올림
-        float baseWristY = 0.3f;
+        // 1. X축(앞뒤 뻗는 방향) / Z축(좌우) 이동 보간
+        currentLeftWrist.x = glm::mix(currentLeftWrist.x, targetLeftWrist.x, wristMoveAlpha);
+        currentRightWrist.x = glm::mix(currentRightWrist.x, targetRightWrist.x, wristMoveAlpha);
+        currentLeftWrist.z = glm::mix(currentLeftWrist.z, targetLeftWrist.z, wristMoveAlpha);
+        currentRightWrist.z = glm::mix(currentRightWrist.z, targetRightWrist.z, wristMoveAlpha);
+
+        // 2. Y축(상하) 아치형 곡선 + 검은 건반 보정: 타겟과의 거리가 멀수록, 검은 건반을 누를수록 손목을 위로 들어올림
+        // (좌우 이동뿐 아니라 앞뒤 이동 중에도 들리도록 XZ 평면 거리를 사용)
+        float baseWristY = 0.1f; // 건반 위로 손목이 과하게 뜨지 않도록 낮춤 (기존 0.3f)
         float arcMultiplier = 0.2f; // 손목이 들리는 높이 가중치
-        float targetY_L = baseWristY + std::abs(targetLeftWrist.z - currentLeftWrist.z) * arcMultiplier;
-        float targetY_R = baseWristY + std::abs(targetRightWrist.z - currentRightWrist.z) * arcMultiplier;
+        auto remainingTravel = [](const glm::vec3& target, const glm::vec3& current) {
+            return glm::length(glm::vec2(target.x - current.x, target.z - current.z));
+        };
+        float targetY_L = baseWristY + remainingTravel(targetLeftWrist, currentLeftWrist) * arcMultiplier + leftBlackBias;
+        float targetY_R = baseWristY + remainingTravel(targetRightWrist, currentRightWrist) * arcMultiplier + rightBlackBias;
 
-        currentLeftWrist.y = glm::mix(currentLeftWrist.y, targetY_L, 0.15f);
-        currentRightWrist.y = glm::mix(currentRightWrist.y, targetY_R, 0.15f);
+        currentLeftWrist.y = glm::mix(currentLeftWrist.y, targetY_L, wristLiftAlpha);
+        currentRightWrist.y = glm::mix(currentRightWrist.y, targetY_R, wristLiftAlpha);
+
+        wristCenterZ = (currentLeftWrist.z + currentRightWrist.z) * 0.5f;
 
 
         // --- [FK 계산 람다] ---
@@ -1422,10 +1712,6 @@ private:
                 hand[fingerIdx].joints[i + 1].globalTransform = globalTransform;
             }
             };
-
-        // 1. 시간에 따른 C코드와 F코드 블렌딩 비율 계산 (0.0 ~ 1.0 반복)
-        // 사인 함수를 사용하여 부드럽게 두 코드를 오가도록 만듭니다. (주기: 약 2초)
-        float blend = (std::sin(time * 3.141592f) + 1.0f) * 0.5f;
 
         // 2. 각 손가락별 C코드와 F코드 타겟 위치 정의
         // glm::vec3 targetsC[5];
@@ -1471,9 +1757,12 @@ private:
         // --- [손가락 타겟 로직 (프레임 간 보간 및 낙하 궤적 추가)] ---
         glm::vec3 desiredTargets[10]; // 손가락이 최종적으로 가야 할 목표 지점
 
-        // 1. 대기 상태 위치 설정
-        float restX = 1.0f;
-        float restY = -0.1f;
+        // 1. 대기 상태 위치 설정. 거의 일자로 편 상태(-0.1)는 관절이 굽힘 쪽으로만 넉넉하고
+        // 펴는 쪽 여유가 거의 없는 이 손가락 구조에서 오히려 수렴이 안 되는 어려운 자세였음
+        // (디버그로 확인: err~0.3 고착). 실제 이완된 손가락처럼 자연스럽게 아래로 굽은
+        // 자세를 목표로 삼아 관절 한계와 맞는 자세로 바꿈.
+        float restX = 0.9f;
+        float restY = -0.35f;
         for (int i = 0; i < 10; i++) {
             glm::vec3 wristPos = (i < 5) ? currentLeftWrist : currentRightWrist;
             desiredTargets[i] = wristPos + hand[i].rootOffset + glm::vec3(restX, restY, 0.0f);
@@ -1510,12 +1799,16 @@ private:
 
         // 3. 자코비안 IK 알고리즘 적용
         for (int fingerIdx = 0; fingerIdx < 10; fingerIdx++) {
-            
+
+            // [진단 결과] 이전 프레임의 각도로 웜스타트하면 한 번 나쁜 국소 최적해(관절이
+            // 한계각도에 고정됨)에 빠진 뒤 영원히 못 벗어남 (반복마다 살짝 당기는 방식도
+            // 매 반복 주 목표와 경합하여 오히려 수렴을 방해함, 직접 확인함: 오차가 더 커짐).
+            // 매 프레임 일자 자세(0도)에서 새로 풀어서 나쁜 상태가 누적되지 않도록 함.
             for (int i = 0; i < 3; i++) {
-                hand[fingerIdx].joints[i].angle *= 0.98f;
+                hand[fingerIdx].joints[i].angle = glm::vec3(0.0f);
             }
 
-            int iterationLimit = 15;
+            int iterationLimit = 40;
             float tolerance = 0.01f;
             glm::vec3 targetPos = smoothedTargets[fingerIdx]; // 개별 손가락 타겟 적용
             for (int iter = 0; iter < iterationLimit; iter++) {
@@ -1622,23 +1915,31 @@ private:
                 glm::mat3 invJWJt = glm::inverse(JWJt);
                 glm::vec3 e_star = invJWJt * error;
 
-                // 3. dTheta 적용 (W^-1 * J^T * e_star)
+                // 3. dTheta 계산 (W^-1 * J^T * e_star). [버그 수정] 예전에는 관절마다 따로
+                // maxStep으로 잘랐는데, 이러면 지렛대가 큰 joint0(길이 1.0)와 작은
+                // joint2(길이 0.25)가 매 반복 "같은" 각도만큼만 움직이도록 강제되어, 원래
+                // 가중 역행렬이 의도한 관절별 분배 비율이 깨짐. 그 결과 지렛대가 작은
+                // joint1/2가 실제 필요한 것보다 훨씬 빨리 한계각도까지 밀려버리고, joint0는
+                // 못 따라잡아 전체가 나쁜 국소해에 고정됨 (반복별 디버그로 직접 확인).
+                // 9개 DOF 전체를 하나의 벡터로 보고 총 스텝 길이만 제한해 비율을 보존함.
+                glm::vec3 dThetaPerJoint[3];
                 dofIndex = 0;
                 for (int i = 0; i < 3; i++) {
-                    glm::vec3 dTheta(
+                    dThetaPerJoint[i] = glm::vec3(
                         W_inv[dofIndex] * glm::dot(J_cols[dofIndex], e_star),
                         W_inv[dofIndex + 1] * glm::dot(J_cols[dofIndex + 1], e_star),
                         W_inv[dofIndex + 2] * glm::dot(J_cols[dofIndex + 2], e_star)
                     );
-
-                    float maxStep = 0.1f;
-                    float stepLen = glm::length(dTheta);
-                    if (stepLen > maxStep) {
-                        dTheta *= (maxStep / stepLen); // 방향은 유지하고 최대 길이만 제한
-                    }
-
-                    hand[fingerIdx].joints[i].angle += dTheta;
                     dofIndex += 3;
+                }
+
+                float maxStep = 0.1f;
+                float totalStepLenSq = glm::dot(dThetaPerJoint[0], dThetaPerJoint[0]) + glm::dot(dThetaPerJoint[1], dThetaPerJoint[1]) + glm::dot(dThetaPerJoint[2], dThetaPerJoint[2]);
+                float totalStepLen = std::sqrt(totalStepLenSq);
+                float scale = (totalStepLen > maxStep) ? (maxStep / totalStepLen) : 1.0f;
+
+                for (int i = 0; i < 3; i++) {
+                    hand[fingerIdx].joints[i].angle += dThetaPerJoint[i] * scale;
 
                     // 4. 안전장치: 연산 오차로 인한 범위 이탈을 막기 위한 최종 하드 클램프
                     JointLimits& limits = hand[fingerIdx].joints[i].limits;

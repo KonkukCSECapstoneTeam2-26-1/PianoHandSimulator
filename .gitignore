@@ -49,3 +49,6 @@ NotForCommit/
 # ===================== 대용량 미디어 =====================
 # 최종발표영상 (104MB) — GitHub 파일당 100MB 한도 초과. 별도 공유.
 03_Reports/Final/최종 제출본/*_최종발표영상.mp4
+
+# ===================== CMake (02_Implementation/02_IK) =====================
+02_Implementation/02_IK/build/
