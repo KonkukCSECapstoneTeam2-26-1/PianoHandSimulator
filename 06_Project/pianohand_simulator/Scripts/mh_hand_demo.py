@@ -100,7 +100,10 @@ for _k, _v in DETAIL.items():
 # Phase 5: the geometric groove follows the baked crease LINE instead of the whole joint band
 MASK = '/Game/PianoHand/Textures/T_PH_WrinkleMask'
 MASK_GROOVE = dict(mask_crease_depth=0.035, mask_crease_width=0.12,
-                   dorsal_gather=0.045, dorsal_gather_spacing=0.24, dorsal_gather_reach=0.7, dorsal_gather_base=0.8, dorsal_gather_iron=8.0)
+                   dorsal_gather=0.045, dorsal_gather_spacing=0.24, dorsal_gather_reach=0.7, dorsal_gather_base=0.8, dorsal_gather_iron=8.0,
+                   # 10-18 fold pile on the inside of a bending joint: pads bulge, secondary fold, primary crease deepens (sqrt of the drive)
+                   palmar_pad_height=0.10, palmar_pad_dist=0.30, palmar_pad_width=0.22, palmar_fold2_depth=0.05, palmar_fold2_dist=0.55,
+                   palmar_fold2_width=0.10, palmar_crease_deepen=0.08, palmar_fold_bend_full=1.2)
 
 
 def use_mask_groove(on=True):
@@ -120,7 +123,7 @@ IMPLICIT = dict(
     implicit_iterations=12, implicit_sigma=0.35, implicit_stop_angle=55.0, implicit_max_step=0.3,
     implicit_tolerance=0.002, implicit_relax=1.0, implicit_beta_diffusion=12, implicit_smooth_iterations=24,
     implicit_smooth_beta=1.0, implicit_bulge=0.0, implicit_bulge_start=15.0, implicit_bulge_full=70.0,
-    implicit_bend_start=10.0, implicit_bend_full=40.0, implicit_contact_depth=0.25,
+    implicit_bend_start=10.0, implicit_bend_full=40.0, implicit_contact_depth=0.25, implicit_stretch_keep=0.25,
     implicit_samples_per_bone=50, implicit_palm_samples=100,
 )
 

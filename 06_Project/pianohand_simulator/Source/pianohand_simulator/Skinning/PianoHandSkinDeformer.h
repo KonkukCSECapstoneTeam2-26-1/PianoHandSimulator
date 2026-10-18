@@ -194,7 +194,8 @@ public:
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
 		SHADER_PARAMETER(uint32, NumTriangles)
 		SHADER_PARAMETER(uint32, BaseIndex)
-		SHADER_PARAMETER_SRV(Buffer<uint>, IndexBuffer)
+		/** 10-18: LOD indices with UV-seam twins replaced by their canonical vertex (see PianoHandImplicit::BuildWeldMap). */
+		SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<uint>, IndexBuffer)
 		SHADER_PARAMETER(uint32, bUseProportionedRest)
 		SHADER_PARAMETER_SRV(Buffer<float>, RestPositionBuffer)
 		/** Phase 5: the rest pose skinned with the proportion scales, used instead of RestPositionBuffer when bUseProportionedRest. */
@@ -233,6 +234,7 @@ public:
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<int>, TensorAccumIn)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, TensorCountIn)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<int>, NormalOuterAccumIn)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, WeldCanon)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<UNORM float4>, ColorBufferUAV)
 		/** Averaged tensor, 6 floats per LOD vertex, for the detail pass. */
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<float>, VertexTensorOut)
@@ -254,7 +256,8 @@ public:
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
 		SHADER_PARAMETER(uint32, NumTriangles)
 		SHADER_PARAMETER(uint32, BaseIndex)
-		SHADER_PARAMETER_SRV(Buffer<uint>, IndexBuffer)
+		/** 10-18: LOD indices with UV-seam twins replaced by their canonical vertex (see PianoHandImplicit::BuildWeldMap). */
+		SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<uint>, IndexBuffer)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float>, SmoothTensorIn)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<int>, TensorAccum)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, TensorCount)
@@ -276,6 +279,7 @@ public:
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float>, SmoothTensorIn)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<int>, TensorAccumIn)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, TensorCountIn)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, WeldCanon)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<float>, SmoothTensorOut)
 	END_SHADER_PARAMETER_STRUCT()
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
@@ -329,6 +333,14 @@ public:
 		SHADER_PARAMETER(float, DorsalGatherReach)
 		SHADER_PARAMETER(float, DorsalGatherBase)
 		SHADER_PARAMETER(float, DorsalGatherIron)
+		SHADER_PARAMETER(float, PalmarPadHeight)
+		SHADER_PARAMETER(float, PalmarPadDist)
+		SHADER_PARAMETER(float, PalmarPadWidth)
+		SHADER_PARAMETER(float, PalmarFold2Depth)
+		SHADER_PARAMETER(float, PalmarFold2Dist)
+		SHADER_PARAMETER(float, PalmarFold2Width)
+		SHADER_PARAMETER(float, PalmarCreaseDeepen)
+		SHADER_PARAMETER(float, PalmarFoldBendFull)
 		SHADER_PARAMETER_TEXTURE(Texture2D, WrinkleMask)
 		SHADER_PARAMETER_SAMPLER(SamplerState, WrinkleMaskSampler)
 		SHADER_PARAMETER_SRV(Buffer<float2>, UVInputBuffer)
@@ -355,6 +367,7 @@ public:
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FBoneTransform>, RefPoseInverses)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float>, VertexTensor)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float2>, RelaxStateIn)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, WeldCanon)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<float>, PositionBufferUAV)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<SNORM float4>, TangentBufferUAV)
 		/** Rewritten with the bone-relative strain (R stretch, G along-bone compression, B across, A slack). */
@@ -377,7 +390,8 @@ public:
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
 		SHADER_PARAMETER(uint32, NumTriangles)
 		SHADER_PARAMETER(uint32, BaseIndex)
-		SHADER_PARAMETER_SRV(Buffer<uint>, IndexBuffer)
+		/** 10-18: LOD indices with UV-seam twins replaced by their canonical vertex (see PianoHandImplicit::BuildWeldMap). */
+		SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<uint>, IndexBuffer)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<float>, DisplacedPositionBuffer)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<int>, NormalAccum)
 	END_SHADER_PARAMETER_STRUCT()
@@ -398,6 +412,7 @@ public:
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
 		SHADER_PARAMETER(uint32, NumLodVertices)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<int>, NormalAccumIn)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, WeldCanon)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<SNORM float4>, TangentBufferUAV)
 	END_SHADER_PARAMETER_STRUCT()
 
@@ -532,6 +547,10 @@ public:
 	static constexpr uint32 ThreadGroupSize = 64;
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
 		SHADER_PARAMETER_STRUCT_INCLUDE(FPianoHandImplicitCommonParameters, Common)
+		SHADER_PARAMETER(float, StretchKeep)
+		SHADER_PARAMETER(float, BendGateStart)
+		SHADER_PARAMETER(float, BendGateFull)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float>, PairBend)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<float>, PrePosition)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<float>, PositionUAV)
 	END_SHADER_PARAMETER_STRUCT()
@@ -792,6 +811,38 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|MaskCrease", meta = (UIMin = "0", UIMax = "12"))
 	float DorsalGatherIron = 8.0f;
 
+	/** 10-18 fold pile: cm, how far the skin on either side of a palmar crease bulges out at full fold. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|MaskCrease")
+	float PalmarPadHeight = 0.05f;
+
+	/** 10-18 fold pile: cm from the crease where the bulge peaks. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|MaskCrease")
+	float PalmarPadDist = 0.3f;
+
+	/** 10-18 fold pile: cm, half-width of the bulge. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|MaskCrease")
+	float PalmarPadWidth = 0.22f;
+
+	/** 10-18 fold pile: cm, depth of the secondary fold at full fold. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|MaskCrease")
+	float PalmarFold2Depth = 0.03f;
+
+	/** 10-18 fold pile: cm from the crease to the secondary fold. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|MaskCrease")
+	float PalmarFold2Dist = 0.55f;
+
+	/** 10-18 fold pile: cm, half-width of the secondary fold. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|MaskCrease")
+	float PalmarFold2Width = 0.1f;
+
+	/** 10-18 fold pile: cm, extra depth of the primary crease at full fold. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|MaskCrease")
+	float PalmarCreaseDeepen = 0.05f;
+
+	/** 10-18 fold pile: radians of real joint bend at which the fold is complete. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|MaskCrease")
+	float PalmarFoldBendFull = 1.2f;
+
 	/**
 	 * Phase 7 - joint contact and volume-preserving bulge. The inside of a bent joint is where skin does
 	 * what no skinning does: the two segments come into CONTACT and the tissue squeezed between them
@@ -929,6 +980,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Implicit", meta = (UIMin = "0", UIMax = "1.5"))
 	float ImplicitContactDepth = 0.1f;
 
+	/**
+	 * 10-18: how much of the implicit correction is kept on the STRETCHING side of a bent joint (the back of a
+	 * knuckle), 1 = all of it. The union of two rest-relative tubes meeting at an angle has a concave corner on
+	 * the outer side of the bend; projecting the dorsal skin onto it dents the knuckle crest while the real skin
+	 * is pulled tight and smooth there. The geometric (DQS) skin is the better model on that side, so the
+	 * correction fades to this fraction where the vertex's joint is bent and the vertex sits outside the fold.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Implicit", meta = (ClampMin = "0", ClampMax = "1"))
+	float ImplicitStretchKeep = 0.25f;
+
 	/** Debug: 1 = vertex colour shows (stopped, displacement, residual) of the implicit passes (view with M_PianoHandVColor). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Implicit", meta = (ClampMin = "0", ClampMax = "3"))
 	int32 ImplicitDebugMode = 0;
@@ -976,6 +1037,12 @@ struct FPianoHandDeformerRenderState
 	bool bLoggedLayout = false;
 	bool bLoggedUnsupported = false;
 	bool bLoggedTensionUnavailable = false;
+	/** 10-18: UV-seam weld map (canonical vertex per LOD vertex) and the LOD index buffer rewritten with it. */
+	TRefCountPtr<FRDGPooledBuffer> WeldCanon;
+	TRefCountPtr<FRDGPooledBuffer> WeldIndices;
+	uint32 WeldNumVerts = 0;
+	uint32 WeldNumIndices = 0;
+	bool bLoggedWeld = false;
 	bool bLoggedProportionsDQS = false;
 	bool bLoggedMaskUnavailable = false;
 
@@ -1060,6 +1127,14 @@ struct FPianoHandDeformerFrameParams
 	float DorsalGatherReach = 0.7f;
 	float DorsalGatherBase = 0.8f;
 	float DorsalGatherIron = 8.0f;
+	float PalmarPadHeight = 0.05f;
+	float PalmarPadDist = 0.3f;
+	float PalmarPadWidth = 0.22f;
+	float PalmarFold2Depth = 0.03f;
+	float PalmarFold2Dist = 0.55f;
+	float PalmarFold2Width = 0.1f;
+	float PalmarCreaseDeepen = 0.05f;
+	float PalmarFoldBendFull = 1.2f;
 
 	/** True when any proportion scale is not 1: the render thread then skins a scaled rest pose for the strain reference. */
 	bool bProportioned = false;
@@ -1093,6 +1168,7 @@ struct FPianoHandDeformerFrameParams
 	float ImplicitBendFull = 40.0f;
 	int32 ImplicitDebugMode = 0;
 	float ImplicitContactDepth = 0.1f;
+	float ImplicitStretchKeep = 0.25f;
 	bool bImplicitTracking = true;
 	float ImplicitTrackMaxStepDeg = 25.0f;
 };

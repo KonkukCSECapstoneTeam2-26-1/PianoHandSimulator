@@ -25,6 +25,7 @@
 namespace PianoHandImplicit
 {
 	void Build(const USkinnedMeshComponent* Component, const FPianoHandImplicitBuildSettings& Settings, FPianoHandImplicitData& Out);
+	bool BuildWeldMap(const FSkeletalMeshLODRenderData& Lod, TArray<uint32>& OutCanon, TArray<uint32>& OutWeldedIndices, int32& OutNumTwins);
 }
 
 namespace PianoHandProportions
@@ -306,6 +307,54 @@ namespace PianoHandSkinDeformer
 			const FRawStaticIndexBuffer16or32Interface* IndexBuffer = Lod.MultiSizeIndexContainer.IsIndexBufferValid() ? Lod.MultiSizeIndexContainer.GetIndexBuffer() : nullptr;
 			IndexSRV = IndexBuffer ? IndexBuffer->GetSRV() : nullptr;
 		}
+		// 10-18: every triangle-gather pass runs on the WELDED index buffer (UV-seam twins -> canonical vertex) and
+		// every per-vertex resolve reads the canonical vertex's accumulation, so the two copies of a seam vertex
+		// get the same strain, normal and displacement. Without this the seams along the finger sides opened
+		// into hairline cracks (detail pass) and see-through slivers (implicit relaxation + smoothing).
+		FRDGBufferSRVRef WeldIndexSRV = nullptr;
+		FRDGBufferSRVRef WeldCanonSRV = nullptr;
+		{
+			const uint32 NumLodVertsForWeld = Lod.GetNumVertices();
+			if (!State.WeldCanon.IsValid() || !State.WeldIndices.IsValid() || State.WeldNumVerts != NumLodVertsForWeld)
+			{
+				TArray<uint32> Canon, Welded;
+				int32 NumTwins = 0;
+				if (PianoHandImplicit::BuildWeldMap(Lod, Canon, Welded, NumTwins) && Canon.Num() == (int32)NumLodVertsForWeld && Welded.Num() >= 3)
+				{
+					FRDGBufferRef CanonBuf = CreateStructuredBuffer(GraphBuilder, TEXT("PianoHandWeldCanon"), Canon);
+					FRDGBufferRef IdxBuf = CreateVertexBuffer(GraphBuilder, TEXT("PianoHandWeldIndices"), FRDGBufferDesc::CreateBufferDesc(sizeof(uint32), Welded.Num()), Welded.GetData(), Welded.Num() * sizeof(uint32));
+					GraphBuilder.QueueBufferExtraction(CanonBuf, &State.WeldCanon);
+					GraphBuilder.QueueBufferExtraction(IdxBuf, &State.WeldIndices);
+					State.WeldNumVerts = NumLodVertsForWeld;
+					State.WeldNumIndices = (uint32)Welded.Num();
+					WeldCanonSRV = GraphBuilder.CreateSRV(CanonBuf);
+					WeldIndexSRV = GraphBuilder.CreateSRV(IdxBuf, PF_R32_UINT);
+					if (!State.bLoggedWeld)
+					{
+						State.bLoggedWeld = true;
+						UE_LOG(LogPianoHand, Display, TEXT("[SkinDeformer] %s: UV-seam weld map built - %d of %u vertices are seam twins (%d indices rewritten)"),
+							*OwnerName.ToString(), NumTwins, NumLodVertsForWeld, Welded.Num());
+					}
+				}
+				else
+				{
+					State.WeldCanon.SafeRelease();
+					State.WeldIndices.SafeRelease();
+					State.WeldNumVerts = 0;
+					if (!State.bLoggedWeld)
+					{
+						State.bLoggedWeld = true;
+						UE_LOG(LogPianoHand, Warning, TEXT("[SkinDeformer] %s: no CPU access to positions / indices - seam weld unavailable, tension and normals skipped"), *OwnerName.ToString());
+					}
+				}
+			}
+			else
+			{
+				WeldCanonSRV = GraphBuilder.CreateSRV(GraphBuilder.RegisterExternalBuffer(State.WeldCanon, TEXT("PianoHandWeldCanon")));
+				WeldIndexSRV = GraphBuilder.CreateSRV(GraphBuilder.RegisterExternalBuffer(State.WeldIndices, TEXT("PianoHandWeldIndices")), PF_R32_UINT);
+			}
+		}
+		if (WeldIndexSRV == nullptr) { IndexSRV = nullptr; }
 		if (bComputeTension)
 		{
 			if (IndexSRV != nullptr)
@@ -589,6 +638,10 @@ namespace PianoHandSkinDeformer
 				TShaderMapRef<FPianoHandImplicitFinalizeCS> FinalizeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
 				FPianoHandImplicitFinalizeCS::FParameters* FP = GraphBuilder.AllocParameters<FPianoHandImplicitFinalizeCS::FParameters>();
 				FP->Common = Common;
+				FP->StretchKeep = FMath::Clamp(Params.ImplicitStretchKeep, 0.0f, 1.0f);
+				FP->BendGateStart = FMath::DegreesToRadians(Params.ImplicitBendStart);
+				FP->BendGateFull = FMath::DegreesToRadians(FMath::Max(Params.ImplicitBendFull, Params.ImplicitBendStart + 1.0f));
+				FP->PairBend = PairBendSRV;
 				FP->PrePosition = GraphBuilder.CreateSRV(ImplicitPrePos, PF_R32_FLOAT);
 				FP->PositionUAV = PositionUAV;
 				FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("PianoHand.ImplicitFinalize"), FinalizeShader, FP,
@@ -679,7 +732,7 @@ namespace PianoHandSkinDeformer
 				FPianoHandTensionAccumulateCS::FParameters* AccParams = GraphBuilder.AllocParameters<FPianoHandTensionAccumulateCS::FParameters>();
 				AccParams->NumTriangles = Section.NumTriangles;
 				AccParams->BaseIndex = Section.BaseIndex;
-				AccParams->IndexBuffer = IndexSRV;
+				AccParams->IndexBuffer = WeldIndexSRV;
 				AccParams->RestPositionBuffer = PositionSRV;
 				AccParams->ProportionedRestPositionBuffer = PropRestPositionSRV;
 				AccParams->bUseProportionedRest = bUseProportionedRest ? 1u : 0u;
@@ -741,6 +794,7 @@ namespace PianoHandSkinDeformer
 			ResParams->TensorAccumIn = GraphBuilder.CreateSRV(TensorAccum);
 			ResParams->TensorCountIn = GraphBuilder.CreateSRV(TensorCount);
 			ResParams->NormalOuterAccumIn = GraphBuilder.CreateSRV(NormalOuter);
+			ResParams->WeldCanon = WeldCanonSRV;
 			ResParams->ColorBufferUAV = ColorUAV;
 			ResParams->VertexTensorOut = GraphBuilder.CreateUAV(VertexTensorBuffer);
 			ResParams->DeltaTime = RelaxDeltaTime;
@@ -772,7 +826,7 @@ namespace PianoHandSkinDeformer
 					FPianoHandTensorSmoothScatterCS::FParameters* SP = GraphBuilder.AllocParameters<FPianoHandTensorSmoothScatterCS::FParameters>();
 					SP->NumTriangles = Section.NumTriangles;
 					SP->BaseIndex = Section.BaseIndex;
-					SP->IndexBuffer = IndexSRV;
+					SP->IndexBuffer = WeldIndexSRV;
 					SP->SmoothTensorIn = InSRV;
 					SP->TensorAccum = TensorAccumUAV;
 					SP->TensorCount = TensorCountUAV;
@@ -787,6 +841,7 @@ namespace PianoHandSkinDeformer
 				RP->SmoothTensorIn = InSRV;
 				RP->TensorAccumIn = GraphBuilder.CreateSRV(TensorAccum);
 				RP->TensorCountIn = GraphBuilder.CreateSRV(TensorCount);
+				RP->WeldCanon = WeldCanonSRV;
 				RP->SmoothTensorOut = GraphBuilder.CreateUAV(Smoothed);
 				FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("PianoHand.TensorSmoothResolve(%d)", It), ResolveSmooth, RP,
 					FComputeShaderUtils::GetGroupCount(NumLodVertices, FPianoHandTensorSmoothResolveCS::ThreadGroupSize));
@@ -873,6 +928,14 @@ namespace PianoHandSkinDeformer
 				DispParams->DorsalGatherReach = FMath::Max(Params.DorsalGatherReach, 0.1f);
 				DispParams->DorsalGatherBase = Params.DorsalGatherBase;
 				DispParams->DorsalGatherIron = Params.DorsalGatherIron;
+				DispParams->PalmarPadHeight = Params.PalmarPadHeight;
+				DispParams->PalmarPadDist = Params.PalmarPadDist;
+				DispParams->PalmarPadWidth = Params.PalmarPadWidth;
+				DispParams->PalmarFold2Depth = Params.PalmarFold2Depth;
+				DispParams->PalmarFold2Dist = Params.PalmarFold2Dist;
+				DispParams->PalmarFold2Width = Params.PalmarFold2Width;
+				DispParams->PalmarCreaseDeepen = Params.PalmarCreaseDeepen;
+				DispParams->PalmarFoldBendFull = Params.PalmarFoldBendFull;
 				DispParams->WrinkleMask = bMask ? MaskRHI : GBlackTexture->TextureRHI.GetReference();
 				DispParams->WrinkleMaskSampler = TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
 				DispParams->UVInputBuffer = UVSRV ? UVSRV : GNullColorVertexBuffer.VertexBufferSRV.GetReference();
@@ -915,6 +978,7 @@ namespace PianoHandSkinDeformer
 				DispParams->RefPoseInverses = GraphBuilder.CreateSRV(RefInvBuffer);
 				DispParams->VertexTensor = VertexTensorSRV;
 				DispParams->RelaxStateIn = RelaxStateSRV;
+				DispParams->WeldCanon = WeldCanonSRV;
 				DispParams->PositionBufferUAV = PositionUAV;
 				DispParams->TangentBufferUAV = TangentUAV;
 				DispParams->ColorBufferUAV = DetailColorUAV;
@@ -946,7 +1010,7 @@ namespace PianoHandSkinDeformer
 					FPianoHandNormalAccumulateCS::FParameters* NAParams = GraphBuilder.AllocParameters<FPianoHandNormalAccumulateCS::FParameters>();
 					NAParams->NumTriangles = Section.NumTriangles;
 					NAParams->BaseIndex = Section.BaseIndex;
-					NAParams->IndexBuffer = IndexSRV;
+					NAParams->IndexBuffer = WeldIndexSRV;
 					NAParams->DisplacedPositionBuffer = SkinnedPositionSRV;
 					NAParams->NormalAccum = NormalAccumUAV;
 
@@ -962,6 +1026,7 @@ namespace PianoHandSkinDeformer
 				FPianoHandNormalResolveCS::FParameters* NRParams = GraphBuilder.AllocParameters<FPianoHandNormalResolveCS::FParameters>();
 				NRParams->NumLodVertices = NumLodVertices;
 				NRParams->NormalAccumIn = GraphBuilder.CreateSRV(NormalAccum);
+				NRParams->WeldCanon = WeldCanonSRV;
 				NRParams->TangentBufferUAV = TangentUAV;
 
 				FComputeShaderUtils::AddPass(
@@ -1004,7 +1069,7 @@ namespace PianoHandSkinDeformer
 				FPianoHandNormalAccumulateCS::FParameters* NAParams = GraphBuilder.AllocParameters<FPianoHandNormalAccumulateCS::FParameters>();
 				NAParams->NumTriangles = Section.NumTriangles;
 				NAParams->BaseIndex = Section.BaseIndex;
-				NAParams->IndexBuffer = IndexSRV;
+				NAParams->IndexBuffer = WeldIndexSRV;
 				NAParams->DisplacedPositionBuffer = ImplicitPosSRV;
 				NAParams->NormalAccum = NormalAccumUAV;
 				FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("PianoHand.NormalAccumulateImplicit(section %d)", SectionIndex), NormalAccShader, NAParams,
@@ -1014,6 +1079,7 @@ namespace PianoHandSkinDeformer
 			FPianoHandNormalResolveCS::FParameters* NRParams = GraphBuilder.AllocParameters<FPianoHandNormalResolveCS::FParameters>();
 			NRParams->NumLodVertices = NumLodVerticesEarly;
 			NRParams->NormalAccumIn = GraphBuilder.CreateSRV(NormalAccum);
+			NRParams->WeldCanon = WeldCanonSRV;
 			NRParams->TangentBufferUAV = TangentUAV;
 			FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("PianoHand.NormalResolveImplicit"), NormalResShader, NRParams,
 				FComputeShaderUtils::GetGroupCount(NumLodVerticesEarly, FPianoHandNormalResolveCS::ThreadGroupSize));
@@ -1471,6 +1537,14 @@ void UPianoHandSkinDeformerInstance::EnqueueWork(FEnqueueWorkDesc const& InDesc)
 		FrameParams.DorsalGatherReach = Source->DorsalGatherReach;
 		FrameParams.DorsalGatherBase = Source->DorsalGatherBase;
 		FrameParams.DorsalGatherIron = Source->DorsalGatherIron;
+		FrameParams.PalmarPadHeight = Source->PalmarPadHeight;
+		FrameParams.PalmarPadDist = Source->PalmarPadDist;
+		FrameParams.PalmarPadWidth = Source->PalmarPadWidth;
+		FrameParams.PalmarFold2Depth = Source->PalmarFold2Depth;
+		FrameParams.PalmarFold2Dist = Source->PalmarFold2Dist;
+		FrameParams.PalmarFold2Width = Source->PalmarFold2Width;
+		FrameParams.PalmarCreaseDeepen = Source->PalmarCreaseDeepen;
+		FrameParams.PalmarFoldBendFull = Source->PalmarFoldBendFull;
 		FrameParams.bProportioned = bProportioned;
 		FrameParams.bContactBulge = Source->bContactBulge;
 		FrameParams.ContactMargin = Source->ContactMargin;
@@ -1498,6 +1572,7 @@ void UPianoHandSkinDeformerInstance::EnqueueWork(FEnqueueWorkDesc const& InDesc)
 		FrameParams.ImplicitBendFull = Source->ImplicitBendFull;
 		FrameParams.ImplicitDebugMode = Source->ImplicitDebugMode;
 		FrameParams.ImplicitContactDepth = Source->ImplicitContactDepth;
+		FrameParams.ImplicitStretchKeep = Source->ImplicitStretchKeep;
 		FrameParams.bImplicitTracking = Source->bImplicitTracking;
 		FrameParams.ImplicitTrackMaxStepDeg = Source->ImplicitTrackMaxStepDeg;
 	}

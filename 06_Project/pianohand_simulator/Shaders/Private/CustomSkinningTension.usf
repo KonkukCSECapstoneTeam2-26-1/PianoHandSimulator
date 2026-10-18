@@ -191,6 +191,7 @@ Buffer<SNORM float4>   ProportionedRestTangentBuffer;   // Phase 5: same, from t
 StructuredBuffer<int>  TensorAccumIn;
 StructuredBuffer<uint> TensorCountIn;
 StructuredBuffer<int>  NormalOuterAccumIn;  // see NormalOuterAccum above
+StructuredBuffer<uint> WeldCanon;           // 10-18: canonical vertex of a UV-seam twin (the accumulations live there)
 RWBuffer<UNORM float4> ColorBufferUAV;      // passthrough vertex factory colour buffer (RGBA8)
 RWStructuredBuffer<float> VertexTensorOut;  // averaged C3, 6 floats per vertex, consumed by CustomSkinningDetail.usf
 RWStructuredBuffer<float2> RelaxState;      // PERSISTS between frames: .x = last total log-strain, .y = viscous log-strain E_v
@@ -212,7 +213,8 @@ void ResolveCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	{
 		return;
 	}
-	const uint Count = TensorCountIn[V];
+	const uint Vc = WeldCanon[V];              // seam twins share the canonical vertex's accumulation
+	const uint Count = TensorCountIn[Vc];
 
 	// Rest tangent frame of the vertex. The tensor is projected onto this plane, which is also the
 	// material's tangent space, so anything derived here lines up with the normal map.
@@ -229,8 +231,8 @@ void ResolveCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		UNROLL
 		for (uint i = 0; i < TENSOR_STRIDE; ++i)
 		{
-			C[i] = ((float)TensorAccumIn[V * TENSOR_STRIDE + i] / TENSOR_FIXED_SCALE) / (float)Count
-			     + ((float)NormalOuterAccumIn[V * TENSOR_STRIDE + i] / TENSOR_FIXED_SCALE) / (float)Count;
+			C[i] = ((float)TensorAccumIn[Vc * TENSOR_STRIDE + i] / TENSOR_FIXED_SCALE) / (float)Count
+			     + ((float)NormalOuterAccumIn[Vc * TENSOR_STRIDE + i] / TENSOR_FIXED_SCALE) / (float)Count;
 		}
 	}
 	else
@@ -343,12 +345,13 @@ void SmoothResolveCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	{
 		return;
 	}
-	const uint Count = TensorCountIn[V];
+	const uint Vc = WeldCanon[V];
+	const uint Count = TensorCountIn[Vc];
 	UNROLL
 	for (uint c = 0; c < TENSOR_STRIDE; ++c)
 	{
 		const float Own = SmoothTensorIn[V * TENSOR_STRIDE + c];
-		const float Mean = (Count > 0u) ? ((float)TensorAccumIn[V * TENSOR_STRIDE + c] / TENSOR_FIXED_SCALE) / (float)Count : Own;
+		const float Mean = (Count > 0u) ? ((float)TensorAccumIn[Vc * TENSOR_STRIDE + c] / TENSOR_FIXED_SCALE) / (float)Count : Own;
 		SmoothTensorOut[V * TENSOR_STRIDE + c] = lerp(Own, Mean, SmoothLambda);
 	}
 }

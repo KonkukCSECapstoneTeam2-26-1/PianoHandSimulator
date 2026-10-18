@@ -1061,6 +1061,71 @@ HRBF 장만 자기 표면으로 쓰던 것 — 굽힌 관절에서 지골 01 지
 합집합 등위면의 안쪽 접힘은 오목한 골이라 양쪽 피부 정점이 거기로 몰린다. 제대로 풀려면 2014 의 g_dc 를 2D 격자에
 구워 쓰는 접촉 연산자가 필요하다(다음 단계).
 
+## 1-X. Phase 12 — "뚫려 보이는" 주먹의 진짜 원인: UV 심(seam) 쌍둥이 정점 (2026-10-18)
+
+**증상.** Play 에서 주먹을 쥘 때 손가락 옆면을 따라 가는 금이 가고, 그 금이 접힘부에서는 빛이 새는 틈·찢어진 쐐기로
+벌어졌다 (`skin_v10_seam_weld_zoom_before_after.jpg` 윗줄, `skin_v10_seam_weld_fist_before_after.jpg` 왼쪽).
+접촉 깊이(`implicit_contact_depth`) 를 0.25 → 3.0 cm 까지 올려도 전혀 변하지 않아 접촉 처리 문제가 아니었다.
+
+**원인.** Dense 손 메시(74,186 렌더 정점)는 MetaHuman 바디 UV 가 손가락마다 옆면을 따라 갈라져 있어 같은 위치의 정점이
+1,754 개 복제되어 있다. 1-링 인접(ARAP 이완·보정 스무딩), 스트레인 텐서 누적/해석, 노멀 재계산, 디테일 변위가 모두
+렌더 정점 번호로 모으기 때문에 심 양쪽의 두 복사본이 서로 다른 링·다른 합을 보고 따로 움직였다. 세 단계로 분리 확인:
+DQS 만(깨끗) → DQS+디테일(가는 금) → implicit+디테일(틈·쐐기).
+
+**수정 (weld map).** `PianoHandImplicit::BuildWeldMap` 이 rest 위치 해시(0.0005 cm)로 정점마다 대표 정점 `Canon[V]` 를 만든다.
+- implicit 빌더: 링과 노멀을 대표 정점 기준으로 만든다 (`RingEdges[Canon[V]]`, 요약에 `seam twins welded`).
+- 디포머 렌더 상태에 `WeldCanon` 과 대표 정점으로 다시 쓴 LOD 인덱스 버퍼 `WeldIndices` 를 한 번 만들어 보관.
+  삼각형 단위 누적 패스(TensionAccumulate, TensorSmoothScatter, NormalAccumulate ×2)는 welded 인덱스로 돌고,
+  정점 단위 해석(TensionResolve, TensorSmoothResolve, NormalResolve)과 DisplaceCS 는 `Vc = WeldCanon[V]` 의 누적값·노멀·
+  rest 탄젠트·마스크 UV 를 읽는다 (쓰기는 V). 누적 셰이더의 `IndexBuffer` 는 RDG SRV(`PF_R32_UINT`) 로 바뀜.
+- 이후 1-링을 모으는 패스를 새로 만들면 반드시 `WeldCanon` 을 거쳐야 한다.
+
+**결과.** 세 모드 모두 금·틈이 사라지고, 추적 모드 주먹의 엄지쪽 쐐기도 없어졌다 (`skin_v10_seam_weld_track_before_after.jpg`).
+플레이 카메라에서 접힘부에 남는 밝은 띠 하나는 변형 오류가 아니라 느슨한 주먹(굽힘 62/72/32)에서 엄지·검지와 나머지
+손가락 사이의 실제 틈으로 빛이 새는 것이다 (`skin_v10_fist_finger_gap.jpg`). 닫으려면 `make_mh_hand_poses.py` 에 손가락
+내전(adduction)을 넣어야 하고, 그러면 손가락끼리의 접촉을 implicit 장애물 처리가 떠안게 된다.
+Simulate(실제 Play 경로, 라이브 프레임레이트 추적)로도 확인: 주먹 구간(t≈1.25~1.55 s)에 금·틈·쐐기 없음.
+
+**남은 금 2개 (같은 날 저녁).** 사용자가 "금이 아직 남아 있다"고 해서 플레이 카메라 4K 로 전 구간을 다시 훑었다.
+1. 손가락 뿌리(MCP) 투영 경계: 디버그 모드 2 에서 "투영 안 함(파랑) / 투영(빨강)" 경계가 지배 본 기준이라 톱니였고, 그 자리의
+   블렌드가 이미 0.15 여서 단차가 생길 수 있었다. 지배 본이 중수골이어도 지골 가중치가 블렌드 램프 안이면 가장 센 지골에
+   투영하도록 바꿔 보정이 정확히 0 에서 시작하게 했다 (`BestPhalanx`, 54,380 정점 투영). 그러나 보이던 금은 이것이 아니었다.
+2. **진짜 원인은 머티리얼의 손금(PalmLine)**: 클레이 재질에서는 그 자리에 아무것도 없었고, 머티리얼 파라미터를 하나씩 끄니
+   `PalmLineDepth=0` 에서만 사라졌다 (`skin_v10_palmline_isolation.jpg`). 베이크(`Tools/bake_skin_maps.py`)의 손금 거리장이
+   손바닥 쪽 판정을 `z < -0.25` 하드 임계값 + 최근접 정점 팔라 플래그로 잘라서, 엄지두덩 손금(thenar)의 손목 쪽 끝이 손등
+   요골 쪽까지 돌아 나오며 톱니 모양으로 잘린 것이 "틈"처럼 보였고, 펼친 손에서는 손목을 가로지르는 긴 선으로 보였다.
+   수정: 옆면 쪽(z −0.2..−0.7)과 손목 쪽(x 0.6..1.6 cm) 모두 smoothstep 으로 진폭을 부드럽게 0 으로 보내고, thenar 곡선 끝을
+   손목 중심에서 1.2 cm 원위로 당겼다. `T_PH_WrinkleMask2` 만 재베이크·재임포트 (다른 텍스처는 그대로).
+   결과: `skin_v10_palmline_leak_before_after.jpg`, `skin_v10_palmline_wrist_before_after.jpg`, 전 구간 `skin_v10_final_cycle.jpg`.
+   손바닥 쪽 세 손금은 그대로 남아 있다.
+
+**첫 마디(MCP)가 접힐 때의 부자연스러운 굴곡 (같은 날 밤).** 손등 쪽 너클 정수리에 작은 홈(notch)이 파이고, 더 접히면
+너클이 울퉁불퉁해졌다. 클레이 + 디테일 끔 + 마스크 홈 끔 + 손등 리지 끔 모두에서 남고 DQS 에서만 사라졌으므로 implicit
+투영 자체가 원인이다: rest 기준의 두 튜브(중수골·근위지골)를 max 로 합치면 굽힘의 **바깥쪽**에 오목한 모서리가 생기고,
+투영이 손등 피부를 그 모서리로 끌어 넣는다 (디버그 1 에서 너클 정수리의 큰 변위). 실제 피부는 그쪽에서 뼈 위로 팽팽하게
+펴지므로 DQS 가 더 맞는 모델이다. 수정: `ImplicitFinalize` 에서 정점의 관절마다 `FoldSide`(접힘 안쪽 1, 바깥 0) 와 굽힘
+게이트(0 → `ImplicitBendStart` 에서 완전)를 곱한 "바깥 정도"로 보정을 `ImplicitStretchKeep`(기본 0.25) 까지 페이드.
+접힘 안쪽(접촉 쪽)은 그대로 유지. 처음엔 게이트를 10°~40° 로 두어 15° 굽힘의 홈이 그대로 남았다 — 모서리는 굽히자마자
+생기므로 게이트는 0° 에서 시작해야 한다. 비교: `skin_v10_mcp_stretch_fade_side.jpg`, `_dorsal.jpg`, `_play.jpg`
+(keep 1.0 / 0.25 / 0.0 / DQS). `mh_hand_demo.py` IMPLICIT 에 `implicit_stretch_keep=0.25` 추가.
+
+**접히면서 쌓이는 주름 (같은 날 밤, 사용자: "근사치로만 처리된 것 같다").** 정직한 평가: 그렇다. 주름은 머티리얼의
+노멀/높이 선 + 0.35 mm 홈이 전부였고, 접힘 안쪽에서 피부가 실제로 쌓이는 기하는 없었다. 두 가지를 기하로 추가했다.
+1. 접힘 안쪽 — `PalmarFoldDisplacement` (DisplaceCS, 마스크 G/A/B 필드 기반): 뼈를 따라 줄어든 길이가 갈 곳은 쌓임뿐이므로
+   1차 주름선이 더 깊어지고(`PalmarCreaseDeepen`), 양옆 피부가 패드로 부풀고(`PalmarPadHeight`, 선에서 `PalmarPadDist` 떨어져
+   폭 `PalmarPadWidth`), 조금 더 밖에 2차 접힘이 생긴다(`PalmarFold2*`). 좌굴한 판은 길이를 보존하므로 진폭은 √(구동)이고,
+   구동은 측정된 뼈 방향 압축과 실제 관절 굽힘(`PalmarFoldBendFull` 1.2 rad)의 큰 쪽이다 (강체 튜브 스키닝은 너클의 변형률을
+   과소평가). 밴드는 패드 자리에서 R≈0.6 이므로 `saturate(R·1.6)` 로 정규화. 기본값 패드 0.10 / 2차 0.05 / 1차 심화 0.08 cm
+   (`MASK_GROOVE` 의 `palmar_*`). 비교 `skin_v10_palmar_foldpile_{clay,skin,profile}.jpg` (off / A=기본 / B=1.6배).
+2. 손등·손가락 바깥 — 펼 때 마디에 모이는 주름 (`DorsalGatherDisplacement` 재설계): 사인 골판 + 텍셀 노이즈가 자갈처럼 읽히고
+   실루엣을 톱니로 만들었다. 이제 넓은 패드와 좁은 골(`pow(phase, 0.45)`), 주름선을 따라 천천히 변하는 높이, 살짝 흔들리는 선,
+   손가락 옆면에서는 소멸(`smoothstep(0.3, 0.85, dorsal)`). 비교 `skin_v10_dorsal_folds_{clay,skin,profile}.jpg`.
+전 구간 `skin_v10_final_cycle.jpg`. 한계: 여전히 해석적 모델이다(마스크 거리장 + 변형률/굽힘 구동). 실제 좌굴 시뮬레이션이나
+사진 기반 주름 전사는 하지 않았다.
+
+주의: `mh_hand_demo.py` 는 `PH_MH_Hand` 를 지우고 다시 스폰하므로 에디터 재시작 후에는 AnimationData(anim_to_play)가
+비어 Play 에서 손이 멈춰 있다. 재시작 뒤에는 `setup_play_level.py` 를 다시 돌려 맵을 저장해야 한다 (이번에 복구함).
+
 ## 2. 로드맵
 
 ### Phase 1 — 실제 스켈레탈 메시 연결 (MeshDeformer) — ✅ 완료 (1-B 참조)

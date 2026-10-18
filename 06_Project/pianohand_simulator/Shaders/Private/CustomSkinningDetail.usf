@@ -106,6 +106,14 @@ float DorsalGatherSpacing;   // cm between ridges
 float DorsalGatherReach;     // cm from the crease where the ridges die out
 float DorsalGatherBase;      // standing gate on an extended knuckle
 float DorsalGatherIron;      // how fast flexion stretch spends it
+float PalmarPadHeight;       // cm, how far the skin on either side of a palmar crease bulges out at full fold
+float PalmarPadDist;         // cm from the crease where the bulge peaks
+float PalmarPadWidth;        // cm, half-width of the bulge
+float PalmarFold2Depth;      // cm, depth of the secondary fold at full fold
+float PalmarFold2Dist;       // cm from the crease to the secondary fold
+float PalmarFold2Width;      // cm, half-width of the secondary fold
+float PalmarCreaseDeepen;    // cm, extra depth of the primary crease at full fold
+float PalmarFoldBendFull;    // radians of real joint bend at which the fold is complete
 Texture2D      WrinkleMask;
 SamplerState   WrinkleMaskSampler;
 Buffer<float2> UVInputBuffer;        // engine texcoord stream, NumUVChannels per vertex
@@ -148,6 +156,7 @@ Buffer<uint>                     InputWeightStream;    // FSkinWeightVertexBuffe
 StructuredBuffer<FBoneTransform> RefPoseInverses;      // RefBasesInvMatrix in section BoneMap order
 StructuredBuffer<float>          VertexTensor;         // averaged C3, 6 floats per LOD vertex (xx yy zz xy xz yz)
 StructuredBuffer<float2>         RelaxStateIn;         // .y = relax slack, from CustomSkinningTension.usf
+StructuredBuffer<uint>           WeldCanon;            // 10-18: canonical vertex of a UV-seam twin - its normal, tangent and UV are used so both copies displace alike
 
 RWBuffer<float>                   PositionBufferUAV;   // read + write (displaced in place)
 RWBuffer<TANGENT_RWBUFFER_FORMAT> TangentBufferUAV;    // read only in this pass
@@ -294,6 +303,54 @@ float MaskCreaseDisplacement(uint VertexIndex, float CompressionC, float Stretch
 	return MaskCreaseDepth * Furrow * Band * lerp(GatePalm, GateBack, Dorsal);
 }
 
+// 10-18: the skin on the INSIDE of a bending joint does not just crease - the length it loses along
+// the bone has to go somewhere, so it piles up: the primary crease deepens, the skin on either side of
+// it bulges out into pads, and a secondary fold forms a little further out. A buckled sheet keeps its
+// length, so the amplitudes grow like sqrt(compression). Driven by the larger of the measured along-bone
+// compression and the real bend of the joint (rigid-tube skinning understates the strain at a knuckle).
+float PalmarFoldDisplacement(uint VertexIndex, float CompressC, uint Bone, uint Other)
+{
+	if (PalmarPadHeight <= 0.0f && PalmarFold2Depth <= 0.0f && PalmarCreaseDeepen <= 0.0f)
+	{
+		return 0.0f;
+	}
+	float BendDrive = 0.0f;
+	if (Bone != Other && Bone < NumSectionBones && Other < NumSectionBones)
+	{
+		const FBoneTransform Rb = RefPoseInverses[Bone], Ro = RefPoseInverses[Other];
+		const float3 AxisB = normalize(float3(Rb.Row0.x, Rb.Row1.x, Rb.Row2.x));
+		const float3 AxisO = normalize(float3(Ro.Row0.x, Ro.Row1.x, Ro.Row2.x));
+		const float3 AnimB = normalize(TransformVector(BoneTransforms[Bone], AxisB) + 1e-6f);
+		const float3 AnimO = normalize(TransformVector(BoneTransforms[Other], AxisO) + 1e-6f);
+		const float Bend = abs(acos(clamp(dot(AnimB, AnimO), -1.0f, 1.0f)) - acos(clamp(dot(AxisB, AxisO), -1.0f, 1.0f)));
+		BendDrive = saturate(Bend / max(PalmarFoldBendFull, 0.05f));
+	}
+	const float Drive = max(CompressC, BendDrive);
+	if (Drive < 1e-3f)
+	{
+		return 0.0f;
+	}
+	const float2 UV = UVInputBuffer[VertexIndex * max(NumUVChannels, 1u)];
+	const float4 M = WrinkleMask.SampleLevel(WrinkleMaskSampler, UV, 0);
+	const float Band = saturate(M.r * MaskGain * 1.6f);                            // the band reads ~0.6 where the pads sit: full there, fading past the fold region
+	const float Palmar = 1.0f - saturate((M.a * 2.0f - 1.0f) * 1.5f + 0.5f);
+	if (Band * Palmar < 1e-3f)
+	{
+		return 0.0f;
+	}
+	const float S0 = M.g * MaskCreaseRange;                                        // cm to the crease, unsigned
+	const int JT = (int)round(saturate(M.b) * 5.0f);
+	const float Split = (JT == 2) ? MaskPalmSplit : 0.0f;                          // the palmar PIP crease is a pair
+	const float Amp = sqrt(Drive);
+	// pads either side of the crease, measured from the outer crease of the pair
+	const float Sp = max(S0 - Split, 0.0f);
+	const float Pad = exp(-(Sp - PalmarPadDist) * (Sp - PalmarPadDist) / max(PalmarPadWidth * PalmarPadWidth, 1e-4f));
+	const float Fold2 = exp(-(Sp - PalmarFold2Dist) * (Sp - PalmarFold2Dist) / max(PalmarFold2Width * PalmarFold2Width, 1e-4f));
+	const float Furrow = MaskFurrow(S0 - Split, MaskCreaseWidth * 1.3f);           // < 0 in the crease
+	const float Var = 0.85f + 0.15f * sin(UV.x * 611.0f + UV.y * 283.0f);
+	return Band * Palmar * Amp * (PalmarPadHeight * Pad * Var - PalmarFold2Depth * Fold2 + PalmarCreaseDeepen * Furrow);
+}
+
 // Ridges of gathered skin on the BACK of an extended joint, parallel to the crease on both sides of
 // it (cm, positive = outward). The skin over a knuckle is slack when the finger is straight - it has
 // to be, to cover the knuckle when it bends - and stands in a few parallel folds; flexion pulls it
@@ -327,11 +384,16 @@ float DorsalGatherDisplacement(uint VertexIndex, float StretchC, uint Bone, uint
 	}
 	const float S0 = M.g * MaskCreaseRange;                  // cm to the crease, unsigned
 	const float Gate = saturate(DorsalGatherBase - StretchC * DorsalGatherIron) * BendGate;
-	const float Ridge = 0.5f - 0.5f * cos(6.2831853f * S0 / DorsalGatherSpacing);   // 0 on the crease, 1 half a spacing out
+	// 10-18: gathered skin is rounded PADS separated by narrow fold valleys, not a sine corrugation, and the folds run
+	// continuously across the finger with only a slow change of height - the old per-texel noise made the ridges
+	// read as cobbles and scalloped the silhouette. The folds also die out towards the flanks of the finger.
+	const float Wobble = 0.025f * sin(UV.y * 160.0f + UV.x * 70.0f);                  // cm, a gentle waver of the fold lines
+	const float Phase = 0.5f - 0.5f * cos(6.2831853f * (S0 + Wobble) / DorsalGatherSpacing);   // 0 on the crease, 1 half a spacing out
+	const float Ridge = pow(Phase, 0.45f);                                               // wide pads, narrow valleys
 	const float Env = exp(-(S0 * S0) / (DorsalGatherReach * DorsalGatherReach));
-	// real folds are not a corrugation: vary the ridge height along and across the crease
-	const float Var = 0.7f + 0.3f * sin(UV.x * 523.0f + UV.y * 311.0f) * sin(UV.y * 437.0f - UV.x * 190.0f);
-	return DorsalGather * Band * Dorsal * Gate * Ridge * Env * Var;
+	const float Var = 0.85f + 0.15f * sin(UV.x * 110.0f + UV.y * 65.0f);                  // slow height change along the fold
+	const float Flank = smoothstep(0.3f, 0.85f, Dorsal);                                 // gone on the sides of the finger
+	return DorsalGather * Band * Flank * Gate * Ridge * Env * Var;
 }
 
 [numthreads(THREADGROUP_SIZE, 1, 1)]
@@ -343,13 +405,14 @@ void DisplaceCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		return;
 	}
 	const uint VertexIndex = BaseVertexIndex + LocalIndex;
+	const uint Vc = WeldCanon[VertexIndex];   // seam twin -> canonical vertex for every per-vertex INPUT; writes stay at VertexIndex
 
 	const float3 SkinnedP = float3(
 		PositionBufferUAV[VertexIndex * 3 + 0],
 		PositionBufferUAV[VertexIndex * 3 + 1],
 		PositionBufferUAV[VertexIndex * 3 + 2]);
 
-	const float4 PackedTZ = TangentBias_SkinCache(TangentBufferUAV[VertexIndex * 2 + GPUSKIN_RWBUFFER_OFFSET_TANGENT_Z]);
+	const float4 PackedTZ = TangentBias_SkinCache(TangentBufferUAV[Vc * 2 + GPUSKIN_RWBUFFER_OFFSET_TANGENT_Z]);
 	const float3 Normal = normalize(PackedTZ.xyz + float3(0.0f, 0.0f, 1e-6f));
 
 	// ---- strain tensor in the rest tangent plane ------------------------------
@@ -359,8 +422,8 @@ void DisplaceCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	{
 		C[c] = VertexTensor[VertexIndex * TENSOR_STRIDE + c];
 	}
-	const float4 RestTX = (bUseProportionedRest != 0u) ? ProportionedRestTangentBuffer[VertexIndex * 2 + GPUSKIN_VB_OFFSET_TANGENT_X] : RestTangentBuffer[VertexIndex * 2 + GPUSKIN_VB_OFFSET_TANGENT_X];
-	const float4 RestTZ = (bUseProportionedRest != 0u) ? ProportionedRestTangentBuffer[VertexIndex * 2 + GPUSKIN_VB_OFFSET_TANGENT_Z] : RestTangentBuffer[VertexIndex * 2 + GPUSKIN_VB_OFFSET_TANGENT_Z];
+	const float4 RestTX = (bUseProportionedRest != 0u) ? ProportionedRestTangentBuffer[Vc * 2 + GPUSKIN_VB_OFFSET_TANGENT_X] : RestTangentBuffer[Vc * 2 + GPUSKIN_VB_OFFSET_TANGENT_X];
+	const float4 RestTZ = (bUseProportionedRest != 0u) ? ProportionedRestTangentBuffer[Vc * 2 + GPUSKIN_VB_OFFSET_TANGENT_Z] : RestTangentBuffer[Vc * 2 + GPUSKIN_VB_OFFSET_TANGENT_Z];
 	const float3 RestN = normalize(RestTZ.xyz + float3(0, 0, 1e-6f));
 	float3 RestT = RestTX.xyz - RestN * dot(RestN, RestTX.xyz);
 	RestT = (dot(RestT, RestT) > 1e-8f) ? normalize(RestT) : float3(1, 0, 0);
@@ -446,9 +509,10 @@ void DisplaceCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	if (bHasWrinkleMask != 0u)
 	{
 		// the narrow groove replaces the band-wide trench; the relax term still rides on the band
-		CreaseTerm = MaskCreaseDisplacement(VertexIndex, saturate(Compression * TensionScale), saturate(Stretch * TensionScale))
+		CreaseTerm = MaskCreaseDisplacement(Vc, saturate(Compression * TensionScale), saturate(Stretch * TensionScale))
 		           - RelaxCreaseGain * JointBand * Slack
-		           + DorsalGatherDisplacement(VertexIndex, saturate(Stretch * TensionScale), DominantBone, SecondBone);
+		           + DorsalGatherDisplacement(Vc, saturate(Stretch * TensionScale), DominantBone, SecondBone)
+		           + PalmarFoldDisplacement(Vc, saturate(Compression * TensionScale), DominantBone, SecondBone);
 	}
 
 	// ---- ripples along the bone axis ----------------------------------------
@@ -549,10 +613,11 @@ void NormalResolveCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		return;
 	}
 
+	const uint Vc = WeldCanon[V];              // seam twins share one accumulated normal
 	const float3 Sum = float3(
-		(float)NormalAccumIn[V * 3 + 0],
-		(float)NormalAccumIn[V * 3 + 1],
-		(float)NormalAccumIn[V * 3 + 2]) / NORMAL_FIXED_SCALE;
+		(float)NormalAccumIn[Vc * 3 + 0],
+		(float)NormalAccumIn[Vc * 3 + 1],
+		(float)NormalAccumIn[Vc * 3 + 2]) / NORMAL_FIXED_SCALE;
 
 	const float SumLen = length(Sum);
 	if (SumLen < 1e-6f)

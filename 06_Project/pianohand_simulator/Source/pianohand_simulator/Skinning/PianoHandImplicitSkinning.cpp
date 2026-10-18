@@ -277,6 +277,59 @@ namespace PianoHandImplicit
 		return (U - B * T).SizeSquared() <= 2.2f * 2.2f;
 	}
 
+	// 10-18: vertices duplicated along UV seams (the MetaHuman body UV splits every finger down its sides -
+	// 1754 twins on the Dense hand) are one point of skin. Every pass that gathers over a one-ring or
+	// accumulates per vertex (tangential relaxation, correction smoothing, strain tensor, recomputed normals)
+	// must see them as one vertex, or the two copies drift apart and the seam opens into a hairline crack
+	// (DQS + detail) or a see-through sliver (implicit). Canon[V] = the first vertex at the same rest position.
+	int32 BuildWeldMap(const TArray<FVector3f>& Pos, TArray<uint32>& OutCanon)
+	{
+		const int32 NumVerts = Pos.Num();
+		OutCanon.SetNumUninitialized(NumVerts);
+		TMap<FIntVector, uint32> First;
+		First.Reserve(NumVerts);
+		int32 NumTwins = 0;
+		for (int32 V = 0; V < NumVerts; ++V)
+		{
+			const FIntVector Key(FMath::RoundToInt(Pos[V].X * 2000.0f), FMath::RoundToInt(Pos[V].Y * 2000.0f), FMath::RoundToInt(Pos[V].Z * 2000.0f));
+			if (const uint32* C = First.Find(Key))
+			{
+				OutCanon[V] = *C;
+				++NumTwins;
+			}
+			else
+			{
+				First.Add(Key, (uint32)V);
+				OutCanon[V] = (uint32)V;
+			}
+		}
+		return NumTwins;
+	}
+
+	bool BuildWeldMap(const FSkeletalMeshLODRenderData& Lod, TArray<uint32>& OutCanon, TArray<uint32>& OutWeldedIndices, int32& OutNumTwins)
+	{
+		const FPositionVertexBuffer& Positions = Lod.StaticVertexBuffers.PositionVertexBuffer;
+		if (!Positions.GetAllowCPUAccess() || Positions.GetNumVertices() == 0 || !Lod.MultiSizeIndexContainer.IsIndexBufferValid())
+		{
+			return false;
+		}
+		Lod.MultiSizeIndexContainer.GetIndexBuffer(OutWeldedIndices);
+		if (OutWeldedIndices.Num() < 3)
+		{
+			return false;
+		}
+		const int32 NumVerts = (int32)Positions.GetNumVertices();
+		TArray<FVector3f> Pos;
+		Pos.SetNumUninitialized(NumVerts);
+		for (int32 V = 0; V < NumVerts; ++V) { Pos[V] = Positions.VertexPosition(V); }
+		OutNumTwins = BuildWeldMap(Pos, OutCanon);
+		for (uint32& I : OutWeldedIndices)
+		{
+			if ((int32)I < NumVerts) { I = OutCanon[I]; }
+		}
+		return true;
+	}
+
 	void Build(const USkinnedMeshComponent* Component, const FPianoHandImplicitBuildSettings& Settings, FPianoHandImplicitData& Out)
 	{
 		Out.bValid = false;
@@ -312,6 +365,8 @@ namespace PianoHandImplicit
 		for (int32 V = 0; V < NumVerts; ++V) { Pos[V] = Positions.VertexPosition(V); }
 		TArray<int32> Dominant;
 		Dominant.Init(INDEX_NONE, NumVerts);
+		TArray<int32> BestPhalanx;          // strongest phalanx influence, even where a metacarpal / the palm dominates
+		BestPhalanx.Init(INDEX_NONE, NumVerts);
 		// weight carried by the phalanges (thumb_01..03, *_01..03): the implicit correction is kept where this is high
 		TArray<bool> IsPhalanx;
 		IsPhalanx.Init(false, NumBones);
@@ -334,6 +389,7 @@ namespace PianoHandImplicit
 			{
 				const FSkinWeightInfo W = Weights->GetVertexSkinWeights(V);
 				int32 Best = INDEX_NONE; uint16 BestW = 0;
+				int32 BestPh = INDEX_NONE; uint16 BestPhW = 0;
 				float Total = 0.0f, Finger = 0.0f;
 				for (int32 I = 0; I < MAX_TOTAL_INFLUENCES; ++I)
 				{
@@ -341,7 +397,11 @@ namespace PianoHandImplicit
 					const int32 Bone = (int32)Section.BoneMap[W.InfluenceBones[I]];
 					const float Wf = (float)W.InfluenceWeights[I];
 					Total += Wf;
-					if (IsPhalanx.IsValidIndex(Bone) && IsPhalanx[Bone]) { Finger += Wf; }
+					if (IsPhalanx.IsValidIndex(Bone) && IsPhalanx[Bone])
+					{
+						Finger += Wf;
+						if (W.InfluenceWeights[I] > BestPhW) { BestPhW = W.InfluenceWeights[I]; BestPh = Bone; }
+					}
 					if (W.InfluenceWeights[I] > BestW)
 					{
 						BestW = W.InfluenceWeights[I];
@@ -349,6 +409,7 @@ namespace PianoHandImplicit
 					}
 				}
 				Dominant[V] = Best;
+				BestPhalanx[V] = BestPh;
 				FingerWeight[V] = (Total > 0.0f) ? Finger / Total : 0.0f;
 				// the two strongest OTHER phalanx influences
 				for (int32 I = 0; I < MAX_TOTAL_INFLUENCES; ++I)
@@ -362,6 +423,9 @@ namespace PianoHandImplicit
 				}
 			}
 		}
+		// 10-18: seam twins share one normal and (below) one ring - see BuildWeldMap
+		TArray<uint32> Canon;
+		const int32 NumTwins = BuildWeldMap(Pos, Canon);
 		TArray<FVector3f> Normal;
 		Normal.Init(FVector3f::ZeroVector, NumVerts);
 		const int32 NumTris = Indices.Num() / 3;
@@ -370,9 +434,9 @@ namespace PianoHandImplicit
 			const uint32 I0 = Indices[T * 3], I1 = Indices[T * 3 + 1], I2 = Indices[T * 3 + 2];
 			if ((int32)I0 >= NumVerts || (int32)I1 >= NumVerts || (int32)I2 >= NumVerts) { continue; }
 			const FVector3f Face = FVector3f::CrossProduct(Pos[I2] - Pos[I0], Pos[I1] - Pos[I0]);   // same winding as the GPU normal pass
-			Normal[I0] += Face; Normal[I1] += Face; Normal[I2] += Face;
+			Normal[Canon[I0]] += Face; Normal[Canon[I1]] += Face; Normal[Canon[I2]] += Face;
 		}
-		for (int32 V = 0; V < NumVerts; ++V) { Normal[V] = Normal[V].GetSafeNormal(UE_SMALL_NUMBER, FVector3f::ZAxisVector); }
+		for (int32 V = 0; V < NumVerts; ++V) { Normal[V] = Normal[Canon[V]].GetSafeNormal(UE_SMALL_NUMBER, FVector3f::ZAxisVector); }
 
 		// ---- reference pose, component space ---------------------------------------------
 		TArray<FTransform> CS;
@@ -723,13 +787,24 @@ namespace PianoHandImplicit
 		int32 NumSkinned = 0, NumOverlaps = 0, NumLowIso = 0;
 		for (int32 V = 0; V < NumVerts; ++V)
 		{
-			const int32 B = Dominant[V];
+			int32 B = Dominant[V];
 			if (B == INDEX_NONE) { continue; }
-			const int32 P = BoneToPart[B];
+			int32 P = BoneToPart[B];
 			if (P == INDEX_NONE || !Alive[P]) { continue; }
-			const FPart& Part = Parts[P];
 			// the palm and the metacarpals keep their geometric skinning: they are soft, not tubes
-			if (!Settings.bProjectPalm && (Part.bPalm || Part.Segment == 3)) { continue; }
+			if (!Settings.bProjectPalm && (Parts[P].bPalm || Parts[P].Segment == 3))
+			{
+				// 10-18: deciding "projected or not" by the DOMINANT bone leaves a ragged boundary at every MCP where the
+				// metacarpal and the proximal phalanx trade dominance (sawtooth in debug mode 2) and the blend is already
+				// ~0.15 there - a visible cliff / slit along the knuckle while the finger bends. A vertex whose phalanx
+				// weight is inside the blend ramp is projected onto its strongest phalanx instead, so the correction
+				// fades to exactly 0 where the projection stops.
+				if (FingerWeight[V] <= Settings.BlendFadeStart || BestPhalanx[V] == INDEX_NONE) { continue; }
+				B = BestPhalanx[V];
+				P = BoneToPart[B];
+				if (P == INDEX_NONE || !Alive[P] || Parts[P].bPalm || Parts[P].Segment == 3) { continue; }
+			}
+			const FPart& Part = Parts[P];
 			Out.VertexBlend[V] = FMath::SmoothStep(Settings.BlendFadeStart, Settings.BlendFadeFull, FingerWeight[V]);
 			const float F = FieldOf(Part, Pos[V]);
 			TArray<TPair<float, int32>, TInlineAllocator<8>> Over;
@@ -786,8 +861,8 @@ namespace PianoHandImplicit
 			RingEdges.SetNum(NumVerts);
 			for (int32 T = 0; T < NumTris; ++T)
 			{
-				const int32 I0 = (int32)Indices[T * 3], I1 = (int32)Indices[T * 3 + 1], I2 = (int32)Indices[T * 3 + 2];
-				if (I0 >= NumVerts || I1 >= NumVerts || I2 >= NumVerts) { continue; }
+				if ((int32)Indices[T * 3] >= NumVerts || (int32)Indices[T * 3 + 1] >= NumVerts || (int32)Indices[T * 3 + 2] >= NumVerts) { continue; }
+				const int32 I0 = (int32)Canon[Indices[T * 3]], I1 = (int32)Canon[Indices[T * 3 + 1]], I2 = (int32)Canon[Indices[T * 3 + 2]];
 				RingEdges[I0].Add(FIntPoint(I1, I2));
 				RingEdges[I1].Add(FIntPoint(I2, I0));
 				RingEdges[I2].Add(FIntPoint(I0, I1));
@@ -800,7 +875,7 @@ namespace PianoHandImplicit
 			for (int32 V = 0; V < NumVerts; ++V)
 			{
 				Out.AdjOffsets[V] = (uint32)Out.AdjIndices.Num();
-				const TArray<FIntPoint>& E = RingEdges[V];
+				const TArray<FIntPoint>& E = RingEdges[Canon[V]];   // a seam twin uses the welded ring (neighbours are canonical ids)
 				if (E.Num() == 0) { continue; }
 				// try to chain the edges into one closed loop
 				Ring.Reset();
@@ -895,8 +970,8 @@ namespace PianoHandImplicit
 				}
 			}
 			Out.AdjOffsets[NumVerts] = (uint32)Out.AdjIndices.Num();
-			Out.Summary = FString::Printf(TEXT("%d prims (%d centres), %d / %d vertices skinned (%d share a 2nd phalanx), iso %.3f..%.3f (%d below 0.3), %d with rest overlaps, fit residual %.2e, %d closed rings"),
-				Out.PrimInfo.Num(), Out.Samples.Num() / 2, NumSkinned, NumVerts, NumOwn2, IsoMin, IsoMax, NumLowIso, NumOverlaps, WorstResidual, NumClosed);
+			Out.Summary = FString::Printf(TEXT("%d prims (%d centres), %d / %d vertices skinned (%d share a 2nd phalanx), iso %.3f..%.3f (%d below 0.3), %d with rest overlaps, fit residual %.2e, %d closed rings, %d seam twins welded"),
+				Out.PrimInfo.Num(), Out.Samples.Num() / 2, NumSkinned, NumVerts, NumOwn2, IsoMin, IsoMax, NumLowIso, NumOverlaps, WorstResidual, NumClosed, NumTwins);
 		}
 		for (int32 P = 0; P < Parts.Num(); ++P)
 		{

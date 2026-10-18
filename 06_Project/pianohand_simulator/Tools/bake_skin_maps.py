@@ -470,7 +470,7 @@ def palm_creases(bones):
     thenar = _bezier(
         radial_start + np.array([-0.3, 0.0]),
         np.array([wrist[0] + 2.6, mcp['index'][1] - 1.8]),
-        wrist)
+        wrist + np.array([0.6, 0.0]))   # 10-18: ends 1.2 cm distal of hand_r, inside the wrist gate
 
     def taper(n, head, tail, depth):
         t = np.linspace(0.0, 1.0, n)
@@ -507,12 +507,23 @@ def palm_crease_texels(bones, framef, hit):
     curves = palm_creases(bones)
     pts = np.concatenate([c for c, _ in curves])
     amps = np.concatenate([a for _, a in curves])
-    sel = hit & (framef[..., 3] > 0.5) & (framef[..., 2] < -0.25)
+    # 10-18: the hard palmar threshold (z < -0.25) and the nearest-vertex palm flag cut the thenar crease
+    # with a sawtooth edge where it wraps onto the radial side of the wrist - from the play camera that
+    # read as a slit in the skin. Both gates are smooth now: the amplitude fades out towards the side of
+    # the hand (z -0.7 .. -0.2) and towards the wrist (x 0.6 .. 1.6 cm distal of hand_r); the flag only
+    # keeps the field off the fingers.
+    z = framef[..., 2]
+    x = framef[..., 0]
+    side_gate = np.clip((-0.2 - z) / 0.5, 0.0, 1.0)
+    side_gate = side_gate * side_gate * (3.0 - 2.0 * side_gate)
+    wrist_gate = np.clip((x - 0.6) / 1.0, 0.0, 1.0)
+    wrist_gate = wrist_gate * wrist_gate * (3.0 - 2.0 * wrist_gate)
+    sel = hit & (framef[..., 3] > 0.5) & (side_gate > 1e-3) & (wrist_gate > 1e-3)
     if sel.any():
         q = framef[sel][:, :2]
         d, k = cKDTree(pts).query(q)
         dist[sel] = np.minimum(d, PALM_RANGE)
-        amp[sel] = amps[k]
+        amp[sel] = amps[k] * side_gate[sel] * wrist_gate[sel]
     return dist, amp
 
 

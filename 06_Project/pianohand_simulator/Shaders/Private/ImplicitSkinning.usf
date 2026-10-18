@@ -65,6 +65,7 @@ float BendGateFull;
 float RelaxScale;            // multiplier on mu
 float ContactDepth;          // cm, how far other parts may push a vertex per frame before it is frozen
 float SmoothBeta;            // multiplier on beta in the Laplacian step
+float StretchKeep;           // 10-18: fraction of the correction kept on the stretching (outer) side of a bent joint
 
 StructuredBuffer<float4>         HrbfSamples;     // 2 per sample: (p.xyz, a), (b.xyz, 0), normalised coordinates
 StructuredBuffer<float4>         PrimInfo;        // origin.xyz (rest component space), support scale s
@@ -608,13 +609,41 @@ void ImplicitFinalizeCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	{
 		return;
 	}
-	const float W = saturate(VertexBlend[V]);
+	float W = saturate(VertexBlend[V]);
+	const float3 Pre = LoadP(PrePosition, V);
+	const float3 Cur = LoadPU(PositionUAV, V);
+	// 10-18: on the OUTER side of a bent joint (the back of a knuckle) the union of the two tubes has a concave
+	// corner that the projection pulls the skin into - a dent on the knuckle crest while the real skin is pulled
+	// tight there. Fade the correction towards the geometric skin on that side, per joint of this vertex's part,
+	// in proportion to the bend. Inside the fold (FoldSide 1) everything is kept.
+	if (StretchKeep < 1.0f)
+	{
+		const uint  Prim = (uint)VertexPrim[V];
+		const uint4 Meta = PrimMeta[Prim];
+		float Outside = 0.0f;
+		for (uint n = 0; n < Meta.z; ++n)
+		{
+			const int2 NB = PrimNeighbours[Meta.w + n];
+			if (NB.y == 0)
+			{
+				continue;
+			}
+			// the outer-side corner of the union appears with the first degrees of bend (the dent on the knuckle
+			// crest is already there at 15 deg), so this gate is full by BendGateStart, not by BendGateFull
+			const float Gate = smoothstep(0.0f, max(BendGateStart, 0.02f), PairBend[Meta.w + n]);
+			if (Gate <= 0.0f)
+			{
+				continue;
+			}
+			const float Side = (NB.y == 1) ? FoldSide((uint)NB.x, Prim, Pre, true) : FoldSide(Prim, (uint)NB.x, Pre, false);
+			Outside = max(Outside, Gate * (1.0f - Side));
+		}
+		W *= lerp(1.0f, StretchKeep, Outside);
+	}
 	if (W >= 1.0f)
 	{
 		return;
 	}
-	const float3 Pre = LoadP(PrePosition, V);
-	const float3 Cur = LoadPU(PositionUAV, V);
 	StoreP(V, lerp(Pre, Cur, W));
 }
 
