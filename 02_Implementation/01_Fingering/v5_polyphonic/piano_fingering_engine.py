@@ -1008,6 +1008,7 @@ def analyze_polyphonic(file_path):
     output_path = os.path.join(output_dir, f"{midi_name}_polyphonic_result.json")
     with open(output_path, "w") as f: json.dump(final_notes, f, indent=4)
     print(f"\n--- POLYPHONIC ANALYSIS COMPLETE: {output_path} ---")
+    return output_path   # 배치 실행기(tools/run_batch.py)가 결과 경로를 받기 위함
 
 if __name__ == "__main__":
     base_dir = os.path.dirname(os.path.abspath(__file__))

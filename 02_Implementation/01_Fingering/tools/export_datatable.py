@@ -257,8 +257,12 @@ def build_row(index, note, optional_columns, fps):
 
 
 def default_output_path(input_path):
-    """출력 경로 기본값: 입력과 같은 디렉터리의 `<원본이름>_datatable.csv`."""
-    directory = os.path.dirname(os.path.abspath(input_path))
+    """출력 경로 기본값: 입력 폴더 아래 `ue5/<원본이름>_datatable.csv`.
+
+    UE5 임포트 대상 CSV 는 한 폴더에 모아 둔다. 배치 실행기(run_batch.py)와
+    단독 실행이 서로 다른 위치에 쓰면 어느 쪽이 최신인지 알 수 없게 된다.
+    """
+    directory = os.path.join(os.path.dirname(os.path.abspath(input_path)), "ue5")
     stem = os.path.splitext(os.path.basename(input_path))[0]
     return os.path.join(directory, f"{stem}_datatable.csv")
 
