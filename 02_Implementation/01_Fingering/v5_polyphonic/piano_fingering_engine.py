@@ -14,34 +14,42 @@ except ImportError:  # 다른 작업 디렉터리에서 임포트되는 경우 �
     _sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import piano_keyboard
 
+# 공유 상수 (01/02/03 파트 공용) — 수치의 단일 출처
+try:
+    import shared_constants
+except ImportError:
+    import sys as _sys
+    _sys.path.insert(0, os.path.abspath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")))
+    import shared_constants
+
 # --- Constants & Anatomical Limits ---
-BLACK_KEYS = {1, 3, 6, 8, 10}
+# 수치는 `02_Implementation/01_Fingering/shared_constants.py` 가 단일 출처다.
+# 아래 이름들은 기존 소비측(metrics.py·테스트)과의 호환을 위해 그대로 노출한다.
+BLACK_KEYS = set(shared_constants.BLACK_KEY_PITCH_CLASSES)
 
 # 피아노 88키 음역 (A0 ~ C8)
-PIANO_MIN_PITCH, PIANO_MAX_PITCH = 21, 108
+PIANO_MIN_PITCH = shared_constants.MIDI_MIN
+PIANO_MAX_PITCH = shared_constants.MIDI_MAX
 
-# Max semitones between finger pairs (Hard Limits)
-MAX_SPAN = {
-    (1, 2): 12, (2, 3): 6, (3, 4): 5, (4, 5): 6,
-    (1, 3): 14, (1, 4): 15, (1, 5): 17, # Thumb to others
-    (2, 4): 10, (2, 5): 12, (3, 5): 10
-}
+# 손가락 쌍별 최대 허용 반음 간격 (하드 제약)
+MAX_SPAN = shared_constants.MAX_SPAN
 
-# Wrist Rotation Limits (Degrees)
+# 손목 가동 범위 (도)
 WRIST_ROM = {
-    "yaw_max": 35.0,
-    "roll_max": 20.0
+    "yaw_max": shared_constants.WRIST_YAW_MAX_DEG,
+    "roll_max": shared_constants.WRIST_ROLL_MAX_DEG,
 }
 
 # 손가락별 손목 기준점 오프셋 (반음, 손목 중심 기준)
-FINGER_WRIST_OFFSET_L = {1: 4,  2: 2,  3: 0, 4: -2, 5: -4}  # 왼손
-FINGER_WRIST_OFFSET_R = {1: -4, 2: -2, 3: 0, 4:  2, 5:  4}  # 오른손
+FINGER_WRIST_OFFSET_L = shared_constants.FINGER_WRIST_OFFSET_L
+FINGER_WRIST_OFFSET_R = shared_constants.FINGER_WRIST_OFFSET_R
 
 # ── 피아노 교육학 기반 손가락 비용 ───────────────────────────────
-FINGER_DIFFICULTY = {1: 0, 2: 0, 3: 0, 4: 6, 5: 3}
+FINGER_DIFFICULTY = shared_constants.FINGER_DIFFICULTY
 
 # 포지션(5지 묶음) 전환 임계값 (반음)
-POSITION_SHIFT_THRESHOLD = 5
+POSITION_SHIFT_THRESHOLD = shared_constants.POSITION_SHIFT_THRESHOLD
 
 class NoteEvent:
     def __init__(self, pitch, velocity, start_ms, duration_ms, hand):
@@ -193,7 +201,7 @@ def parse_pedal_spans(file_path):
 # 타건 자체에 필요한 최소 점유 시간(ms).
 # 페달이 처음부터 눌려 있어 건반을 즉시 떼도 되는 경우에도, 건반을 누르는 동작
 # 자체에 시간이 걸리므로 하한을 둔다. (화음 그룹화 임계값과 동일한 30ms)
-MIN_STRIKE_HOLD_MS = 30.0
+MIN_STRIKE_HOLD_MS = shared_constants.MIN_STRIKE_HOLD_MS
 
 def _merge_spans(spans):
     """겹치거나 맞닿는 구간을 병합해 정렬된 [(a, b)] 반환."""

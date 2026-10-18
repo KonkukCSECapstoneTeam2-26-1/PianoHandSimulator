@@ -34,6 +34,12 @@ import json
 import os
 import sys
 
+# 공유 상수 (본 이름 등) — 수치의 단일 출처
+_SC_DIR = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+if _SC_DIR not in sys.path:
+    sys.path.insert(0, _SC_DIR)
+import shared_constants
+
 # --- 상수 -------------------------------------------------------------------
 
 #: 기본 프레임레이트 — Interface B(IK → Skinning)가 30 FPS 기준이므로 동일하게 맞춘다.
@@ -138,20 +144,27 @@ def format_value(value, kind):
 
 # --- 파생 값 계산 ------------------------------------------------------------
 
+# 본 이름의 단일 출처는 shared_constants (01/02/03 파트 공용).
+# 위의 FINGER_BONE_PREFIX·BONE_SEGMENT·HAND_BONE_SUFFIX 는 명명 규칙을 설명하는
+# 참조용으로 남기고, 실제 산출은 공유 표를 쓴다.
+_BONE_TABLE = {"Right": shared_constants.BONE_NAME_R,
+               "Left": shared_constants.BONE_NAME_L}
+
+
 def resolve_bone_name(hand, finger):
     """hand + finger → UE5 IK End Effector 본 이름 (예: 'thumb_03_r').
 
     매핑에 없는 조합은 ValueError로 즉시 실패시킨다(조용한 오류 방지).
     """
-    prefix = FINGER_BONE_PREFIX.get(finger)
-    if prefix is None:
-        raise ValueError(f"알 수 없는 finger 값: {finger!r} (1~5만 허용)")
-
-    suffix = HAND_BONE_SUFFIX.get(hand)
-    if suffix is None:
+    table = _BONE_TABLE.get(hand)
+    if table is None:
         raise ValueError(f"알 수 없는 hand 값: {hand!r} ('Left' | 'Right'만 허용)")
 
-    return f"{prefix}_{BONE_SEGMENT}_{suffix}"
+    name = table.get(finger)
+    if name is None:
+        raise ValueError(f"알 수 없는 finger 값: {finger!r} (1~5만 허용)")
+
+    return name
 
 
 def ms_to_frame(ms, fps):

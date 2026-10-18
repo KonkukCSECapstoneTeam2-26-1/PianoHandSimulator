@@ -25,33 +25,37 @@
       UE5 월드 좌표(cm, 좌수 Z-up)로 쓰려면 소비측에서 축 매핑·단위 변환을 수행한다.
 """
 
-# ── 건반 물리 치수 (문서 3장 표) ─────────────────────────────────
-OCTAVE_WIDTH_MM = 164.0      # 옥타브 폭 (백건 7개) — 표준 규격 공칭값
-WHITE_KEY_WIDTH_MM = OCTAVE_WIDTH_MM / 7.0  # 백건 폭 = 23.4286 mm
-                                            # 23.4로 반올림하면 88키에서 약 1.5mm 누적 오차
-BLACK_KEY_WIDTH_MM = 13.7    # 흑건 폭
-WHITE_KEY_LENGTH_MM = 150.0  # 백건 길이
-BLACK_KEY_LENGTH_MM = 95.0   # 흑건 길이
-BLACK_KEY_HEIGHT_MM = 12.5   # 백건 상면 대비 흑건 상면 높이 (문서 5.1절)
-MAX_KEY_TRAVEL_MM = 10.0     # 건반 최대 누름 깊이 (key dip, 문서 4.1절)
+# ── 공유 상수 (01/02/03 파트 공용) ──────────────────────────────
+# 수치는 `02_Implementation/01_Fingering/shared_constants.py` 가 단일 출처다.
+# 이 모듈은 그 값을 쓰는 '변환 식'만 책임진다. 상수를 여기서 다시 정의하지 말 것.
+import os as _os
+import sys as _sys
+_SC_DIR = _os.path.abspath(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), ".."))
+if _SC_DIR not in _sys.path:
+    _sys.path.insert(0, _SC_DIR)
+import shared_constants as _sc
 
-# ── 타건 접점 Y (문서 5.2절 표) ──────────────────────────────────
-# 흑건 앞단은 백건 앞단으로부터 55.0mm 후방 (150.0 - 95.0)
-BLACK_KEY_FRONT_Y_MM = WHITE_KEY_LENGTH_MM - BLACK_KEY_LENGTH_MM  # 55.0
-WHITE_TOUCH_Y_MM = 30.0      # 백건 타건 접점 — 흑건 앞쪽 노출 구간(0~55) 중앙부
-BLACK_TOUCH_Y_MM = 85.0      # 흑건 타건 접점 — 흑건 앞단(55.0) + 30.0
+# 아래 이름들은 기존 소비측(테스트·시뮬레이터)과의 호환을 위해 그대로 노출한다.
+OCTAVE_WIDTH_MM = _sc.OCTAVE_WIDTH_MM
+WHITE_KEY_WIDTH_MM = _sc.WHITE_KEY_WIDTH_MM
+BLACK_KEY_WIDTH_MM = _sc.BLACK_KEY_WIDTH_MM
+WHITE_KEY_LENGTH_MM = _sc.WHITE_KEY_LENGTH_MM
+BLACK_KEY_LENGTH_MM = _sc.BLACK_KEY_LENGTH_MM
+BLACK_KEY_HEIGHT_MM = _sc.BLACK_KEY_HEIGHT_MM
+MAX_KEY_TRAVEL_MM = _sc.MAX_KEY_TRAVEL_MM
 
-# ── MIDI 범위 (88키 피아노) ──────────────────────────────────────
-MIN_PITCH = 21   # A0
-MAX_PITCH = 108  # C8
-WHITE_KEY_COUNT = 52  # 백건 총 개수 (인덱스 0~51)
+BLACK_KEY_FRONT_Y_MM = _sc.BLACK_KEY_FRONT_Y_MM
+WHITE_TOUCH_Y_MM = _sc.WHITE_TOUCH_Y_MM
+BLACK_TOUCH_Y_MM = _sc.BLACK_TOUCH_Y_MM
 
-# 흑건에 해당하는 pitch class 집합 (C#, D#, F#, G#, A#)
-BLACK_PITCH_CLASSES = frozenset({1, 3, 6, 8, 10})
+MIN_PITCH = _sc.MIDI_MIN
+MAX_PITCH = _sc.MIDI_MAX
+WHITE_KEY_COUNT = _sc.WHITE_KEY_COUNT
 
-# 옥타브 내 선행 백건 수 (문서 4.2절 WHITE_BEFORE 테이블)
-#          C  C#  D  D#  E  F  F#  G  G#  A  A#  B
-WHITE_BEFORE = (0, 1, 1, 2, 2, 3, 4, 4, 5, 5, 6, 6)
+BLACK_PITCH_CLASSES = frozenset(_sc.BLACK_KEY_PITCH_CLASSES)
+
+# 옥타브 내 선행 백건 수 — 인덱싱 편의를 위해 튜플로 변환
+WHITE_BEFORE = tuple(_sc.WHITE_BEFORE[i] for i in range(12))
 
 
 def _validate_pitch(pitch):

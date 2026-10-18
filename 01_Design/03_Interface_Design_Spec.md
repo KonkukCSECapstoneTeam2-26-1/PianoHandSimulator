@@ -139,8 +139,13 @@
 피아노 건반의 물리적 치수 (기준):
 
 > **확정 완료** — 근거: `01_Design/09_Interface_Parameter_Decisions.md`
-> 구현은 `02_Implementation/01_Fingering/v5_polyphonic/piano_keyboard.py` 가 **유일한 산출 경로**이며,
-> 운지법 엔진과 IK 양측이 이 모듈을 공유한다. 수치를 각자 복제하지 말 것.
+>
+> **코드에서의 단일 출처**
+> - 수치: `02_Implementation/01_Fingering/shared_constants.py`
+>   (건반 치수, MAX_SPAN, 손목 ROM, **UE5 본 이름**, 프레임레이트, 타이밍 프로토콜)
+> - 좌표 변환식: `02_Implementation/01_Fingering/v5_polyphonic/piano_keyboard.py`
+>
+> 01_Fingering · 02_IK · 03_Skinning 모두 이 두 파일을 참조한다. 수치를 각자 복제하지 말 것.
 
 | 항목 | 확정값 |
 |------|--------|
