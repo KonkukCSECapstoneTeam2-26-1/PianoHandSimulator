@@ -8,7 +8,9 @@ IK는 이미 매 프레임 관절 각도를 `hand[i].joints[j].angle`에 계산�
 
 ## 왜 실시간 루프에서 꺼내지 않는가
 
-화면 루프(`drawFrame`, 약 1998줄)는 `high_resolution_clock`의 실제 경과 시간으로 `time`을 넣는다. 모니터 주사율에 따라 프레임 간격이 일정하지 않아서 30 FPS 데이터가 되지 않는다. 그래서 `time = frame / 30`으로 직접 돌리는 **별도 루프**를 쓴다. `updateJacobianKinematics`가 `static` 변수에 상태를 쌓으므로, 실시간 루프(`mainLoop`)가 시작되기 **전에** 실행한다.
+화면 루프(`drawFrame`, 약 1998줄)는 `high_resolution_clock`의 실제 경과 시간으로 `time`을 넣는다. 모니터 주사율에 따라 프레임 간격이 일정하지 않아서 30 FPS 데이터가 되지 않는다. 그래서 시간을 직접 넣어 돌리는 **별도 루프**를 쓴다. `updateJacobianKinematics`가 `static` 변수에 상태를 쌓으므로, 실시간 루프(`mainLoop`)가 시작되기 **전에** 실행한다.
+
+**내부 계산은 60 Hz로 하고 30 FPS로 기록한다.** 손가락 타겟 보간(`fingerLerpSpeed = 0.25f`, 약 1788줄)과 낙하 궤적(`dist * 0.08f`)이 **호출 한 번당** 고정 비율로 움직이도록 되어 있다. 시간(`dt`)을 쓰는 손목 보간과 달리 호출 횟수에 따라 속도가 달라진다. 손목 보간의 주석("기존 60FPS 기준")으로 보아 60 Hz 기준으로 맞춰진 값이다. 30 Hz로 호출하면 손가락이 화면에서 보던 것보다 절반 속도로 움직인다. 그래서 60 Hz로 두 번 계산하고 두 번째 결과만 기록한다. (근본 해결은 이 보간을 `dt` 기반으로 바꾸는 것이다. 1학기 보고서 6.1절의 "손가락 타겟 보간의 타임스텝 독립화" 항목이다.)
 
 ## 변경 4곳
 
@@ -40,10 +42,14 @@ IK는 이미 매 프레임 관절 각도를 `hand[i].joints[j].angle`에 계산�
         jf << std::fixed << std::setprecision(4);
         wf << std::fixed << std::setprecision(4);
 
+        const float innerHz = 60.0f;                                   // 화면에서 보이는 움직임과 같은 갱신 속도
+        const int subSteps = static_cast<int>(innerHz / fps);          // 30 FPS 기록이면 2
         const int frames = static_cast<int>(std::ceil(songLengthMs / 1000.0f * fps));
         for (int frame = 0; frame <= frames; ++frame) {
-            const float t = frame / fps;
-            updateJacobianKinematics(t, getActiveNotesForCurrentTime(t));
+            for (int s = 0; s < subSteps; ++s) {                       // 마지막 서브스텝이 정확히 frame/fps 시각이 되게 한다
+                const float t = std::max(0.0f, (frame * subSteps - (subSteps - 1) + s) / innerHz);
+                updateJacobianKinematics(t, getActiveNotesForCurrentTime(t));
+            }
             const float timeMs = frame * 1000.0f / fps;
 
             for (int f = 0; f < 5; ++f) {
@@ -96,4 +102,5 @@ python Scripts/check_ik_csv.py ik_joints.csv ik_wrist.csv
 - 내보내는 건 **오른손**이다(스키닝 쪽에 오른손 메시만 있음). 왼손은 `hand[0..4]`로 같은 방식이다.
 - `joints[0..2]`가 `*_01_r ~ *_03_r`에 대응한다. `*_metacarpal_r`은 IK에 없어서 보내지 않는다.
 - `songLengthMs`는 곡 길이 + 0.5초이고 `getActiveNotesForCurrentTime`은 그 길이로 반복한다. 곡 전체가 한 번 나온다.
-- 프레임 사이 점프가 보이면(검증기 경고) 이전 프레임 결과를 초기값으로 쓰는 개선이 필요하다. 지금은 매 프레임 0도에서 시작한다.
+- 매 프레임 0도에서 새로 푸는 것은 의도된 설계다. 코드 주석(1803~1806줄)에 따르면 이전 프레임 각도로 시작(웜스타트)하면 한 번 나쁜 국소해에 빠진 뒤 못 벗어나서 지금 방식으로 바꿨다. 그래서 프레임 사이 점프가 보이면(검증기 경고) 초기값을 바꾸지 말고, **기록한 각도를 시간 방향으로 평활화**하는 쪽을 먼저 검토한다.
+- 곡은 `kFingeringCsvPath`에 고정된 `deb_clai`(Clair de Lune) 하나다. 약 248초이고 30 FPS면 7,446프레임이다. 다른 곡은 경로를 바꿔 다시 빌드해야 한다.
