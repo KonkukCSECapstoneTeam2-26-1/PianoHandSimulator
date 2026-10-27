@@ -144,9 +144,21 @@ struct NoteEvent {
     float key_hold_ms;
 };
 
-// 손가락 뼈대 전체 길이(1.0 + 0.5 + 0.25 = 1.75)에 맞춰 건반 폭을 잡아야 손과 비율이 맞음.
+// 흰 건반 폭 0.45 = 실제 2.3 cm 로 IK 단위를 정함 (1 단위 = 약 5.1 cm). 손가락 마디 길이도 이 단위로 환산한다(kSegmentCm).
 // getKeyLayout()과 initPianoKeyboard()가 반드시 이 값을 공유해야 건반 메시와 타겟 좌표가 어긋나지 않음.
 const float kWhiteKeyWidth = 0.45f;
+const float kIkUnitPerCm = kWhiteKeyWidth / 2.3f; // 실제 흰 건반 폭 2.3 cm
+
+// 손가락별 마디 길이(cm): 근위(joints[0]->[1]), 중간([1]->[2]), 원위([2]->손끝).
+// MetaHuman 오른손 실측 (Scripts/dump_hand_proportions.py, MeasureHand). 원위 마디는 뼈가 없어 피부 정점까지 잰 값이고,
+// 중지·약지·엄지 원위는 아직 재지 않아 검지(2.11)·소지(1.91) 실측에서 추정한 값이다.
+const float kSegmentCm[5][3] = {
+    { 4.08f, 2.39f, 2.30f },   // 엄지 (원위 추정)
+    { 4.01f, 1.96f, 2.11f },   // 검지
+    { 4.33f, 2.56f, 2.20f },   // 중지 (원위 추정)
+    { 3.74f, 2.84f, 2.10f },   // 약지 (원위 추정)
+    { 2.55f, 1.56f, 1.91f },   // 소지
+};
 
 struct KeyLayout {
     bool isBlack;
@@ -500,10 +512,12 @@ private:
                 int i = h * 5 + f;
                 hand[i].joints.resize(4);
 
+                // 마디 길이: MetaHuman 손(SKM_MH_Hand_R) 실측 cm 를 IK 단위로 환산 (흰 건반 폭 0.45 = 2.3 cm).
+                // 각도만 UE 로 넘기므로 길이가 같아야 MetaHuman 손끝도 같은 건반에 닿는다.
                 hand[i].joints[0].localPos = glm::vec3(0.0f, 0.0f, 0.0f);
-                hand[i].joints[1].localPos = glm::vec3(1.0f, 0.0f, 0.0f);
-                hand[i].joints[2].localPos = glm::vec3(0.5f, 0.0f, 0.0f);
-                hand[i].joints[3].localPos = glm::vec3(0.25f, 0.0f, 0.0f);
+                hand[i].joints[1].localPos = glm::vec3(kSegmentCm[f][0] * kIkUnitPerCm, 0.0f, 0.0f);
+                hand[i].joints[2].localPos = glm::vec3(kSegmentCm[f][1] * kIkUnitPerCm, 0.0f, 0.0f);
+                hand[i].joints[3].localPos = glm::vec3(kSegmentCm[f][2] * kIkUnitPerCm, 0.0f, 0.0f);
 
                 for (int j = 0; j < 4; j++) {
                     hand[i].joints[j].angle = glm::vec3(0.0f);
