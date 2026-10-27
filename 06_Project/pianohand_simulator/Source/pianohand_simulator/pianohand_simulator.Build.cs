@@ -23,7 +23,9 @@ public class pianohand_simulator : ModuleRules
 			"RenderCore",
 			"RHI",
 			"Renderer",
-			"Projects"
+			"Projects",
+			// 04_Flesh adapter: IDataflowGeometryCachable (Flesh surface positions for a render mesh)
+			"DataflowSimulation"
 		});
 	}
 }
