@@ -52,3 +52,6 @@ NotForCommit/
 
 # ===================== CMake (02_Implementation/02_IK) =====================
 02_Implementation/02_IK/build/
+
+# Flesh 시뮬레이션 녹화 결과(Geometry Cache). 100MB 초과로 푸시 불가, 재생성 방법은 Docs/Kyungmin/4.4 참조
+06_Project/pianohand_simulator/Content/PianoHand/FleshAssets/GC_*.uasset
