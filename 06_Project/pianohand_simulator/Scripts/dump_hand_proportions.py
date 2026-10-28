@@ -4,7 +4,8 @@ Run in the editor (Output Log > Python console):
     exec(open(r'<project>/Scripts/dump_hand_proportions.py').read())
 
 Lengths are |parent-relative translation| of the child bone in the reference pose (cm), i.e. the distance between
-consecutive joints. Result is printed and written to Saved/hand_proportions.txt (IK-ratio table included).
+consecutive joints. The thumb has no thumb_metacarpal bone: thumb_01 is the metacarpal (CMC joint), so its row is
+metacarpal / proximal / distal, one segment shifted from the other fingers (proximal / middle / distal). Result is printed and written to Saved/hand_proportions.txt (IK-ratio table included).
 """
 import os
 
@@ -78,6 +79,23 @@ def run():
             f, (k - hand).length(), k.x - hand.x, k.y - hand.y, k.z - hand.z))
     for a, b in zip(FINGERS, FINGERS[1:]):
         lines.append('knuckle gap %s-%s: %.2f' % (a, b, (knuckles[a] - knuckles[b]).length()))
+
+    # thumb root (CMC = thumb_01) against the knuckle line, in the palm's own axes:
+    # forward = hand_r -> middle_01, across = index_01 -> pinky_01 (made orthogonal), up = forward x across.
+    # The IK puts every finger root on the MCP line; the thumb root has to sit 'back' cm behind it.
+    lines.append('')
+    lines.append('thumb root (thumb_01_r) relative to the knuckle line, cm')
+    fwd = (knuckles['middle'] - hand)
+    fwd = fwd.normal()
+    across = knuckles['pinky'] - knuckles['index']
+    across = across - fwd * across.dot(fwd)
+    across = across.normal()
+    up = fwd.cross(across)
+    mcp_line = (knuckles['index'] + knuckles['pinky']) * 0.5
+    for name in ('thumb_01_r', 'thumb_02_r', 'thumb_03_r'):
+        d = pos(name) - mcp_line
+        lines.append('%-11s back %.2f   toward thumb side %.2f   palm-normal %.2f   (from hand_r %.2f)' % (
+            name, -d.dot(fwd), -d.dot(across), d.dot(up), (pos(name) - hand).length()))
 
     text = '\n'.join(lines)
     print(text)

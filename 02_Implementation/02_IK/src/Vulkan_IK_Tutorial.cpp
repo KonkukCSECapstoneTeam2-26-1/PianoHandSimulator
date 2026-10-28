@@ -149,16 +149,21 @@ struct NoteEvent {
 const float kWhiteKeyWidth = 0.45f;
 const float kIkUnitPerCm = kWhiteKeyWidth / 2.3f; // 실제 흰 건반 폭 2.3 cm
 
-// 손가락별 마디 길이(cm): 근위(joints[0]->[1]), 중간([1]->[2]), 원위([2]->손끝).
+// 손가락별 마디 길이(cm): joints[0]->[1], [1]->[2], [2]->손끝. 검지~소지는 첫마디/중간마디/끝마디(뿌리 = MCP),
+// 엄지는 손허리뼈/첫마디/끝마디(뿌리 = CMC, thumb_01_r)다. MetaHuman 엄지는 손허리뼈가 thumb_01 이라 마디가 하나씩 밀린다.
 // MetaHuman 오른손 실측 (Scripts/dump_hand_proportions.py, MeasureHand). 원위 마디는 뼈가 없어 피부 정점까지 잰 값이고,
 // 중지·약지·엄지 원위는 아직 재지 않아 검지(2.11)·소지(1.91) 실측에서 추정한 값이다.
 const float kSegmentCm[5][3] = {
-    { 4.08f, 2.39f, 2.30f },   // 엄지 (원위 추정)
+    { 4.08f, 2.39f, 2.30f },   // 엄지: 손허리뼈 / 첫마디 / 끝마디 (끝마디 추정)
     { 4.01f, 1.96f, 2.11f },   // 검지
     { 4.33f, 2.56f, 2.20f },   // 중지 (원위 추정)
     { 3.74f, 2.84f, 2.10f },   // 약지 (원위 추정)
     { 2.55f, 1.56f, 1.91f },   // 소지
 };
+
+// 엄지 뿌리(CMC)가 다른 손가락 뿌리(MCP 줄 = 손목 x)보다 손목 쪽으로 물러난 거리(cm). 해부학 추정값, thumb_01 실측 전.
+// 뿌리만 빼면 엄지가 건반에 닿지 않으므로(오차 1 cm 이상 26% -> 72%) 엄지 타건 지점을 앞으로 당긴다(getFingerPressPosition).
+const float kThumbRootBackCm = 4.5f;
 
 struct KeyLayout {
     bool isBlack;
@@ -201,6 +206,15 @@ glm::vec3 getKeyPosition(int pitch) {
     float pressY = layout.isBlack ? -0.35f : -0.5f;
 
     return glm::vec3(pressX, pressY, layout.z);
+}
+
+// 손가락이 실제로 누르는 지점. 엄지는 뿌리(CMC)가 손목 쪽에 있어 짧으므로 건반 앞쪽(손목 쪽, 작은 X)을 누른다.
+// 당기는 양(IK 단위)은 건반 앞 끝(흰 0.5 / 검은 0.9)에서 0.1 여유를 둔 최대값: 흰 0.8 -> 0.6, 검은 1.3 -> 1.0.
+const float kThumbPressShiftWhite = 0.2f, kThumbPressShiftBlack = 0.3f;
+glm::vec3 getFingerPressPosition(int pitch, int finger) {
+    glm::vec3 p = getKeyPosition(pitch);
+    if (finger == 1) p.x -= getKeyLayout(pitch).isBlack ? kThumbPressShiftBlack : kThumbPressShiftWhite;
+    return p;
 }
 
 // 전체 MIDI 노트 데이터를 담아둘 멤버 변수 (클래스 멤버로 선언)
@@ -539,7 +553,7 @@ private:
                     hand[i].joints[1].limits = deg2rad(110.0f, 15.0f, 0.0f, 0.0f, 0.0f, 0.0f); // [실험] PIP는 문제삼지 않았으니 여유를 더 줌
                     hand[i].joints[2].limits = deg2rad(32.0f, 15.0f, 0.0f, 0.0f, 0.0f, 0.0f); // DIP는 요청대로 좁게 유지
                     hand[i].joints[3].limits = deg2rad(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-                    hand[i].rootOffset = glm::vec3(0.0f, -0.2f, zOff);
+                    hand[i].rootOffset = glm::vec3(-kThumbRootBackCm * kIkUnitPerCm, -0.2f, zOff);
                 }
                 else {
                     // [일반 손가락] 마찬가지로 신전 여유를 넓히고, DIP(joint2) 굽힘 범위를 좁힘.
@@ -1796,7 +1810,7 @@ private:
         for (const auto& note : activeNotes) {
             if (note.finger >= 1 && note.finger <= 5) {
                 int fingerIdx = (note.hand * 5) + (note.finger - 1);
-                desiredTargets[fingerIdx] = getKeyPosition(note.pitch);
+                desiredTargets[fingerIdx] = getFingerPressPosition(note.pitch, note.finger);
             }
         }
 
