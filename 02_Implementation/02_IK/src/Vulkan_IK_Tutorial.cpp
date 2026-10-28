@@ -10,6 +10,7 @@
 
 #include <iostream>
 #include <fstream>
+#include <iomanip>
 #include <sstream>
 #include <filesystem>
 #include <cmath>
@@ -143,9 +144,21 @@ struct NoteEvent {
     float key_hold_ms;
 };
 
-// 손가락 뼈대 전체 길이(1.0 + 0.5 + 0.25 = 1.75)에 맞춰 건반 폭을 잡아야 손과 비율이 맞음.
+// 흰 건반 폭 0.45 = 실제 2.3 cm 로 IK 단위를 정함 (1 단위 = 약 5.1 cm). 손가락 마디 길이도 이 단위로 환산한다(kSegmentCm).
 // getKeyLayout()과 initPianoKeyboard()가 반드시 이 값을 공유해야 건반 메시와 타겟 좌표가 어긋나지 않음.
 const float kWhiteKeyWidth = 0.45f;
+const float kIkUnitPerCm = kWhiteKeyWidth / 2.3f; // 실제 흰 건반 폭 2.3 cm
+
+// 손가락별 마디 길이(cm): 근위(joints[0]->[1]), 중간([1]->[2]), 원위([2]->손끝).
+// MetaHuman 오른손 실측 (Scripts/dump_hand_proportions.py, MeasureHand). 원위 마디는 뼈가 없어 피부 정점까지 잰 값이고,
+// 중지·약지·엄지 원위는 아직 재지 않아 검지(2.11)·소지(1.91) 실측에서 추정한 값이다.
+const float kSegmentCm[5][3] = {
+    { 4.08f, 2.39f, 2.30f },   // 엄지 (원위 추정)
+    { 4.01f, 1.96f, 2.11f },   // 검지
+    { 4.33f, 2.56f, 2.20f },   // 중지 (원위 추정)
+    { 3.74f, 2.84f, 2.10f },   // 약지 (원위 추정)
+    { 2.55f, 1.56f, 1.91f },   // 소지
+};
 
 struct KeyLayout {
     bool isBlack;
@@ -370,6 +383,13 @@ public:
         initNoteData();
         initPianoKeyboard();
         initVulkan();
+        if (std::getenv("PH_EXPORT_CSV")) {            // 환경 변수 PH_EXPORT_CSV 가 있을 때만 내보낸다
+            exportJointAnglesCsv("ik_joints.csv", "ik_wrist.csv");
+            if (std::getenv("PH_EXPORT_ONLY")) {       // PH_EXPORT_ONLY 도 있으면 화면 루프 없이 바로 종료
+                cleanup();
+                return;
+            }
+        }
         mainLoop();
         cleanup();
     }
@@ -416,6 +436,7 @@ private:
 
     // 카메라가 따라갈 두 손목의 중간 Z (updateJacobianKinematics 에서 갱신)
     float wristCenterZ = 0.0f;
+    glm::vec3 exportRightWrist = glm::vec3(0.0f);   // 내보내기용: 오른손목 위치(IK 단위)
 
     VkBuffer vertexBuffer;
     VkDeviceMemory vertexBufferMemory;
@@ -491,10 +512,12 @@ private:
                 int i = h * 5 + f;
                 hand[i].joints.resize(4);
 
+                // 마디 길이: MetaHuman 손(SKM_MH_Hand_R) 실측 cm 를 IK 단위로 환산 (흰 건반 폭 0.45 = 2.3 cm).
+                // 각도만 UE 로 넘기므로 길이가 같아야 MetaHuman 손끝도 같은 건반에 닿는다.
                 hand[i].joints[0].localPos = glm::vec3(0.0f, 0.0f, 0.0f);
-                hand[i].joints[1].localPos = glm::vec3(1.0f, 0.0f, 0.0f);
-                hand[i].joints[2].localPos = glm::vec3(0.5f, 0.0f, 0.0f);
-                hand[i].joints[3].localPos = glm::vec3(0.25f, 0.0f, 0.0f);
+                hand[i].joints[1].localPos = glm::vec3(kSegmentCm[f][0] * kIkUnitPerCm, 0.0f, 0.0f);
+                hand[i].joints[2].localPos = glm::vec3(kSegmentCm[f][1] * kIkUnitPerCm, 0.0f, 0.0f);
+                hand[i].joints[3].localPos = glm::vec3(kSegmentCm[f][2] * kIkUnitPerCm, 0.0f, 0.0f);
 
                 for (int j = 0; j < 4; j++) {
                     hand[i].joints[j].angle = glm::vec3(0.0f);
@@ -1689,6 +1712,7 @@ private:
         currentRightWrist.y = glm::mix(currentRightWrist.y, targetY_R, wristLiftAlpha);
 
         wristCenterZ = (currentLeftWrist.z + currentRightWrist.z) * 0.5f;
+        exportRightWrist = currentRightWrist;       // currentRightWrist 는 함수 안 static 이라 밖에서 못 본다
 
 
         // --- [FK 계산 람다] ---
@@ -1978,6 +2002,52 @@ private:
         }
 
         memcpy(vertexBufferMapped, vertices.data(), sizeof(Vertex) * vertices.size());
+    }
+
+    // 오른손 관절 각도와 손목 위치를 30 FPS CSV로 저장한다 (형식: IK_Handoff_Format.md)
+    void exportJointAnglesCsv(const std::string& jointsPath, const std::string& wristPath, float fps = 30.0f) {
+        const float cmPerUnit = 2.3f / kWhiteKeyWidth;        // 흰 건반 폭: IK 0.45 = 실제 2.3 cm
+        static const char* fingerNames[5] = { "thumb", "index", "middle", "ring", "pinky" };
+        static const char* jointSuffix[3] = { "01", "02", "03" };   // joints[0..2] -> _01_r, _02_r, _03_r
+
+        std::ofstream jf(jointsPath), wf(wristPath);
+        if (!jf || !wf) { std::cerr << "[Export] cannot open output files" << std::endl; return; }
+        jf << "frame,time_ms,bone,flex_deg,abd_deg,twist_deg\n";
+        wf << "frame,time_ms,x_cm,y_cm,z_cm,yaw_deg,pitch_deg,roll_deg\n";
+        jf << std::fixed << std::setprecision(4);
+        wf << std::fixed << std::setprecision(4);
+
+        const float innerHz = 60.0f;                                   // 화면에서 보이는 움직임과 같은 갱신 속도
+        const int subSteps = static_cast<int>(innerHz / fps);          // 30 FPS 기록이면 2
+        const int frames = static_cast<int>(std::ceil(songLengthMs / 1000.0f * fps));
+        std::cout << "[Export] start: " << frames + 1 << " frames (Debug build is slow, use Release)" << std::endl;
+        for (int frame = 0; frame <= frames; ++frame) {
+            if (frame % 30 == 0) glfwPollEvents();                     // 계산 중에도 창이 "응답 없음"이 되지 않게 한다
+            if (frame % 300 == 0) {                                    // 곡 10초마다 진행률 출력
+                std::cout << "[Export] " << frame << "/" << frames + 1 << " (" << frame * 100 / (frames + 1) << "%)" << std::endl;
+            }
+            for (int s = 0; s < subSteps; ++s) {                       // 마지막 서브스텝이 정확히 frame/fps 시각이 되게 한다
+                const float t = std::max(0.0f, (frame * subSteps - (subSteps - 1) + s) / innerHz);
+                updateJacobianKinematics(t, getActiveNotesForCurrentTime(t));
+            }
+            const float timeMs = frame * 1000.0f / fps;
+
+            for (int f = 0; f < 5; ++f) {
+                const Finger& finger = hand[5 + f];            // 5~9 = 오른손 (엄지 -> 소지)
+                for (int j = 0; j < 3; ++j) {                  // joints[3] 은 손가락 끝이라 각도가 없다
+                    const glm::vec3& a = finger.joints[j].angle;   // 라디안
+                    jf << frame << ',' << timeMs << ',' << fingerNames[f] << '_' << jointSuffix[j] << "_r,"
+                       << -glm::degrees(a.x) << ','            // IK 는 굴곡을 음수로 저장 -> 닫힘이 + 가 되게 부호 반전
+                       << glm::degrees(a.y) << ','
+                       << glm::degrees(a.z) << '\n';
+                }
+            }
+            wf << frame << ',' << timeMs << ','
+               << exportRightWrist.x * cmPerUnit << ','        // x: 앞뒤, y: 높이, z: 좌우 (IK 축 그대로)
+               << exportRightWrist.y * cmPerUnit << ','
+               << exportRightWrist.z * cmPerUnit << ",0,0,0\n";   // IK 에는 손목 회전이 없다
+        }
+        std::cout << "[Export] wrote " << frames + 1 << " frames to " << jointsPath << std::endl;
     }
 
     void drawFrame() {
