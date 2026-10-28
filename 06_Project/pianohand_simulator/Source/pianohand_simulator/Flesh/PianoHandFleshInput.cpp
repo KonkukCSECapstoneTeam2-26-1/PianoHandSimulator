@@ -19,6 +19,10 @@
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 #include <atomic>
+#include "Async/ParallelFor.h"
+#include "ChaosFlesh/ChaosDeformableTetrahedralComponent.h"
+#include "ChaosFlesh/FleshCollectionEngineUtility.h"
+#include "GeometryCollection/Facades/CollectionTetrahedralBindingsFacade.h"
 
 // ---------------------------------------------------------------------------
 // Compute shader: Position = lerp(Position, Flesh, Blend), in place
@@ -144,6 +148,72 @@ namespace PianoHandFlesh
 }
 
 // ---------------------------------------------------------------------------
+// Fast read of the bound surface (same maths as ChaosFlesh::BoundSurfacePositions, but the bindings and evaluator are
+// built once and the per-vertex evaluation runs on all cores)
+// ---------------------------------------------------------------------------
+
+struct FPianoHandFleshFastPath
+{
+	TUniquePtr<GeometryCollection::Facades::FTetrahedralBindings> Bindings;
+	TUniquePtr<GeometryCollection::Facades::FTetrahedralBindings::Evaluator> Evaluator;
+	TArray<Chaos::TVector<Chaos::FRealSingle, 3>> Current;
+	bool bBuilt = false;
+	bool bFailed = false;
+};
+
+namespace
+{
+	bool BuildFastPath(FPianoHandFleshFastPath& Path, const UDeformableTetrahedralComponent* Tet, const USkeletalMesh* Mesh)
+	{
+		const UFleshAsset* Rest = Tet->GetRestCollection();
+		const FFleshCollection* FleshCollection = Rest ? Rest->GetCollection() : nullptr;
+		const TManagedArray<FVector3f>* RestVertices = Rest ? Rest->FindPositions() : nullptr;
+		if (FleshCollection == nullptr || RestVertices == nullptr)
+		{
+			return false;
+		}
+		const FName MeshId(ChaosFlesh::GetMeshId(Mesh, false));
+		Path.Bindings = MakeUnique<GeometryCollection::Facades::FTetrahedralBindings>(static_cast<const FManagedArrayCollection&>(*FleshCollection));
+		const int32 TetIndex = Path.Bindings->GetTetMeshIndex(MeshId, 0);
+		if (TetIndex == INDEX_NONE || !Path.Bindings->ReadBindingsGroup(TetIndex, MeshId, 0))
+		{
+			return false;
+		}
+		Path.Evaluator = Path.Bindings->InitEvaluator(RestVertices);
+		return Path.Evaluator.IsValid() && Path.Evaluator->IsValid();
+	}
+
+	bool FastRead(FPianoHandFleshFastPath& Path, const UDeformableTetrahedralComponent* Tet, TArray<FVector3f>& OutPositions)
+	{
+		const UFleshDynamicAsset* Dynamic = Tet->GetDynamicCollection();
+		const TManagedArray<FVector3f>* Simulated = Dynamic ? Dynamic->FindPositions() : nullptr;
+		if (Simulated == nullptr || !Path.Evaluator.IsValid())
+		{
+			return false;
+		}
+		Path.Current.SetNumUninitialized(Simulated->Num());
+		for (int32 Index = 0; Index < Path.Current.Num(); ++Index)
+		{
+			Path.Current[Index] = Chaos::FVec3f((*Simulated)[Index]);
+		}
+
+		const int32 NumVertices = Path.Evaluator->NumVertices();
+		OutPositions.SetNumUninitialized(NumVertices);
+		constexpr int32 BatchSize = 2048;
+		const int32 NumBatches = (NumVertices + BatchSize - 1) / BatchSize;
+		ParallelFor(NumBatches, [&](int32 Batch)
+		{
+			const int32 End = FMath::Min((Batch + 1) * BatchSize, NumVertices);
+			for (int32 Index = Batch * BatchSize; Index < End; ++Index)
+			{
+				OutPositions[Index] = Path.Evaluator->GetEmbeddedPosition(Index, Path.Current);
+			}
+		});
+		return true;
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -255,7 +325,32 @@ void UPianoHandFleshInputComponent::TickComponent(float DeltaTime, ELevelTick Ti
 	}
 
 	// One position per render vertex of 'Mesh', in the order GenerateSurfaceBindings stored them (Flesh component space).
-	TArray<FVector3f> Positions = Cachable->GetGeometryCachePositions(Mesh);
+	const double TickStart = FPlatformTime::Seconds();
+	TArray<FVector3f> Positions;
+	bool bReadFast = false;
+	if (bFastRead)
+	{
+		if (!FastPath.IsValid())
+		{
+			FastPath = MakeShared<FPianoHandFleshFastPath>();
+		}
+		const UDeformableTetrahedralComponent* Tet = Cast<UDeformableTetrahedralComponent>(FleshComponent);
+		if (!FastPath->bBuilt && !FastPath->bFailed && Tet != nullptr)
+		{
+			FastPath->bBuilt = BuildFastPath(*FastPath, Tet, Mesh);
+			FastPath->bFailed = !FastPath->bBuilt;
+			UE_LOG(LogPianoHand, Display, TEXT("[FleshInput] fast read %s"), FastPath->bBuilt ? TEXT("ready (cached bindings, parallel)") : TEXT("unavailable, using Flesh's own call"));
+		}
+		if (FastPath->bBuilt)
+		{
+			bReadFast = FastRead(*FastPath, Tet, Positions);
+		}
+	}
+	if (!bReadFast)
+	{
+		Positions = Cachable->GetGeometryCachePositions(Mesh);
+	}
+	const double ReadSeconds = FPlatformTime::Seconds() - TickStart;
 	if (Positions.IsEmpty())
 	{
 		return; // not simulated yet, or the Flesh asset has no bindings for this mesh
@@ -306,6 +401,20 @@ void UPianoHandFleshInputComponent::TickComponent(float DeltaTime, ELevelTick Ti
 	}
 	PublishedKey = Key;
 	PianoHandFlesh::Publish(Key, MoveTemp(Positions), Blend);
+
+	// Cost of this adapter on the game thread, logged every 300 ticks next to the frame time (so FPS is visible too).
+	TimingTicks++;
+	TimingReadSeconds += ReadSeconds;
+	TimingTotalSeconds += FPlatformTime::Seconds() - TickStart;
+	TimingFrameSeconds += DeltaTime;
+	if (TimingTicks >= 300)
+	{
+		UE_LOG(LogPianoHand, Display, TEXT("[FleshInput] game thread, avg over %d ticks: read Flesh %.2f ms | whole tick %.2f ms | frame %.1f ms (%.1f FPS)"),
+			TimingTicks, 1000.0 * TimingReadSeconds / TimingTicks, 1000.0 * TimingTotalSeconds / TimingTicks,
+			1000.0 * TimingFrameSeconds / TimingTicks, TimingFrameSeconds > 0.0 ? TimingTicks / TimingFrameSeconds : 0.0);
+		TimingTicks = 0;
+		TimingReadSeconds = TimingTotalSeconds = TimingFrameSeconds = 0.0;
+	}
 }
 
 void UPianoHandFleshInputComponent::LogDiagnostics(const TArray<FVector3f>& FleshPositions) const

@@ -16,6 +16,7 @@
 class FSkeletalMeshObject;
 class USkeletalMeshComponent;
 class UPrimitiveComponent;
+struct FPianoHandFleshFastPath;
 
 namespace PianoHandFlesh
 {
@@ -61,6 +62,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Flesh")
 	TObjectPtr<AActor> SkinnedActor;
 
+	/** Evaluate the Flesh bindings here with a cached evaluator and all cores (Flesh's own call rebuilds them every frame, ~46 ms). Off = use Flesh's call. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Flesh")
+	bool bFastRead = true;
+
 	/** Test only: moves the Flesh result by this many cm along +Z of the skinned component. Use 5 to see at once whether the blend works, then 0. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Flesh")
 	float DebugLiftCm = 0.0f;
@@ -84,4 +89,9 @@ private:
 	bool bDiagnosticsLogged = false;
 	bool bWarnedMissing = false;
 	bool bWarnedCount = false;
+	TSharedPtr<FPianoHandFleshFastPath> FastPath;
+	int32 TimingTicks = 0;
+	double TimingReadSeconds = 0.0;
+	double TimingTotalSeconds = 0.0;
+	double TimingFrameSeconds = 0.0;
 };

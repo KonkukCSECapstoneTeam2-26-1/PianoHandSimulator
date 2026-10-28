@@ -25,7 +25,12 @@ public class pianohand_simulator : ModuleRules
 			"Renderer",
 			"Projects",
 			// 04_Flesh adapter: IDataflowGeometryCachable (Flesh surface positions for a render mesh)
-			"DataflowSimulation"
+			"DataflowSimulation",
+			// 04_Flesh adapter: evaluate the Flesh surface bindings ourselves (cached evaluator, parallel)
+			"ChaosFleshEngine",
+			"ChaosFlesh",
+			"Chaos",
+			"ChaosCore"
 		});
 	}
 }
