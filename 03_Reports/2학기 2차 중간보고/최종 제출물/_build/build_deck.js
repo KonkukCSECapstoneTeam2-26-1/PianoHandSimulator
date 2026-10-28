@@ -122,6 +122,16 @@ function stat(s, o) {
     fontSize: o.ls || 11.5, color: MUTED, align: "left", valign: "top", lineSpacingMultiple: 1.2 });
 }
 
+// 납작한 수치 카드 — 값과 라벨을 가로로 둔다
+function statRow(s, o) {
+  card(s, { x: o.x, y: o.y, w: o.w, h: o.h, fill: CARD, line: o.line || LINE });
+  txt(s, [{ text: o.value, options: { fontSize: o.vs || 26, bold: true, color: o.color || WHITE } },
+          { text: o.unit ? " " + o.unit : "", options: { fontSize: 12, bold: true, color: o.color || MUTED } }],
+      { x: o.x + 0.24, y: o.y + 0.08, w: o.vw || 1.6, h: o.h - 0.16, align: "left", valign: "middle" });
+  txt(s, o.label, { x: o.x + 0.26 + (o.vw || 1.6), y: o.y + 0.08, w: o.w - 0.5 - (o.vw || 1.6), h: o.h - 0.16,
+    fontSize: 11, color: MUTED, align: "left", valign: "middle", lineSpacingMultiple: 1.2 });
+}
+
 function bullets(s, items, o) {
   const runs = items.map((it, i) => {
     const t = typeof it === "string" ? it : it.text;
@@ -358,41 +368,17 @@ divider("01", "운지법 결정 엔진",
   const s = newContent("01 운지법 · 핵심", "제약을 화음 단위로 걸고 있었다", SEC.fing);
   lead(s, "손이 닿는 범위, 한 손가락은 한 건반, 손가락 순서 — 이 제약들은 모두 \"시간상의 한 순간\"에 성립해야 한다.");
 
-  const lw = 5.9;
-  card(s, { x: M, y: BODY_Y + 0.44, w: lw, h: 2.5, line: H.RED });
-  chip(s, M + 0.28, BODY_Y + 0.68, "1학기 방식", H.RED, 1.2);
-  txt(s, "화음 단위로 검사", { x: M + 0.28, y: BODY_Y + 1.04, w: lw - 0.56, h: 0.38,
-    fontSize: 18, bold: true, color: WHITE, valign: "middle" });
-  bullets(s, [
-    "화음은 시간을 분할하지 않는다",
-    "지속음이 다음 화음까지 걸쳐 있어도 보이지 않는다",
-    "서로 다른 화음이 같은 순간에 겹쳐도 각각 따로 검사된다",
-  ], { x: M + 0.3, y: BODY_Y + 1.52, w: lw - 0.6, h: 1.3, fontSize: 12 });
+  s.addImage({ path: CROP + "/diag_constraint_unit.png", x: 0.95, y: 1.94, w: 11.44, h: 3.74,
+    objectName: "diag_constraint" });
 
-  card(s, { x: M + lw + 0.3, y: BODY_Y + 0.44, w: W - lw - 0.3, h: 2.5, line: H.GREEN });
-  chip(s, M + lw + 0.58, BODY_Y + 0.68, "2학기 방식", H.GREEN, 1.2);
-  txt(s, "시간 구간 겹침 기준", { x: M + lw + 0.58, y: BODY_Y + 1.04, w: W - lw - 0.86, h: 0.38,
-    fontSize: 18, bold: true, color: WHITE, valign: "middle" });
-  bullets(s, [
-    "음표마다 점유 시작·끝 시각을 가진다",
-    "어느 순간에 동시에 눌린 건반 집합을 만든다",
-    "그 집합에 대해서만 제약을 검사한다",
-  ], { x: M + lw + 0.6, y: BODY_Y + 1.52, w: W - lw - 0.9, h: 1.3, fontSize: 12 });
-
-  const sy = BODY_Y + 3.24;
-  txt(s, "같은 데이터를 두 방식으로 재니", { x: M, y: sy, w: 5.0, h: 0.32, fontSize: 12.5,
-    bold: true, color: GOLD, valign: "middle" });
-  txt(s, "검사 단위를 바꾸기 전까지는 이 2,552건이 아예 보이지 않았다.",
-    { x: M + 5.2, y: sy, w: W - 5.2, h: 0.32, fontSize: 12, color: MUTED,
-      align: "right", valign: "middle" });
-  const tw = (W - 0.38 * 2) / 3;
+  const tw = (W - 0.3 * 2) / 3;
   [
-    { v: "3", u: "건", l: "화음 단위로 셌을 때의 위반", c: "FFFFFF", ln: H.LINE },
-    { v: "2,552", u: "건", l: "순간 단위로 셌을 때의 위반", c: H.RED, ln: H.RED, vs: 32 },
-    { v: "0", u: "건", l: "재정의 후 현재 (21곡 전체)", c: H.GREEN, ln: H.GREEN },
+    { v: "3", u: "건", l: "화음 단위로 셌을 때의\n실제 데이터 위반", c: "FFFFFF", ln: H.LINE, vw: 1.5 },
+    { v: "2,552", u: "건", l: "순간 단위로 셌을 때의\n같은 데이터 위반", c: H.RED, ln: H.RED, vs: 24, vw: 1.7 },
+    { v: "0", u: "건", l: "재정의 후 현재\n21곡 전체", c: H.GREEN, ln: H.GREEN, vw: 1.5 },
   ].forEach((d, i) => {
-    stat(s, { x: M + i * (tw + 0.38), y: sy + 0.42, w: tw, h: 1.52, value: d.v, unit: d.u,
-      color: d.c, label: d.l, vs: d.vs, line: d.ln });
+    statRow(s, { x: M + i * (tw + 0.3), y: 5.82, w: tw, h: 1.02, value: d.v, unit: d.u,
+      color: d.c, label: d.l, vs: d.vs, vw: d.vw, line: d.ln });
   });
 
   s.addNotes("여기가 2학기 운지법 작업의 중심입니다.\n손이 닿는 범위나 손가락 충돌 같은 제약은 '어느 순간'에 성립해야 하는 조건인데, 엔진은 화음이라는 묶음 단위로 검사하고 있었습니다.\n화음은 시간을 나누지 않습니다. 앞 화음의 지속음이 다음 화음까지 걸쳐 있으면 그 겹침이 보이지 않습니다.\n검사 단위를 바꾸자 3건이던 위반이 2,552건으로 드러났습니다. 없던 문제가 생긴 게 아니라, 원래 있었는데 못 보던 것입니다. 지금은 0건입니다.");
@@ -946,68 +932,39 @@ divider("05", "통합과 마무리",
   const s = newContent("05 통합 · 핵심", "계산해서 넘겼는데, 받는 쪽에서 쓰지 않고 있었다", SEC.wrap);
   lead(s, "모듈을 각자 돌릴 때는 드러나지 않고, 붙여서 데이터를 끝까지 따라가 봐야 보이는 종류의 문제다.");
 
-  const fy = BODY_Y + 0.42, fh = 1.52, fw = 3.5;
-  card(s, { x: M, y: fy, w: fw, h: fh, line: H.GOLD });
-  txt(s, "운지법 엔진 출력", { x: M + 0.26, y: fy + 0.18, w: fw - 0.52, h: 0.3, fontSize: 12,
-    bold: true, color: GOLD, valign: "middle" });
-  txt(s, "wrist_yaw_deg\nwrist_roll_deg", { x: M + 0.26, y: fy + 0.54, w: fw - 0.52, h: 0.6,
-    fontSize: 14, bold: true, color: WHITE, fontFace: "Consolas", valign: "top", lineSpacingMultiple: 1.3 });
-  txt(s, "음표마다 함께 내보낸다", { x: M + 0.26, y: fy + 1.16, w: fw - 0.52, h: 0.26,
-    fontSize: 10.5, color: MUTED, valign: "middle" });
+  const dgw = 6.85, dgh = 3.07, dgy = BODY_Y + 0.3;
+  s.addImage({ path: CROP + "/diag_wrist_roll.png", x: M, y: dgy, w: dgw, h: dgh,
+    objectName: "diag_wrist" });
 
-  s.addShape(pres.ShapeType.rightArrow, { x: M + fw + 0.22, y: fy + fh / 2 - 0.12,
-    w: 0.5, h: 0.24, fill: { color: H.GOLD }, line: { type: "none" }, objectName: "wf1" });
+  const rx2 = M + dgw + 0.3;
+  card(s, { x: rx2, y: dgy, w: W - dgw - 0.3, h: dgh, fill: CARD, line: H.GOLD });
+  txt(s, "무슨 값인가", { x: rx2 + 0.3, y: dgy + 0.22, w: W - dgw - 0.9, h: 0.3,
+    fontSize: 12, bold: true, color: GOLD, charSpacing: 1.2, valign: "middle" });
+  bullets(s, [
+    { text: "엄지가 흑건을 누르면 +12°, 소지가 흑건을 누르면 −12° 가 손 전체에 붙는다 (왼손은 부호 반대)", fontSize: 11.5 },
+    { text: "엄지가 흑건을 누르는 1,758음 중 1,507음에 롤 값이 들어 있다", color: "FFFFFF", bold: true, fontSize: 11.5 },
+    { text: "IK 가 변환한 드뷔시 '달빛' 한 곡만 보면 154음 중 143음", fontSize: 11.5 },
+    { text: "IK 인계 규격서에 \"손목 회전은 IK 쪽 향후 과제\" 로 적혀 있다 — 알려진 공백이고, 아직 닫히지 않았다", color: H.GOLD, fontSize: 11.5 },
+  ], { x: rx2 + 0.32, y: dgy + 0.64, w: W - dgw - 0.94, h: 2.5, gap: 9, lsm: 1.3 });
 
-  card(s, { x: M + fw + 0.94, y: fy, w: fw, h: fh, line: H.RED });
-  txt(s, "IK 가 쓰는 wrist.csv", { x: M + fw + 1.2, y: fy + 0.18, w: fw - 0.52, h: 0.3,
-    fontSize: 12, bold: true, color: H.RED, valign: "middle" });
-  txt(s, "yaw = 0\npitch = 0    roll = 0", { x: M + fw + 1.2, y: fy + 0.54, w: fw - 0.52, h: 0.6,
-    fontSize: 14, bold: true, color: H.RED, fontFace: "Consolas", valign: "top", lineSpacingMultiple: 1.3 });
-  txt(s, "전부 0 으로 기록되어 있다", { x: M + fw + 1.2, y: fy + 1.16, w: fw - 0.52, h: 0.26,
-    fontSize: 10.5, color: MUTED, valign: "middle" });
-
-  const mx = M + (fw + 0.94) * 2 - 0.22;
-  card(s, { x: mx, y: fy, w: W - (mx - M), h: fh, fill: CARD, line: LINE });
+  const cy2 = dgy + dgh + 0.24;
+  card(s, { x: M, y: cy2, w: W, h: 1.14, fill: CARD, line: H.GOLD });
   txt(s, [
-    { text: "154", options: { fontSize: 24, bold: true, color: "FFFFFF" } },
-    { text: " 개 중 ", options: { fontSize: 13, color: H.MUTED } },
-    { text: "143", options: { fontSize: 24, bold: true, color: H.GOLD } },
-    { text: " 개", options: { fontSize: 13, color: H.MUTED, breakLine: true } },
-    { text: "엄지로 검은 건반을 누르는 음 가운데\n±12° 의 롤 값이 들어 있는 음의 수",
-      options: { fontSize: 10.5, color: H.MUTED } },
-  ], { x: mx + 0.28, y: fy + 0.24, w: W - (mx - M) - 0.56, h: 1.1, isTextBox: true, margin: 0,
-    valign: "top", lineSpacingMultiple: 1.35 });
-
-  card(s, { x: M, y: fy + fh + 0.32, w: W, h: 1.16, fill: CARD, line: H.GOLD });
-  txt(s, [
-    { text: "엄지로 검은 건반을 누르려면 손목을 비틀어야 한다. ", options: { fontSize: 14, color: "FFFFFF" } },
-    { text: "엔진은 그 각도를 계산해서 넘겼지만, IK는 읽지 않고 0으로 두고 있었다.",
+    { text: "엄지로 흑건을 누르려면 손목을 비틀어야 한다. ", options: { fontSize: 14, color: "FFFFFF" } },
+    { text: "엔진은 그 각도를 넘겼지만, IK 는 손목 회전을 다루지 않는다.",
       options: { fontSize: 14, bold: true, color: H.GOLD, breakLine: true } },
     { text: "IK 영상에서 보이는 \"손목이 돌아간\" 자세의 유력한 원인이며, 운지법 쪽 결함이 아니다.",
       options: { fontSize: 12, color: H.MUTED } },
-  ], { x: M + 0.34, y: fy + fh + 0.5, w: W - 0.68, h: 0.8, isTextBox: true, margin: 0,
+  ], { x: M + 0.34, y: cy2 + 0.16, w: W - 0.68, h: 0.82, isTextBox: true, margin: 0,
     valign: "middle", lineSpacingMultiple: 1.45 });
 
-  const ty2 = fy + fh + 1.74;
-  txt(s, "여기서 얻은 것", { x: M, y: ty2, w: 4.0, h: 0.3, fontSize: 12, bold: true, color: GOLD,
-    charSpacing: 1.5, valign: "middle" });
-  const lessons = [
-    ["인터페이스는 형식이 아니라 소비까지 확인해야 한다",
-     "필드를 정의하고 파일을 주고받는 것만으로는 부족하다.\n받는 쪽이 실제로 그 값을 쓰는지 확인해야 한다."],
-    ["증상과 원인을 모듈 경계 너머로 연결해야 한다",
-     "손 모양이 이상하다는 증상은 스키닝에서 보이지만,\n원인은 두 모듈 앞에 있었다."],
-  ];
-  const lw4 = (W - 0.34) / 2;
-  lessons.forEach((l, i) => {
-    const x = M + i * (lw4 + 0.34);
-    card(s, { x, y: ty2 + 0.36, w: lw4, h: 1.12, line: LINE });
-    txt(s, l[0], { x: x + 0.3, y: ty2 + 0.52, w: lw4 - 0.6, h: 0.3, fontSize: 12.5, bold: true,
-      color: WHITE, valign: "middle" });
-    txt(s, l[1], { x: x + 0.3, y: ty2 + 0.84, w: lw4 - 0.6, h: 0.56, fontSize: 10.5,
-      color: MUTED, valign: "top", lineSpacingMultiple: 1.3 });
-  });
+  txt(s, [
+    { text: "여기서 얻은 것 — ", options: { fontSize: 12.5, bold: true, color: GOLD } },
+    { text: "인터페이스는 필드를 정의하고 파일을 주고받는 것으로 끝나지 않는다. 받는 쪽이 그 값을 실제로 다루는지까지 확인해야 한다.",
+      options: { fontSize: 12.5, color: "FFFFFF" } },
+  ], { x: M, y: cy2 + 1.26, w: W, h: 0.32, isTextBox: true, margin: 0, valign: "middle" });
 
-  s.addNotes("2차에서 가장 말씀드리고 싶은 내용입니다.\n운지법 엔진은 음마다 손목 yaw와 roll을 함께 내보냅니다. 엄지로 검은 건반을 누르려면 손목을 비틀어야 하니까요. 실제로 그런 음 154개 중 143개에 ±12도의 롤 값이 들어 있습니다.\n그런데 IK가 쓰는 wrist.csv를 열어 보니 yaw, pitch, roll이 전부 0이었습니다. 계산해서 넘겼는데 받는 쪽에서 안 쓰고 있었던 겁니다.\n아까 IK 영상에서 손목이 돌아가 보였던 것의 유력한 원인입니다.\n인터페이스를 정의하고 파일을 주고받는 것만으로는 부족하고, 받는 쪽이 그 값을 실제로 쓰는지까지 확인해야 한다는 걸 배웠습니다.");
+  s.addNotes("2차에서 가장 말씀드리고 싶은 내용입니다.\n왼쪽이 운지법 엔진이 내보낸 손목 롤 값 분포입니다. 21곡 21,912음 중 5,415음에 ±12도가 들어 있습니다. 엄지나 소지가 검은 건반을 누르면 손목을 비틀어야 하기 때문입니다.\n오른쪽이 IK가 기록한 wrist.csv입니다. 전부 0입니다.\nIK는 손목을 위치만 보간하고 회전은 다루지 않습니다. 인계 규격서에도 '손목 회전은 IK 쪽 향후 과제'로 적혀 있습니다. 즉 모르고 있던 게 아니라, 알고 미뤄 둔 공백인데 아직 닫히지 않은 겁니다.\n아까 IK 영상에서 손목이 돌아가 보였던 것의 유력한 원인입니다. 운지법 쪽 결함은 아닙니다.\n인터페이스를 정의하고 파일을 주고받는 것만으로는 부족하고, 받는 쪽이 그 값을 실제로 다루는지까지 확인해야 한다는 걸 배웠습니다.");
 }
 
 {
