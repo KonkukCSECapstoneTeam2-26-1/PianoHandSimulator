@@ -61,6 +61,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Flesh")
 	TObjectPtr<AActor> SkinnedActor;
 
+	/** Test only: moves the Flesh result by this many cm along +Z of the skinned component. Use 5 to see at once whether the blend works, then 0. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Flesh")
+	float DebugLiftCm = 0.0f;
+
 	/** Log vertex count, space and rest-pose deviation once, when the first frame arrives. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Flesh")
 	bool bLogDiagnostics = true;

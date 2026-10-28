@@ -18,6 +18,7 @@
 #include "DataDrivenShaderPlatformInfo.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
+#include <atomic>
 
 // ---------------------------------------------------------------------------
 // Compute shader: Position = lerp(Position, Flesh, Blend), in place
@@ -105,7 +106,20 @@ namespace PianoHandFlesh
 				Frame = *Found;
 			}
 		}
-		if (!Frame.IsValid() || Frame->Blend <= 0.0f || (uint32)Frame->Positions.Num() != NumLodVertices)
+
+		// Render-thread status, logged every 300 calls: shows whether the pass really runs and why it is skipped.
+		static std::atomic<uint32> CallCount{0}, RunCount{0}, NoFrameCount{0}, ZeroBlendCount{0}, MismatchCount{0};
+		const uint32 Call = ++CallCount;
+		const bool bNoFrame = !Frame.IsValid();
+		const bool bZeroBlend = !bNoFrame && Frame->Blend <= 0.0f;
+		const bool bMismatch = !bNoFrame && (uint32)Frame->Positions.Num() != NumLodVertices;
+		if (bNoFrame) { ++NoFrameCount; } else if (bZeroBlend) { ++ZeroBlendCount; } else if (bMismatch) { ++MismatchCount; } else { ++RunCount; }
+		if (Call % 300 == 1)
+		{
+			UE_LOG(LogPianoHand, Display, TEXT("[FleshInput] render pass: %u calls | ran %u | no data %u | blend 0 %u | count mismatch %u (frame %d vs LOD %u)"),
+				Call, RunCount.load(), NoFrameCount.load(), ZeroBlendCount.load(), MismatchCount.load(), Frame.IsValid() ? Frame->Positions.Num() : -1, NumLodVertices);
+		}
+		if (bNoFrame || bZeroBlend || bMismatch)
 		{
 			return false;
 		}
@@ -273,6 +287,15 @@ void UPianoHandFleshInputComponent::TickComponent(float DeltaTime, ELevelTick Ti
 		for (FVector3f& P : Positions)
 		{
 			P = FVector3f(FleshToSkinned.TransformPosition(FVector(P)));
+		}
+	}
+
+	// Visibility test: shift the Flesh result up (skinned component +Z) so Blend > 0 is obvious on screen.
+	if (!FMath::IsNearlyZero(DebugLiftCm))
+	{
+		for (FVector3f& P : Positions)
+		{
+			P.Z += DebugLiftCm;
 		}
 	}
 

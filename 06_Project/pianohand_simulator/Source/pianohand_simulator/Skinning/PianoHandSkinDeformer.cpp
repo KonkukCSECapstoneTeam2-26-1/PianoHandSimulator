@@ -21,6 +21,7 @@
 #include "Engine/SkinnedAsset.h"
 #include "Rendering/PositionVertexBuffer.h"
 #include "Rendering/SkinWeightVertexBuffer.h"
+#include "../Flesh/PianoHandFleshInput.h"  // 04_Flesh adapter (kyungmin)
 
 namespace PianoHandImplicit
 {
@@ -428,6 +429,7 @@ namespace PianoHandSkinDeformer
 		};
 
 		AddSkinPasses(TEXT("SkinDeformer"), AllBones, AllBoneNormals, PositionUAV, TangentUAV);
+		PianoHandFlesh::AddFleshBlendPass(GraphBuilder, MeshObject, PositionBuffer, Lod.GetNumVertices()); // 04_Flesh: Flesh 위치를 스키닝 직후에 섞음(데이터 없으면 아무 일도 안 함)
 
 		// -------------------------------------------------------------------
 		// Phase 8: implicit skinning. The LBS / DQS pose above is the initial solution; every vertex
