@@ -17,6 +17,7 @@ class FSkeletalMeshObject;
 class USkeletalMeshComponent;
 class UPrimitiveComponent;
 struct FPianoHandFleshFastPath;
+struct FPianoHandTipProbe;
 
 namespace PianoHandFlesh
 {
@@ -74,6 +75,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Flesh")
 	bool bLogDiagnostics = true;
 
+	/** Editor only. Measure the Flesh-vs-skeletal-mesh distance at the five fingertips (cm) and log min/mean/max every TipLogInterval ticks as [FleshTip]. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Flesh")
+	bool bLogTipError = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Flesh", meta = (ClampMin = "1"))
+	int32 TipLogInterval = 60;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -82,6 +90,7 @@ protected:
 private:
 	bool FindComponents();
 	void LogDiagnostics(const TArray<FVector3f>& FleshPositions) const;
+	void MeasureTipError(const TArray<FVector3f>& FleshPositionsInSkinnedSpace, float DeltaTime);
 
 	TWeakObjectPtr<USkeletalMeshComponent> Skinned;
 	TWeakObjectPtr<UPrimitiveComponent> Flesh;
@@ -90,6 +99,7 @@ private:
 	bool bWarnedMissing = false;
 	bool bWarnedCount = false;
 	TSharedPtr<FPianoHandFleshFastPath> FastPath;
+	TSharedPtr<FPianoHandTipProbe> TipProbe;
 	int32 TimingTicks = 0;
 	double TimingReadSeconds = 0.0;
 	double TimingTotalSeconds = 0.0;

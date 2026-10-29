@@ -157,6 +157,7 @@ struct FPianoHandFleshFastPath
 	TUniquePtr<GeometryCollection::Facades::FTetrahedralBindings> Bindings;
 	TUniquePtr<GeometryCollection::Facades::FTetrahedralBindings::Evaluator> Evaluator;
 	TArray<Chaos::TVector<Chaos::FRealSingle, 3>> Current;
+	int32 NumTetVertices = 0; // the simulated positions must have exactly this many entries before the bindings are evaluated
 	bool bBuilt = false;
 	bool bFailed = false;
 };
@@ -179,6 +180,7 @@ namespace
 		{
 			return false;
 		}
+		Path.NumTetVertices = RestVertices->Num();
 		Path.Evaluator = Path.Bindings->InitEvaluator(RestVertices);
 		return Path.Evaluator.IsValid() && Path.Evaluator->IsValid();
 	}
@@ -190,6 +192,12 @@ namespace
 		if (Simulated == nullptr || !Path.Evaluator.IsValid())
 		{
 			return false;
+		}
+		if (Simulated->Num() != Path.NumTetVertices)
+		{
+			// The solver has not filled the positions yet (first frames after Play): nothing to read, and indexing would run off the array.
+			OutPositions.Reset();
+			return true;
 		}
 		Path.Current.SetNumUninitialized(Simulated->Num());
 		for (int32 Index = 0; Index < Path.Current.Num(); ++Index)
@@ -212,6 +220,34 @@ namespace
 		return true;
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Fingertip error probe (editor only): Flesh surface vs the skeletal mesh's own linear-blend skin
+// ---------------------------------------------------------------------------
+
+struct FPianoHandTipProbe
+{
+	using FInfluences = TArray<TPair<int32, float>, TInlineAllocator<4>>;
+	struct FFinger
+	{
+		const TCHAR* Name = TEXT("");
+		int32 TipBone = INDEX_NONE;
+		TArray<int32> Verts;      // render vertices whose strongest bone is <finger>_03
+		TArray<FVector3f> Rest;   // their rest positions
+		TArray<FInfluences> Infl; // their skin weights
+		int32 TipIdx = INDEX_NONE; // index into Verts of the vertex farthest from the _03 bone origin
+		FVector PrevSkinTip = FVector::ZeroVector;
+		bool bHasPrev = false;
+		double SumTip = 0.0, MaxTip = 0.0, MinTip = 1e30, SumGroup = 0.0, SumAlong = 0.0, SumSpeed = 0.0;
+		int32 Samples = 0;
+		double MaxSpeed = 0.0, SpeedAtMaxTip = 0.0;               // peak tip speed; tip speed on the tick with the largest error
+		double MoveSumTip = 0.0, MoveSumAlong = 0.0; int32 MoveSamples = 0; // only ticks with speed >= MoveSpeedCmPerSec
+	};
+	static constexpr double MoveSpeedCmPerSec = 10.0;
+	FFinger Fingers[5];
+	bool bBuilt = false;
+	int32 Ticks = 0;
+};
 
 // ---------------------------------------------------------------------------
 // Component
@@ -385,6 +421,11 @@ void UPianoHandFleshInputComponent::TickComponent(float DeltaTime, ELevelTick Ti
 		}
 	}
 
+	if (bLogTipError)
+	{
+		MeasureTipError(Positions, DeltaTime);
+	}
+
 	// Visibility test: shift the Flesh result up (skinned component +Z) so Blend > 0 is obvious on screen.
 	if (!FMath::IsNearlyZero(DebugLiftCm))
 	{
@@ -456,6 +497,176 @@ void UPianoHandFleshInputComponent::LogDiagnostics(const TArray<FVector3f>& Fles
 	{
 		UE_LOG(LogPianoHand, Display, TEXT("[FleshInput] deviation from rest over %d verts: as-is mean %.3f max %.3f | converted mean %.3f max %.3f (cm)"),
 			Count, SumRaw / Count, MaxRaw, SumConv / Count, MaxConv);
+	}
+#endif
+}
+
+void UPianoHandFleshInputComponent::MeasureTipError(const TArray<FVector3f>& FleshPositions, float DeltaTime)
+{
+#if WITH_EDITOR
+	USkeletalMeshComponent* SkinnedComponent = Skinned.Get();
+	const USkeletalMesh* Mesh = SkinnedComponent ? SkinnedComponent->GetSkeletalMeshAsset() : nullptr;
+	const FSkeletalMeshModel* Model = Mesh ? Mesh->GetImportedModel() : nullptr;
+	if (Model == nullptr || !Model->LODModels.IsValidIndex(0) || DeltaTime <= 0.0f)
+	{
+		return;
+	}
+	const TArray<FTransform>& CompSpace = SkinnedComponent->GetComponentSpaceTransforms();
+	const TArray<FMatrix44f>& RefInv = Mesh->GetRefBasesInvMatrix();
+	if (CompSpace.Num() == 0 || CompSpace.Num() != RefInv.Num())
+	{
+		return;
+	}
+
+	if (!TipProbe.IsValid())
+	{
+		TipProbe = MakeShared<FPianoHandTipProbe>();
+	}
+	FPianoHandTipProbe& Probe = *TipProbe;
+
+	if (!Probe.bBuilt)
+	{
+		Probe.bBuilt = true;
+		static const TCHAR* FingerNames[5] = { TEXT("thumb"), TEXT("index"), TEXT("middle"), TEXT("ring"), TEXT("pinky") };
+		for (int32 F = 0; F < 5; ++F)
+		{
+			Probe.Fingers[F].Name = FingerNames[F];
+			Probe.Fingers[F].TipBone = Mesh->GetRefSkeleton().FindBoneIndex(FName(*FString::Printf(TEXT("%s_03_r"), FingerNames[F])));
+		}
+
+		// Group render vertices by the fingertip bone that influences them most.
+		int32 Count = 0;
+		for (const FSkelMeshSection& Section : Model->LODModels[0].Sections)
+		{
+			for (const FSoftSkinVertex& V : Section.SoftVertices)
+			{
+				int32 BestBone = INDEX_NONE;
+				uint16 BestWeight = 0;
+				for (int32 I = 0; I < MAX_TOTAL_INFLUENCES; ++I)
+				{
+					if (V.InfluenceWeights[I] > BestWeight && Section.BoneMap.IsValidIndex(V.InfluenceBones[I]))
+					{
+						BestWeight = V.InfluenceWeights[I];
+						BestBone = Section.BoneMap[V.InfluenceBones[I]];
+					}
+				}
+				for (FPianoHandTipProbe::FFinger& Finger : Probe.Fingers)
+				{
+					if (BestBone != INDEX_NONE && BestBone == Finger.TipBone)
+					{
+						Finger.Verts.Add(Count);
+						Finger.Rest.Add(V.Position);
+						FPianoHandTipProbe::FInfluences List;
+						for (int32 I = 0; I < MAX_TOTAL_INFLUENCES; ++I)
+						{
+							if (V.InfluenceWeights[I] > 0 && Section.BoneMap.IsValidIndex(V.InfluenceBones[I]))
+							{
+								List.Emplace(Section.BoneMap[V.InfluenceBones[I]], V.InfluenceWeights[I] / 65535.0f);
+							}
+						}
+						Finger.Infl.Add(MoveTemp(List));
+						break;
+					}
+				}
+				++Count;
+			}
+		}
+		for (FPianoHandTipProbe::FFinger& Finger : Probe.Fingers)
+		{
+			if (Finger.TipBone == INDEX_NONE || Finger.Verts.IsEmpty()) { continue; }
+			const FVector Origin = FVector(RefInv[Finger.TipBone].Inverse().GetOrigin());
+			double Far = -1.0;
+			for (int32 I = 0; I < Finger.Verts.Num(); ++I)
+			{
+				const double D = FVector::DistSquared(FVector(Finger.Rest[I]), Origin);
+				if (D > Far) { Far = D; Finger.TipIdx = I; }
+			}
+		}
+		UE_LOG(LogPianoHand, Display, TEXT("[FleshTip] probe ready. Vertices per fingertip bone: thumb %d index %d middle %d ring %d pinky %d. Distance = Flesh surface to the skeletal mesh's linear-blend skin (cm); 'along' = part of the offset along the tip's motion (negative = Flesh behind)."),
+			Probe.Fingers[0].Verts.Num(), Probe.Fingers[1].Verts.Num(), Probe.Fingers[2].Verts.Num(), Probe.Fingers[3].Verts.Num(), Probe.Fingers[4].Verts.Num());
+	}
+
+	// skin matrix per bone: ref pose -> current component space
+	TArray<FMatrix44f> SkinMatrices;
+	SkinMatrices.SetNumUninitialized(CompSpace.Num());
+	for (int32 B = 0; B < CompSpace.Num(); ++B)
+	{
+		SkinMatrices[B] = RefInv[B] * FMatrix44f(CompSpace[B].ToMatrixWithScale());
+	}
+
+	for (FPianoHandTipProbe::FFinger& Finger : Probe.Fingers)
+	{
+		if (Finger.TipIdx == INDEX_NONE) { continue; }
+
+		double GroupSum = 0.0;
+		for (int32 I = 0; I < Finger.Verts.Num(); ++I)
+		{
+			FVector Skin = FVector::ZeroVector;
+			for (const TPair<int32, float>& Influence : Finger.Infl[I])
+			{
+				Skin += FVector(SkinMatrices[Influence.Key].TransformPosition(Finger.Rest[I]) * Influence.Value);
+			}
+			GroupSum += FVector::Dist(Skin, FVector(FleshPositions[Finger.Verts[I]]));
+		}
+		Finger.SumGroup += GroupSum / Finger.Verts.Num();
+
+		FVector SkinTip = FVector::ZeroVector;
+		for (const TPair<int32, float>& Influence : Finger.Infl[Finger.TipIdx])
+		{
+			SkinTip += FVector(SkinMatrices[Influence.Key].TransformPosition(Finger.Rest[Finger.TipIdx]) * Influence.Value);
+		}
+		const FVector Offset = FVector(FleshPositions[Finger.Verts[Finger.TipIdx]]) - SkinTip;
+		const double Dist = Offset.Size();
+		Finger.SumTip += Dist;
+		Finger.MinTip = FMath::Min(Finger.MinTip, Dist);
+		double Speed = 0.0;
+		if (Finger.bHasPrev)
+		{
+			const FVector Velocity = (SkinTip - Finger.PrevSkinTip) / DeltaTime;
+			Speed = Velocity.Size();
+			Finger.SumSpeed += Speed;
+			Finger.MaxSpeed = FMath::Max(Finger.MaxSpeed, Speed);
+			if (Speed > 1.0) // cm/s; below this the direction is noise
+			{
+				const double Along = FVector::DotProduct(Offset, Velocity / Speed);
+				Finger.SumAlong += Along;
+				if (Speed >= FPianoHandTipProbe::MoveSpeedCmPerSec)
+				{
+					Finger.MoveSumTip += Dist;
+					Finger.MoveSumAlong += Along;
+					++Finger.MoveSamples;
+				}
+			}
+		}
+		if (Dist > Finger.MaxTip)
+		{
+			Finger.MaxTip = Dist;
+			Finger.SpeedAtMaxTip = Speed;
+		}
+		Finger.PrevSkinTip = SkinTip;
+		Finger.bHasPrev = true;
+		++Finger.Samples;
+	}
+
+	if (++Probe.Ticks >= TipLogInterval)
+	{
+		FString Line;
+		for (FPianoHandTipProbe::FFinger& Finger : Probe.Fingers)
+		{
+			if (Finger.Samples > 0)
+			{
+				Line += FString::Printf(TEXT(" | %s tip %.2f (min %.2f max %.2f @%.0fcm/s) group %.2f speed avg %.1f max %.1f | moving(%d) tip %.2f along %+.2f"), Finger.Name,
+					Finger.SumTip / Finger.Samples, Finger.MinTip, Finger.MaxTip, Finger.SpeedAtMaxTip, Finger.SumGroup / Finger.Samples,
+					Finger.SumSpeed / Finger.Samples, Finger.MaxSpeed,
+					Finger.MoveSamples, Finger.MoveSamples ? Finger.MoveSumTip / Finger.MoveSamples : 0.0, Finger.MoveSamples ? Finger.MoveSumAlong / Finger.MoveSamples : 0.0);
+			}
+			Finger.SumTip = Finger.MaxTip = Finger.SumGroup = Finger.SumAlong = Finger.SumSpeed = 0.0;
+			Finger.MaxSpeed = Finger.SpeedAtMaxTip = Finger.MoveSumTip = Finger.MoveSumAlong = 0.0;
+			Finger.MinTip = 1e30;
+			Finger.Samples = Finger.MoveSamples = 0;
+		}
+		UE_LOG(LogPianoHand, Display, TEXT("[FleshTip] avg over %d ticks, cm (tip = farthest vertex, @ = tip speed on its worst tick, group = mean of all vertices on the tip bone, speed in cm/s, moving = ticks with speed >= 10 cm/s)%s"), Probe.Ticks, *Line);
+		Probe.Ticks = 0;
 	}
 #endif
 }
