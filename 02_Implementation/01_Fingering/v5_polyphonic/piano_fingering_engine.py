@@ -575,6 +575,36 @@ def _occupies_at(note, t_ms):
     """
     return note.start_ms + note.required_hold_ms > t_ms + OCCUPANCY_TOL_MS
 
+def _state_violates(curr_f, held, curr_chord, chord_sequence):
+    """이 DP 상태가 하드 제약을 어기는가 (빔 가지치기 정렬용).
+
+    0 = 위반 없음, 1 = 위반. 비용과 달리 '정도'를 재지 않고 있고/없고만 본다.
+    불가능은 양이 아니므로 두 번 어긴 상태를 한 번 어긴 상태의 두 배로 다루지 않는다.
+
+    판정 범위는 사후 측정(`_instant_violation`)과 같게 맞춘다. 좁게 보면 '깨끗하다'고
+    판단해 남긴 상태가 실제로는 위반인 경우가 생겨, 정렬이 의도대로 동작하지 않는다.
+      - 한 손가락이 두 건반을 동시에 (현재 화음 + 아직 눌려 있는 음)
+      - 현재 화음과 점유 중인 음을 합친 집합에서 손가락 쌍의 손 범위 초과
+    순서 역전은 선호도 성격이 섞여 있어 제외한다.
+    """
+    items = [(n.pitch, f) for n, f in zip(curr_chord, curr_f)]
+    for (ci, pi, f) in held:
+        try:
+            items.append((chord_sequence[ci][pi].pitch, f))
+        except (IndexError, AttributeError):
+            continue
+    fingers = [f for _, f in items]
+    if len(fingers) != len(set(fingers)):
+        return 1
+    items.sort()
+    for a in range(len(items)):
+        for b in range(a + 1, len(items)):
+            lim = MAX_SPAN.get(tuple(sorted((items[a][1], items[b][1]))), 12)
+            if items[b][0] - items[a][0] > lim:
+                return 1
+    return 0
+
+
 def solve_fingering_chord_dp(chord_sequence, hand_id):
     if not chord_sequence: return
     chord_sequence = [_trim_chord(c, hand_id) for c in chord_sequence]
@@ -811,11 +841,21 @@ def solve_fingering_chord_dp(chord_sequence, hand_id):
                 if known is None or cost < known[0]:
                     curr_states[state] = (cost, prev_state)
 
-        # 빔 가지치기: 비용 상위 DP_BEAM_WIDTH 개만 유지해 상태 폭발을 막는다.
+        # 빔 가지치기: 상위 DP_BEAM_WIDTH 개만 유지해 상태 폭발을 막는다.
         # 점유 집합이 상태에 포함되면서 경로마다 서로 다른 상태가 생기므로,
         # 제한하지 않으면 긴 곡에서 상태 수가 급격히 늘어난다.
+        #
+        # 정렬 기준은 (하드 제약 위반 여부, 비용) 이다. 비용만으로 자르면 위반이 없는
+        # 상태가 선호도 때문에 순위에서 밀려 잘려 나가고, 한 번 잘리면 복구되지 않는다.
+        # 실측(13_Cost_Function_Design.md 5.4절): ref_04_pedal_arpeggio 에서 위반 없는
+        # 상태 455개를 버리면서 위반 있는 상태 1,247개를 남겼다. 연주 가능함이 보장된
+        # 입력에서도 일어난다.
         if len(curr_states) > DP_BEAM_WIDTH:
-            kept = sorted(curr_states.items(), key=lambda kv: kv[1][0])[:DP_BEAM_WIDTH]
+            kept = sorted(
+                curr_states.items(),
+                key=lambda kv: (_state_violates(kv[0][0], kv[0][1], curr_chord,
+                                                chord_sequence),
+                                kv[1][0]))[:DP_BEAM_WIDTH]
             curr_states = dict(kept)
 
         dp.append(curr_states)
