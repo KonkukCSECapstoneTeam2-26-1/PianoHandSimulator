@@ -966,20 +966,64 @@ def resolve_instant_conflicts(all_notes):
 
 # --- 3. Wrist Physics ---
 def calculate_wrist_rotation_rom(chord_group, hand_id):
-    if not chord_group: return 0, 0
+    """화음 하나에 대한 손목 회전 **힌트**를 낸다. (yaw, roll) 단위는 도(°).
+
+    이 값은 최종 손목 궤적이 아니다. 궤적을 정하는 것은 IK 쪽이며(설계서 C2),
+    운지법은 "이 화음을 치려면 손목이 어느 쪽으로 얼마나 비틀려야 하는가"만 알려 준다.
+    운지법만이 아는 정보 — 어느 손가락이 어느 건반을 맡는가 — 에서 나오는 값이라
+    IK 가 스스로 계산할 수 없다.
+
+    ── 부호 규약 (두 손 공통) ──────────────────────────────────────────
+      yaw  +  = 새끼손가락 쪽으로 돌림,  −  = 엄지 쪽으로 돌림
+      roll +  = 엄지 쪽을 들어 올림,     −  = 새끼 쪽을 들어 올림
+
+    오른손은 새끼가 고음 쪽, 왼손은 저음 쪽이라 pitch 기준으로는 방향이 반대다.
+    그래서 왼손에 −1 을 곱해 **해부학적 기준(새끼 쪽)으로 부호를 통일**한다.
+    IK 는 손의 좌우를 따지지 말고 이 규약 그대로 쓰면 된다.
+
+    ── roll 이 0 이 되는 경우 ──────────────────────────────────────────
+    엄지와 소지가 **둘 다** 흑건을 누르면 +12 와 −12 가 상쇄되어 0 이 된다.
+    한쪽만 기울일 이유가 없고, 이때는 손 전체가 건반 안쪽(Y+)으로 들어가는 것이
+    실제 동작이기 때문이다. 엄지가 흑건인 음 1,758개 중 251개가 이 경우라서
+    롤 값이 들어 있는 음은 1,507개다.
+    """
+    if not chord_group:
+        return 0, 0
     avg_pitch = sum(n.pitch for n in chord_group) / len(chord_group)
-    
-    # Use proper finger-to-wrist offsets
+
+    # 손가락마다 손목 중심에서 떨어진 기준 거리(반음)가 다르다. 그 기준보다
+    # 바깥에 놓인 음이 많을수록 손목을 그쪽으로 돌려야 한다.
     offsets = FINGER_WRIST_OFFSET_R if hand_id == 1 else FINGER_WRIST_OFFSET_L
     yaw_score = sum((n.pitch - avg_pitch) - offsets.get(n.finger, 0) for n in chord_group)
-    
-    yaw_deg = max(min(yaw_score * 2.5 * (-1 if hand_id == 0 else 1), WRIST_ROM["yaw_max"]), -WRIST_ROM["yaw_max"])
+
+    yaw_deg = max(min(yaw_score * 2.5 * (-1 if hand_id == 0 else 1),
+                      WRIST_ROM["yaw_max"]), -WRIST_ROM["yaw_max"])
+
     roll_deg = 0
-    thumb, pinky = next((n for n in chord_group if n.finger == 1), None), next((n for n in chord_group if n.finger == 5), None)
-    if thumb and thumb.is_black: roll_deg += 12
-    if pinky and pinky.is_black: roll_deg -= 12
-    roll_deg = max(min(roll_deg * (-1 if hand_id == 0 else 1), WRIST_ROM["roll_max"]), -WRIST_ROM["roll_max"])
+    thumb = next((n for n in chord_group if n.finger == 1), None)
+    pinky = next((n for n in chord_group if n.finger == 5), None)
+    if thumb and thumb.is_black:
+        roll_deg += 12      # 엄지가 흑건 → 엄지 쪽을 든다
+    if pinky and pinky.is_black:
+        roll_deg -= 12      # 소지가 흑건 → 소지 쪽을 든다
+    roll_deg = max(min(roll_deg * (-1 if hand_id == 0 else 1),
+                       WRIST_ROM["roll_max"]), -WRIST_ROM["roll_max"])
     return round(yaw_deg, 2), round(roll_deg, 2)
+
+
+def calculate_wrist_x_mm(chord_group):
+    """화음을 칠 때 손목이 놓일 가로 위치(mm). 원점은 A0(MIDI 21) 좌측 모서리.
+
+    기존 `wrist_pos_normalized` 는 이름과 달리 위치가 아니라 **화음 평균 pitch 를
+    0~1 로 정규화한 값**이었다. 다른 모든 좌표가 mm 인데 이 값만 단위가 달라
+    소비 측이 건반 치수를 다시 알아야 쓸 수 있었다. 같은 뜻을 mm 로 내보낸다.
+
+    산출은 `piano_keyboard` 를 거친다 (좌표의 유일한 산출 경로).
+    """
+    if not chord_group:
+        return 0.0
+    xs = [piano_keyboard.key_center_x_mm(n.pitch) for n in chord_group]
+    return round(sum(xs) / len(xs), 2)
 
 # --- 4. Main Analysis ---
 def analyze_polyphonic(file_path):
@@ -1032,10 +1076,12 @@ def analyze_polyphonic(file_path):
             if not group:
                 continue
             wrist_pos = round((sum(n.pitch for n in group)/len(group) - 21) / (108 - 21), 3)
+            wrist_x = calculate_wrist_x_mm(group)
             yaw, roll = calculate_wrist_rotation_rom(group, h)
             for n in group:
                 d = n.to_dict()
-                d.update({"wrist_pos_normalized": wrist_pos, "wrist_yaw_deg": yaw, "wrist_roll_deg": roll})
+                d.update({"wrist_pos_normalized": wrist_pos, "wrist_x_mm": wrist_x,
+                          "wrist_yaw_deg": yaw, "wrist_roll_deg": roll})
                 final_notes.append(d)
     final_notes.sort(key=lambda x: x["start_ms"])
     

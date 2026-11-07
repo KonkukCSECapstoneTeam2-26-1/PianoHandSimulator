@@ -102,15 +102,24 @@ struct FPianoNoteRow : public FTableRowBase
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Note")
 	bool IsBlack = false;
 
-	/** 손목 가로 위치 (0.0~1.0, 88키 전체 폭 기준 정규화) */
+	/** 손목 가로 위치 (0.0~1.0, 88키 전체 폭 기준 정규화).
+	 *  같은 뜻을 mm 로 낸 WristXMm 을 쓰는 편이 낫다. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wrist")
 	float WristPosNormalized = 0.f;
 
-	/** 손목 좌우 회전각 (도, ±35.0 범위) */
+	/** 손목 가로 위치 (mm). 원점은 A0(MIDI 21) 좌측 모서리.
+	 *  UE5 는 cm 이므로 소비 측에서 10 으로 나눈다. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wrist")
+	float WristXMm = 0.f;
+
+	/** 손목 좌우 회전각 (도, ±35.0 범위).
+	 *  + 는 새끼손가락 쪽, − 는 엄지 쪽. 좌우 손 공통 규약이다. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wrist")
 	float WristYawDeg = 0.f;
 
-	/** 손목 기울기 (도, ±20.0 범위) */
+	/** 손목 기울기 (도, ±20.0 범위).
+	 *  + 는 엄지 쪽을 듦, − 는 새끼 쪽을 듦. 좌우 손 공통 규약이다.
+	 *  엄지와 소지가 둘 다 흑건이면 상쇄되어 0 이 된다. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Wrist")
 	float WristRollDeg = 0.f;
 

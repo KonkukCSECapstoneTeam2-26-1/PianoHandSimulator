@@ -136,7 +136,8 @@ for (const FPianoNoteRow* Row : Rows)
 | `Pressure` | float | 0.0~1.0 | 타건 강도. 손가락 가속도 곡선 / 복귀 속도에 사용 |
 | `KeyDepth` | float | 0.0~1.0 | 건반 누름 깊이 비율. ×`MAX_KEY_TRAVEL`(10 mm)이 실제 하강량 |
 | `IsBlack` | bool | `True` / `False` | 흑건 여부 |
-| `WristPosNormalized` | float | 0.0~1.0 | 손목 가로 위치 (88키 전체 폭 기준 정규화) |
+| `WristPosNormalized` | float | 0.0~1.0 | 손목 가로 위치 (88키 전체 폭 기준 정규화). `WristXMm` 을 쓰는 편이 낫다 |
+| `WristXMm` | float | mm | 손목 가로 위치. 원점은 A0(MIDI 21) 좌측 모서리. UE5(cm)는 ÷10 |
 | `WristYawDeg` | float | **도**, ±35 | 손목 좌우 회전 가이드값 |
 | `WristRollDeg` | float | **도**, ±20 | 손목 기울기 가이드값 |
 

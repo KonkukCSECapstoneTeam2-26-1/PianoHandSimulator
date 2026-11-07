@@ -95,6 +95,9 @@ OPTIONAL_COLUMNS = [
     ("target_x_mm", "TargetXMm", "float"),
     ("target_y_mm", "TargetYMm", "float"),
     ("target_z_mm", "TargetZMm", "float"),
+    # 손목 가로 위치(mm). WristPosNormalized 와 같은 뜻을 mm 로 낸 것이다.
+    # IK 가 열 번호로 파싱하므로 기존 열 사이에 끼우지 않고 뒤에 붙인다.
+    ("wrist_x_mm",  "WristXMm",  "float"),
 ]
 
 #: 파생 열 헤더 (계산 결과를 그대로 문자열/정수로 기록)
