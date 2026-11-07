@@ -157,6 +157,12 @@ struct FPianoHandFleshFastPath
 	TUniquePtr<GeometryCollection::Facades::FTetrahedralBindings> Bindings;
 	TUniquePtr<GeometryCollection::Facades::FTetrahedralBindings::Evaluator> Evaluator;
 	TArray<Chaos::TVector<Chaos::FRealSingle, 3>> Current;
+	// Copy of the binding data. The engine's Evaluator::GetEmbeddedPosition builds a debug FString per vertex and writes it to a
+	// global (slow, and a data race when called in parallel), so the same maths is evaluated here directly.
+	TArray<FIntVector4> Parents;
+	TArray<FVector4f> Weights;
+	TArray<FVector3f> Offsets;
+	bool bSelfChecked = false;
 	int32 NumTetVertices = 0; // the simulated positions must have exactly this many entries before the bindings are evaluated
 	bool bBuilt = false;
 	bool bFailed = false;
@@ -182,7 +188,20 @@ namespace
 		}
 		Path.NumTetVertices = RestVertices->Num();
 		Path.Evaluator = Path.Bindings->InitEvaluator(RestVertices);
-		return Path.Evaluator.IsValid() && Path.Evaluator->IsValid();
+		if (!Path.Evaluator.IsValid() || !Path.Evaluator->IsValid())
+		{
+			return false;
+		}
+		const TManagedArray<FIntVector4>& ParentsSrc = Path.Bindings->GetParentsRO()->Get();
+		const TManagedArray<FVector4f>& WeightsSrc = Path.Bindings->GetWeightsRO()->Get();
+		const TManagedArray<FVector3f>& OffsetsSrc = Path.Bindings->GetOffsetsRO()->Get();
+		Path.Parents.SetNumUninitialized(ParentsSrc.Num());
+		Path.Weights.SetNumUninitialized(WeightsSrc.Num());
+		Path.Offsets.SetNumUninitialized(OffsetsSrc.Num());
+		for (int32 Index = 0; Index < ParentsSrc.Num(); ++Index) { Path.Parents[Index] = ParentsSrc[Index]; }
+		for (int32 Index = 0; Index < WeightsSrc.Num(); ++Index) { Path.Weights[Index] = WeightsSrc[Index]; }
+		for (int32 Index = 0; Index < OffsetsSrc.Num(); ++Index) { Path.Offsets[Index] = OffsetsSrc[Index]; }
+		return Path.Parents.Num() == Path.Weights.Num() && Path.Parents.Num() == Path.Offsets.Num();
 	}
 
 	bool FastRead(FPianoHandFleshFastPath& Path, const UDeformableTetrahedralComponent* Tet, TArray<FVector3f>& OutPositions)
@@ -205,18 +224,57 @@ namespace
 			Path.Current[Index] = Chaos::FVec3f((*Simulated)[Index]);
 		}
 
-		const int32 NumVertices = Path.Evaluator->NumVertices();
+		const int32 NumVertices = Path.Parents.Num();
 		OutPositions.SetNumUninitialized(NumVertices);
-		constexpr int32 BatchSize = 2048;
+		// Same maths as FleshDeformerImpl::GetEmbeddedPosition: weighted sum of the tet (or triangle) vertices, minus the offset for surface bindings.
+		const FIntVector4* Parents = Path.Parents.GetData();
+		const FVector4f* Weights = Path.Weights.GetData();
+		const FVector3f* Offsets = Path.Offsets.GetData();
+		const Chaos::TVector<Chaos::FRealSingle, 3>* Current = Path.Current.GetData();
+		FVector3f* Out = OutPositions.GetData();
+		const int32 NumTet = Path.Current.Num();
+		bool bBadIndex = false;
+		constexpr int32 BatchSize = 4096;
 		const int32 NumBatches = (NumVertices + BatchSize - 1) / BatchSize;
 		ParallelFor(NumBatches, [&](int32 Batch)
 		{
 			const int32 End = FMath::Min((Batch + 1) * BatchSize, NumVertices);
 			for (int32 Index = Batch * BatchSize; Index < End; ++Index)
 			{
-				OutPositions[Index] = Path.Evaluator->GetEmbeddedPosition(Index, Path.Current);
+				const FIntVector4& P = Parents[Index];
+				const FVector4f& W = Weights[Index];
+				const bool bSurface = P[3] == INDEX_NONE;
+				const int32 Count = bSurface ? 3 : 4;
+				FVector3f Pos = FVector3f::ZeroVector;
+				for (int32 Corner = 0; Corner < Count; ++Corner)
+				{
+					if ((uint32)P[Corner] >= (uint32)NumTet)
+					{
+						bBadIndex = true;
+						continue;
+					}
+					Pos += FVector3f(Current[P[Corner]].X, Current[P[Corner]].Y, Current[P[Corner]].Z) * W[Corner];
+				}
+				Out[Index] = bSurface ? Pos - Offsets[Index] : Pos;
 			}
 		});
+		if (bBadIndex)
+		{
+			return false;
+		}
+
+		// One-time check against the engine's own evaluator (single thread, a few vertices).
+		if (!Path.bSelfChecked)
+		{
+			Path.bSelfChecked = true;
+			float MaxDiff = 0.f;
+			const int32 Step = FMath::Max(1, NumVertices / 64);
+			for (int32 Index = 0; Index < NumVertices; Index += Step)
+			{
+				MaxDiff = FMath::Max(MaxDiff, FVector3f::Dist(OutPositions[Index], Path.Evaluator->GetEmbeddedPosition(Index, Path.Current)));
+			}
+			UE_LOG(LogPianoHand, Display, TEXT("[FleshInput] fast read self-check vs engine evaluator: max difference %.6f cm over sampled vertices"), MaxDiff);
+		}
 		return true;
 	}
 }
