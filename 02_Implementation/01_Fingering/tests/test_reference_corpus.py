@@ -132,8 +132,21 @@ def verify_playable(path):
     return instants, impossible
 
 
-def engine_violations(path):
-    """2단계 — 엔진 결과의 순간 단위 위반 수. (시점, span위반, 중복, 순서위반)"""
+def engine_violations(path, resolve=True):
+    """2단계 — 엔진 결과의 순간 단위 위반 수. (시점, span위반, 중복, 순서위반, 해소통계)
+
+    resolve=True 면 사후 해소(4단계)까지 돌린 **최종 출력**을 본다.
+    resolve=False 면 DP 직후를 본다. 둘을 나눠 보는 이유는 아래와 같다.
+
+    DP 는 점유 길이를 `required_hold_ms`(페달을 고려한 최소 의무)로 본다. 운지가
+    정해지기 전에는 `key_hold_ms` 를 알 수 없기 때문이다. 페달이 눌린 구간에서는
+    손가락에 유지 의무가 없어 required_hold 가 30 ms 까지 내려가지만, 실제 출력의
+    key_hold 는 그보다 훨씬 길 수 있다. 그래서 DP 는 보이지 않는 겹침을 남기고,
+    4단계가 점유를 단축해 해소한다. 페달이 소리를 잇고 있으므로 이 단축은 무손실이다.
+
+    따라서 DP 직후 위반만 보고 '엔진 결함'이라 판정하면 페달이 많은 입력에서 과하다.
+    판정은 최종 출력으로 하고, DP 직후 수치는 참고로 함께 출력한다.
+    """
     with contextlib.redirect_stdout(io.StringIO()):
         hand_chords = engine.split_wide_chords_between_hands(
             engine.parse_midi_to_hand_chords(path))
@@ -146,9 +159,13 @@ def engine_violations(path):
         notes = [n for h in (0, 1) for c in hand_chords[h] for n in c]
         engine.compute_required_hold(notes, spans)
         engine.apply_key_hold_and_pedal(notes, spans)
+        rs = engine.resolve_instant_conflicts(notes) if resolve else {
+            "released": 0, "released_cutting_sound": 0, "sound_cut_ms": 0.0,
+            "dropped": 0, "unresolved": 0}
 
     records = [{"hand": n.hand, "pitch": n.pitch, "finger": n.finger,
-                "start": n.start_ms, "hold": n.key_hold_ms} for n in notes]
+                "start": n.start_ms, "hold": n.key_hold_ms}
+               for n in notes if not n.dropped]
     instants = span_bad = dup_bad = mono_bad = 0
     for hand in (0, 1):
         for _t, held in held_sets(records, hand, lambda n: n["hold"]):
@@ -176,7 +193,7 @@ def engine_violations(path):
                        all(others[k] > others[k + 1] for k in range(len(others) - 1)))
             if not ordered:
                 mono_bad += 1
-    return instants, span_bad, dup_bad, mono_bad
+    return instants, span_bad, dup_bad, mono_bad, rs
 
 
 def main():
@@ -204,19 +221,30 @@ def main():
                             .format(name, impossible))
 
     print()
-    print("[2단계] 엔진 결과 순간 단위 위반 — 입력이 연주 가능하므로 목표는 0")
-    print("{:30s} {:>6s} {:>6s} {:>6s} {:>6s}  판정".format("곡", "시점", "범위", "중복", "순서"))
-    print("-" * 66)
+    print("[2단계] 최종 출력의 순간 단위 위반 — 입력이 연주 가능하므로 목표는 0")
+    print("{:30s} {:>6s} {:>6s} {:>6s} {:>6s} {:>8s} {:>6s}  판정".format(
+        "곡", "범위", "중복", "순서", "DP직후", "점유단축", "손실"))
+    print("-" * 80)
     for name in files:
-        instants, span_bad, dup_bad, mono_bad = engine_violations(os.path.join(REF_DIR, name))
+        path = os.path.join(REF_DIR, name)
+        _i, span_bad, dup_bad, mono_bad, rs = engine_violations(path)
+        _i2, s2, d2, m2, _ = engine_violations(path, resolve=False)
         total = span_bad + dup_bad + mono_bad
-        print("{:30s} {:6d} {:6d} {:6d} {:6d}  {}".format(
-            name[:29], instants, span_bad, dup_bad, mono_bad, "PASS" if total == 0 else "FAIL"))
+        # 점유 단축은 페달이 소리를 잇는 동안이면 무손실이다. 소리를 끊었거나
+        # 음표를 버렸거나 풀지 못한 시점이 있으면 손실로 본다.
+        lossy = rs["released_cutting_sound"] + rs["dropped"] + rs["unresolved"]
+        ok = total == 0 and lossy == 0
+        print("{:30s} {:6d} {:6d} {:6d} {:6d} {:8d} {:6d}  {}".format(
+            name[:29], span_bad, dup_bad, mono_bad, s2 + d2 + m2,
+            rs["released"], lossy, "PASS" if ok else "FAIL"))
         if total:
-            failures.append("{}: 엔진 위반 {}건 (연주 가능한 입력이므로 엔진 결함)"
+            failures.append("{}: 최종 출력에 위반 {}건 (연주 가능한 입력이므로 엔진 결함)"
                             .format(name, total))
+        elif lossy:
+            failures.append("{}: 위반은 해소되었으나 손실 {}건 (소리 끊김·음표 제외·미해결)"
+                            .format(name, lossy))
 
-    print("-" * 66)
+    print("-" * 80)
     print("FAIL {}건".format(len(failures)))
     for f in failures:
         print("  - " + f)

@@ -236,9 +236,118 @@ def piece_scale():
     return p
 
 
+# ── 코스트 구조 압박용 (13_Cost_Function_Design.md 5.4) ────────────────────
+# 기존 8곡은 짧고 쉬워 가산 코스트의 교환 현상을 재현하지 못한다. 아래 네 곡은
+# 곡을 길게 하고 선호도 항(흑건 엄지, 손목 이동)을 반복 누적시켜 압박한다.
+# 모두 한 손 점유 집합에 유효한 손가락 배정이 존재하도록 구성했다.
+
+def piece_long_inner_voice():
+    """ref_09 — 긴 내성 유지. 점유가 계속 겹치면서 선호도가 길게 누적된다.
+
+    ref_07 과 같은 구조이되 40마디로 늘리고, 이동음이 흑건을 자주 지나도록 했다.
+    유지음(1번 또는 5번 고정)과 이동음 사이 간격은 항상 MAX_SPAN 안이다.
+      오른손: C5(72) 유지 + 그 아래 E4~A4(64~69) 이동  → 최대 8반음, (1,5)=17 이내
+      왼손  : C3(48) 유지 + 그 위 G3~C4(55~60) 이동     → 최대 12반음, (1,5)=17 이내
+    """
+    p = Piece("ref_09_long_inner_voice",
+              "긴 내성 유지 (40마디) — 점유 누적과 선호도 누적을 동시에")
+    move_r = [64, 66, 67, 69, 67, 66, 64, 65]    # 흑건 66 포함
+    move_l = [55, 57, 58, 60, 58, 57, 55, 56]    # 흑건 58, 56 포함
+    t = 0.0
+    for bar in range(40):
+        p.add("R", t, 1.9, 72)
+        p.add("L", t, 1.9, 48)
+        for k in range(4):
+            p.add("R", t + k * 0.5, 0.45, move_r[(bar * 4 + k) % len(move_r)])
+            p.add("L", t + k * 0.5, 0.45, move_l[(bar * 4 + k) % len(move_l)])
+        t += 2.0
+    return p
+
+
+def piece_black_thumb_trap():
+    """ref_10 — 흑건 엄지 비용(+25)이 반복 누적되는 배치.
+
+    각 마디는 흑건 하나와 그 위 백건 넷으로 이뤄진다. 흑건이 가장 낮으므로
+    오른손에서는 1번(엄지)이 흑건을 맡는 배정이 자연스럽고, 그때마다 +25 가 붙는다.
+    피하려면 포지션을 통째로 올려야 해 손목 이동 비용이 대신 든다.
+    두 비용 모두 선호도 항이므로, 60마디 동안 어느 쪽을 고르든 비용이 크게 쌓인다.
+
+    각 화음은 5음이고 1-5 간격이 최대 11반음으로 (1,5)=17 안이다.
+    """
+    p = Piece("ref_10_black_thumb_trap",
+              "흑건 엄지 반복 (60마디) — 선호도 누적 유도")
+    # (흑건 시작음, 위 백건 4개 오프셋)
+    bases_r = [61, 63, 66, 68, 70]              # C#4 D#4 F#4 G#4 A#4
+    offs = [0, 3, 5, 8, 11]
+    bases_l = [37, 39, 42, 44, 46]              # 한 옥타브 반 아래
+    t = 0.0
+    for bar in range(60):
+        br = bases_r[bar % len(bases_r)]
+        bl = bases_l[bar % len(bases_l)]
+        for k, o in enumerate(offs):
+            p.add("R", t + k * 0.25, 0.22, br + o)
+            p.add("L", t + k * 0.25, 0.22, bl + o)
+        t += 1.5
+    return p
+
+
+def piece_position_grind():
+    """ref_11 — 포지션 이동이 끊임없이 일어나는 곡.
+
+    POSITION_SHIFT_THRESHOLD(5반음)을 넘는 이동이 마디마다 생기고, 초과분 × 2 가
+    가산된다. 쉼표를 두지 않아 손목 이동 비용이 계속 쌓인다.
+    각 포지션 안에서는 5지 범위를 넘지 않으므로 연주 가능하다.
+    """
+    p = Piece("ref_11_position_grind",
+              "쉼표 없는 포지션 이동 반복 (80마디) — 손목 이동 비용 누적")
+    anchors_r = [60, 72, 64, 76, 67, 79, 62, 74]
+    anchors_l = [48, 36, 45, 33, 43, 31, 46, 34]
+    steps = [0, 2, 4, 2]
+    t = 0.0
+    for bar in range(80):
+        ar = anchors_r[bar % len(anchors_r)]
+        al = anchors_l[bar % len(anchors_l)]
+        for k, s in enumerate(steps):
+            p.add("R", t + k * 0.25, 0.22, ar + s)
+            p.add("L", t + k * 0.25, 0.22, al + s)
+        t += 1.0
+    return p
+
+
+def piece_wide_sustain():
+    """ref_12 — 넓게 벌어진 화음을 페달로 유지하며 그 사이를 선율이 지난다.
+
+    빔 포화를 노린다. 점유 집합이 커지면 DP 상태가 급격히 늘어 가지치기가 자주 일어나고,
+    3.2(무위반 상태가 잘려 나감)가 재현되기 쉽다. ref_04 가 같은 성격이지만 30화음뿐이다.
+
+    오른손 유지 화음은 (60, 71) = 11반음으로 (1,5)=17 안이고, 그 사이 선율 음도
+    두 유지음과의 간격이 모두 한계 내다. 페달이 있어 소리는 이어지되 점유는
+    key_hold_ms 로 따로 계산된다.
+    """
+    p = Piece("ref_12_wide_sustain",
+              "페달 아래 넓은 유지 화음 + 사이 선율 (50마디) — 빔 포화 유도")
+    inner_r = [62, 64, 65, 67, 69, 67, 65, 64]
+    inner_l = [50, 52, 53, 55, 57, 55, 53, 52]
+    t = 0.0
+    for bar in range(50):
+        p.pedal_down(t)
+        p.add("R", t, 3.8, 60)
+        p.add("R", t, 3.8, 71)
+        p.add("L", t, 3.8, 36)
+        p.add("L", t, 3.8, 47)
+        for k in range(8):
+            p.add("R", t + 0.5 + k * 0.4, 0.35, inner_r[(bar * 2 + k) % len(inner_r)])
+            p.add("L", t + 0.5 + k * 0.4, 0.35, inner_l[(bar * 2 + k) % len(inner_l)])
+        p.pedal_up(t + 3.9)
+        t += 4.0
+    return p
+
+
 PIECES = [piece_five_finger, piece_block_chords, piece_alberti,
           piece_pedal_arpeggio, piece_sustained_bass, piece_position_shift,
-          piece_inner_voice, piece_scale]
+          piece_inner_voice, piece_scale,
+          piece_long_inner_voice, piece_black_thumb_trap,
+          piece_position_grind, piece_wide_sustain]
 
 
 def main():
