@@ -142,12 +142,26 @@ struct NoteEvent {
     // 손가락이 실제로 건반을 누르는 시간. 페달로 늘어난 소리 길이(duration_ms)와 달리
     // 손가락은 이 시점에 건반에서 떨어지므로, 눌림 판정은 반드시 이 값을 기준으로 한다.
     float key_hold_ms;
+    // 운지법이 화음(온셋) 단위로 내는 손목 회전 목표값(도). 규약은 두 손 공통 (01_Design/14_Wrist_Handoff_Request.md 3절).
+    //   yaw  + = 새끼손가락 쪽으로 돌림,  - = 엄지 쪽
+    //   roll + = 엄지 쪽을 들어 올림,     - = 새끼 쪽을 들어 올림
+    // 모의 데이터처럼 값이 없으면 0 (회전 없음).
+    float wrist_yaw_deg = 0.0f;
+    float wrist_roll_deg = 0.0f;
+    // 운지법이 계산한 손목 가로 위치(mm, A0 좌측 모서리 원점). 화음 건반 중심의 단순 평균이라
+    // IK 손목 위치(손가락 뿌리 오프셋을 뺀 평균)와 정의가 다르다. 지금은 비교용으로만 읽는다. 열이 없으면 NaN.
+    float wrist_x_mm = std::numeric_limits<float>::quiet_NaN();
 };
 
-// 흰 건반 폭 0.45 = 실제 2.3 cm 로 IK 단위를 정함 (1 단위 = 약 5.1 cm). 손가락 마디 길이도 이 단위로 환산한다(kSegmentCm).
+// 흰 건반 폭 0.45 = 실제 흰 건반 폭으로 IK 단위를 정함 (1 단위 = 약 5.2 cm). 손가락 마디 길이도 이 단위로 환산한다(kSegmentCm).
 // getKeyLayout()과 initPianoKeyboard()가 반드시 이 값을 공유해야 건반 메시와 타겟 좌표가 어긋나지 않음.
+// 실제 흰 건반 폭은 01_Fingering/shared_constants.py 의 WHITE_KEY_WIDTH_MM = 옥타브 164.0 mm / 7 = 2.3429 cm.
+// (예전 2.3 cm 는 옥타브가 16.1 cm 가 되어 88건반 끝에서 약 2 cm 어긋났다)
+// cm <-> IK 단위 환산은 반드시 kIkUnitPerCm / kCmPerIkUnit 를 쓴다. 값을 따로 적으면 한쪽만 고쳐진다.
 const float kWhiteKeyWidth = 0.45f;
-const float kIkUnitPerCm = kWhiteKeyWidth / 2.3f; // 실제 흰 건반 폭 2.3 cm
+const float kWhiteKeyWidthCm = 16.4f / 7.0f;
+const float kIkUnitPerCm = kWhiteKeyWidth / kWhiteKeyWidthCm;
+const float kCmPerIkUnit = kWhiteKeyWidthCm / kWhiteKeyWidth;
 
 // 손가락별 마디 길이(cm): joints[0]->[1], [1]->[2], [2]->손끝. 검지~소지는 첫마디/중간마디/끝마디(뿌리 = MCP),
 // 엄지는 손허리뼈/첫마디/끝마디(뿌리 = CMC, thumb_01_r)다. MetaHuman 엄지는 손허리뼈가 thumb_01 이라 마디가 하나씩 밀린다.
@@ -217,6 +231,34 @@ glm::vec3 getFingerPressPosition(int pitch, int finger) {
     return p;
 }
 
+// 손목 회전 적용 범위. 환경 변수 PH_WRIST_ROT = off | yaw | roll | both(기본). 반영 전후 비교 측정용.
+const int kWristRotYaw = 1, kWristRotRoll = 2;
+int wristRotationMode() {
+    static const int mode = [] {
+        const char* v = std::getenv("PH_WRIST_ROT");
+        if (!v) return kWristRotYaw | kWristRotRoll;
+        std::string s(v);
+        if (s == "off" || s == "0") return 0;
+        if (s == "yaw") return kWristRotYaw;
+        if (s == "roll") return kWristRotRoll;
+        return kWristRotYaw | kWristRotRoll;
+    }();
+    return mode;
+}
+
+// 운지법 손목 회전(해부학 규약, 두 손 공통)을 IK 좌표계 회전 행렬로 바꾼다.
+// IK 축: x = 손끝 방향(건반 안쪽), y = 위, z = 좌우. 오른손은 엄지가 -z / 새끼가 +z, 왼손은 반대.
+//   yaw  (+ = 새끼 쪽): y축 회전. glm::rotate(+θ, y) 는 +x 를 -z 쪽으로 돌리므로
+//                       오른손(새끼 +z)은 -yaw, 왼손(새끼 -z)은 +yaw.
+//   roll (+ = 엄지 쪽 듦): x축 회전. glm::rotate(+φ, x) 는 -z 쪽을 위로 올리므로
+//                       오른손(엄지 -z)은 +roll, 왼손(엄지 +z)은 -roll.
+// 손목에서 yaw 를 먼저 돌리고, 돌아간 손의 손끝 방향 축으로 roll 을 돌린다.
+glm::mat4 handRotation(int handId, float yawDeg, float rollDeg) {
+    const float s = (handId == 1) ? 1.0f : -1.0f;
+    glm::mat4 R = glm::rotate(glm::mat4(1.0f), glm::radians(-s * yawDeg), glm::vec3(0.0f, 1.0f, 0.0f));
+    return glm::rotate(R, glm::radians(s * rollDeg), glm::vec3(1.0f, 0.0f, 0.0f));
+}
+
 // 전체 MIDI 노트 데이터를 담아둘 멤버 변수 (클래스 멤버로 선언)
 std::vector<NoteEvent> parsedMidiData;
 
@@ -254,8 +296,10 @@ void updateSongInfo() {
 }
 
 // 01_Fingering 의 UE5 DataTable CSV 를 읽어 parsedMidiData 를 채움
-// 열 순서: Name,Pitch,StartMs,DurationMs,Hand,Role,Finger,Pressure,KeyDepth,IsBlack,WristPosNormalized,WristYawDeg,WristRollDeg,
-//          KeyHoldMs,PedalDown,TargetXMm,TargetYMm,TargetZMm,BoneName,FrameIndex,ReleaseFrameIndex
+// 열 순서 (0부터): 0 Name, 1 Pitch, 2 StartMs, 3 DurationMs, 4 Hand, 5 Role, 6 Finger, 7 Pressure, 8 KeyDepth, 9 IsBlack,
+//   10 WristPosNormalized, 11 WristYawDeg, 12 WristRollDeg, 13 KeyHoldMs, 14 PedalDown, 15 TargetXMm, 16 TargetYMm, 17 TargetZMm,
+//   18 WristXMm, 19 BoneName, 20 FrameIndex, 21 ReleaseFrameIndex
+// 18 WristXMm 은 2026-11-08 에 추가된 열이다. 그 이전 CSV 는 18 이 BoneName 이므로 숫자로 읽힐 때만 쓴다.
 bool loadFingeringCsv(const std::string& path) {
     std::ifstream file(path);
     if (!file.is_open()) {
@@ -286,6 +330,13 @@ bool loadFingeringCsv(const std::string& path) {
             note.finger = std::stoi(cols[6]);
             note.velocity = static_cast<int>(std::round(std::stof(cols[7]) * 127.0f));
             note.key_hold_ms = std::stof(cols[13]);
+            note.wrist_yaw_deg = std::stof(cols[11]);
+            note.wrist_roll_deg = std::stof(cols[12]);
+            if (cols.size() > 18) {
+                char* end = nullptr;
+                float x = std::strtof(cols[18].c_str(), &end);
+                if (end != cols[18].c_str() && *end == '\0') note.wrist_x_mm = x;   // 예전 CSV 의 BoneName 문자열은 건너뜀
+            }
 
             // 6음 이상 화음에서 운지 엔진이 손가락을 배정하지 못한 음(finger=0)은 제외
             if (note.finger < 1 || note.finger > 5) { skipped++; continue; }
@@ -300,6 +351,15 @@ bool loadFingeringCsv(const std::string& path) {
         std::cerr << "[Fingering] No valid notes in CSV: " << path << std::endl;
         return false;
     }
+
+    int withYaw = 0, withRoll = 0, withWristX = 0;
+    for (const auto& n : notes) {
+        if (n.wrist_yaw_deg != 0.0f) withYaw++;
+        if (n.wrist_roll_deg != 0.0f) withRoll++;
+        if (!std::isnan(n.wrist_x_mm)) withWristX++;
+    }
+    std::cout << "[Fingering] wrist hints: yaw " << withYaw << ", roll " << withRoll << ", WristXMm " << withWristX
+              << " / " << notes.size() << " notes" << std::endl;
 
     std::sort(notes.begin(), notes.end(), [](const NoteEvent& a, const NoteEvent& b) { return a.time_ms < b.time_ms; });
     parsedMidiData = std::move(notes);
@@ -364,7 +424,9 @@ void initMockMidiData() {
 
 // 운지 CSV 를 우선 로드하고, 실패하면 모의 데이터로 대체
 void initNoteData() {
-    if (!loadFingeringCsv(kFingeringCsvPath)) {
+    // PH_FINGERING_CSV 가 있으면 그 파일을 읽는다 (다른 곡으로 측정할 때)
+    const char* overridePath = std::getenv("PH_FINGERING_CSV");
+    if (!loadFingeringCsv(overridePath ? std::string(overridePath) : kFingeringCsvPath)) {
         std::cerr << "[Fingering] Falling back to mock MIDI data." << std::endl;
         initMockMidiData();
     }
@@ -451,6 +513,18 @@ private:
     // 카메라가 따라갈 두 손목의 중간 Z (updateJacobianKinematics 에서 갱신)
     float wristCenterZ = 0.0f;
     glm::vec3 exportRightWrist = glm::vec3(0.0f);   // 내보내기용: 오른손목 위치(IK 단위)
+    float exportRightWristYawDeg = 0.0f;            // 내보내기용: 오른손목 회전 (운지법 규약, 보간 후 값)
+    float exportRightWristRollDeg = 0.0f;
+
+    // 계측 (PH_IK_METRICS). 내보내기 중 기록 프레임(서브스텝의 마지막)에서만 오른손을 집계한다.
+    // 정의는 12_IK_Test_Cases.md 3절: 손끝-건반 오차는 누른 뒤 150 ms 이후만, 반복 한계 40회.
+    struct IkStats {
+        long solves = 0, unconverged = 0, iterSum = 0;               // 오른손 5개 손가락의 모든 풀이
+        long pressedSolves = 0, pressedUnconverged = 0;              // 그중 건반을 누르는 손가락
+        long errN = 0, errOver1cm = 0; double errSum = 0, errMax = 0; // 손끝-건반 오차 (cm)
+        long thumbBlackN = 0; double thumbBlackSum = 0;              // 엄지-흑건 오차 (cm)
+    } ikStats;
+    bool collectStats = false;
 
     VkBuffer vertexBuffer;
     VkDeviceMemory vertexBufferMemory;
@@ -526,7 +600,7 @@ private:
                 int i = h * 5 + f;
                 hand[i].joints.resize(4);
 
-                // 마디 길이: MetaHuman 손(SKM_MH_Hand_R) 실측 cm 를 IK 단위로 환산 (흰 건반 폭 0.45 = 2.3 cm).
+                // 마디 길이: MetaHuman 손(SKM_MH_Hand_R) 실측 cm 를 IK 단위로 환산 (흰 건반 폭 0.45 = 2.343 cm).
                 // 각도만 UE 로 넘기므로 길이가 같아야 MetaHuman 손끝도 같은 건반에 닿는다.
                 hand[i].joints[0].localPos = glm::vec3(0.0f, 0.0f, 0.0f);
                 hand[i].joints[1].localPos = glm::vec3(kSegmentCm[f][0] * kIkUnitPerCm, 0.0f, 0.0f);
@@ -1652,9 +1726,30 @@ private:
         static float leftBlackBias = 0.0f;
         static float rightBlackBias = 0.0f;
 
+        // --- [손목 회전 목표 (운지법 WristYawDeg / WristRollDeg)] ---
+        // 운지법 값은 화음(온셋) 단위 계단값이다. 눌려 있는 음 중 가장 최근 온셋의 값을 그 손의 목표로 삼고,
+        // 아무것도 누르지 않을 때는 직전 목표를 유지한다 (손목 위치 타겟과 같은 방식).
+        static float targetYawDeg[2] = { 0.0f, 0.0f }, targetRollDeg[2] = { 0.0f, 0.0f };
+        {
+            const int mode = wristRotationMode();
+            float latestOnset[2] = { -1.0f, -1.0f };
+            for (const auto& note : activeNotes) {
+                if (note.time_ms <= latestOnset[note.hand]) continue;
+                latestOnset[note.hand] = note.time_ms;
+                targetYawDeg[note.hand] = (mode & kWristRotYaw) ? note.wrist_yaw_deg : 0.0f;
+                targetRollDeg[note.hand] = (mode & kWristRotRoll) ? note.wrist_roll_deg : 0.0f;
+            }
+        }
+        const glm::mat4 targetHandRot[2] = {
+            handRotation(0, targetYawDeg[0], targetRollDeg[0]),
+            handRotation(1, targetYawDeg[1], targetRollDeg[1]),
+        };
+
         float leftXSum = 0.0f, rightXSum = 0.0f;
         float leftZSum = 0.0f, rightZSum = 0.0f;
         float leftYSum = 0.0f, rightYSum = 0.0f;
+        // 손목이 돌면 손가락 뿌리도 앞뒤(X)로 움직인다. 그만큼 손목 X 를 되돌려 뿌리-건반 거리를 회전 전과 같게 유지한다.
+        float leftRootDxSum = 0.0f, rightRootDxSum = 0.0f;
         int leftCount = 0, rightCount = 0;
 
         for (const auto& note : activeNotes) {
@@ -1662,15 +1757,18 @@ private:
 
             // 손목을 건반 중앙이 아니라 "이 손가락의 뿌리가 건반 바로 위에 오는 위치"에 둠.
             // (건반 Z 평균에 두면 해당 손가락이 자기 rootOffset(최대 0.8)만큼 옆으로 뻗어야 했음)
-            float rootOffsetZ = 0.0f;
+            // 손목 회전을 넣었으므로 뿌리 위치는 회전된 rootOffset 으로 계산한다.
+            glm::vec3 rootOffset(0.0f), rotatedRoot(0.0f);
             if (note.finger >= 1 && note.finger <= 5) {
                 int fingerIdx = (note.hand * 5) + (note.finger - 1);
-                rootOffsetZ = hand[fingerIdx].rootOffset.z;
+                rootOffset = hand[fingerIdx].rootOffset;
+                rotatedRoot = glm::vec3(targetHandRot[note.hand] * glm::vec4(rootOffset, 0.0f));
             }
-            float wristZForThisFinger = keyPos.z - rootOffsetZ;
+            float wristZForThisFinger = keyPos.z - rotatedRoot.z;
+            float rootDx = rotatedRoot.x - rootOffset.x;
 
-            if (note.hand == 0) { leftXSum += keyPos.x; leftZSum += wristZForThisFinger; leftYSum += keyPos.y; leftCount++; }
-            else { rightXSum += keyPos.x; rightZSum += wristZForThisFinger; rightYSum += keyPos.y; rightCount++; }
+            if (note.hand == 0) { leftXSum += keyPos.x; leftZSum += wristZForThisFinger; leftYSum += keyPos.y; leftRootDxSum += rootDx; leftCount++; }
+            else { rightXSum += keyPos.x; rightZSum += wristZForThisFinger; rightYSum += keyPos.y; rightRootDxSum += rootDx; rightCount++; }
         }
 
         // 손목이 누르는 건반 쪽으로 미리 다가가야 손가락이 거의 다 펴지지 않고 자연스럽게 굽혀짐
@@ -1683,8 +1781,8 @@ private:
         auto wristXFromAvgKeyX = [&](float avgKeyX) {
             return whiteKeyPressX + (avgKeyX - whiteKeyPressX) * blackKeyWristReach - wristReachMargin;
         };
-        if (leftCount > 0) targetLeftWrist.x = wristXFromAvgKeyX(leftXSum / leftCount);
-        if (rightCount > 0) targetRightWrist.x = wristXFromAvgKeyX(rightXSum / rightCount);
+        if (leftCount > 0) targetLeftWrist.x = wristXFromAvgKeyX(leftXSum / leftCount) - leftRootDxSum / leftCount;
+        if (rightCount > 0) targetRightWrist.x = wristXFromAvgKeyX(rightXSum / rightCount) - rightRootDxSum / rightCount;
 
         if (leftCount > 0) targetLeftWrist.z = (leftZSum / leftCount);
         if (rightCount > 0) targetRightWrist.z = (rightZSum / rightCount);
@@ -1725,14 +1823,32 @@ private:
         currentLeftWrist.y = glm::mix(currentLeftWrist.y, targetY_L, wristLiftAlpha);
         currentRightWrist.y = glm::mix(currentRightWrist.y, targetY_R, wristLiftAlpha);
 
+        // 3. 손목 회전 보간. 운지법 값은 계단 모양이라 그대로 쓰면 화음이 바뀌는 프레임에서 손 전체가 튄다.
+        //    손목 좌우 이동과 같은 속도로 따라가게 한다.
+        static float currentYawDeg[2] = { 0.0f, 0.0f }, currentRollDeg[2] = { 0.0f, 0.0f };
+        for (int h = 0; h < 2; h++) {
+            currentYawDeg[h] = glm::mix(currentYawDeg[h], targetYawDeg[h], wristMoveAlpha);
+            currentRollDeg[h] = glm::mix(currentRollDeg[h], targetRollDeg[h], wristMoveAlpha);
+        }
+        const glm::mat4 handRot[2] = {
+            handRotation(0, currentYawDeg[0], currentRollDeg[0]),
+            handRotation(1, currentYawDeg[1], currentRollDeg[1]),
+        };
+
         wristCenterZ = (currentLeftWrist.z + currentRightWrist.z) * 0.5f;
         exportRightWrist = currentRightWrist;       // currentRightWrist 는 함수 안 static 이라 밖에서 못 본다
+        exportRightWristYawDeg = currentYawDeg[1];
+        exportRightWristRollDeg = currentRollDeg[1];
 
 
         // --- [FK 계산 람다] ---
+        // 손목 위치 -> 손목 회전 -> 손가락 뿌리 오프셋 순서. 관절 각도는 회전된 손 좌표계 기준이라
+        // UE 로 내보내는 관절 각도의 의미(손목 대비 로컬)는 손목 회전과 무관하게 유지된다.
         auto computeFK = [&](int fingerIdx) {
-            glm::vec3 wristPos = (fingerIdx < 5) ? currentLeftWrist : currentRightWrist;
-            glm::mat4 globalTransform = glm::translate(glm::mat4(1.0f), wristPos + hand[fingerIdx].rootOffset);
+            const int h = (fingerIdx < 5) ? 0 : 1;
+            glm::vec3 wristPos = (h == 0) ? currentLeftWrist : currentRightWrist;
+            glm::mat4 globalTransform = glm::translate(glm::mat4(1.0f), wristPos) * handRot[h]
+                                      * glm::translate(glm::mat4(1.0f), hand[fingerIdx].rootOffset);
 
             hand[fingerIdx].joints[0].pos = glm::vec3(globalTransform[3]);
             hand[fingerIdx].joints[0].globalTransform = globalTransform;
@@ -1802,15 +1918,19 @@ private:
         float restX = 0.9f;
         float restY = -0.35f;
         for (int i = 0; i < 10; i++) {
-            glm::vec3 wristPos = (i < 5) ? currentLeftWrist : currentRightWrist;
-            desiredTargets[i] = wristPos + hand[i].rootOffset + glm::vec3(restX, restY, 0.0f);
+            const int h = (i < 5) ? 0 : 1;
+            glm::vec3 wristPos = (h == 0) ? currentLeftWrist : currentRightWrist;
+            // 대기 자세도 손 좌표계 기준이므로 손목 회전을 함께 적용한다
+            desiredTargets[i] = wristPos + glm::vec3(handRot[h] * glm::vec4(hand[i].rootOffset + glm::vec3(restX, restY, 0.0f), 0.0f));
         }
 
         // 2. 활성화된 Note 위치로 덮어쓰기
+        const NoteEvent* pressedNote[10] = {};   // 계측용: 손가락별로 누르고 있는 음
         for (const auto& note : activeNotes) {
             if (note.finger >= 1 && note.finger <= 5) {
                 int fingerIdx = (note.hand * 5) + (note.finger - 1);
                 desiredTargets[fingerIdx] = getFingerPressPosition(note.pitch, note.finger);
+                pressedNote[fingerIdx] = &note;
             }
         }
 
@@ -1849,13 +1969,15 @@ private:
             int iterationLimit = 40;
             float tolerance = 0.01f;
             glm::vec3 targetPos = smoothedTargets[fingerIdx]; // 개별 손가락 타겟 적용
+            int itersUsed = iterationLimit;
+            bool converged = false;
             for (int iter = 0; iter < iterationLimit; iter++) {
                 computeFK(fingerIdx);
 
                 glm::vec3 endEffector = hand[fingerIdx].joints[3].pos;
                 glm::vec3 error = targetPos - endEffector;
 
-                if (glm::length(error) < tolerance) break;
+                if (glm::length(error) < tolerance) { itersUsed = iter; converged = true; break; }
 
                 glm::vec3 J_cols[9];
                 int dofIndex = 0;
@@ -1987,9 +2109,27 @@ private:
                 }
             }
             computeFK(fingerIdx);
+
+            if (collectStats && fingerIdx >= 5) {
+                IkStats& st = ikStats;
+                st.solves++; st.iterSum += itersUsed;
+                if (!converged) st.unconverged++;
+                if (const NoteEvent* n = pressedNote[fingerIdx]) {
+                    st.pressedSolves++;
+                    if (!converged) st.pressedUnconverged++;
+                    const float nowMs = std::fmod(time * 1000.0f, songLengthMs);
+                    if (nowMs - n->time_ms >= 150.0f) {   // 손끝이 건반까지 내려오는 구간은 제외
+                        const glm::vec3 key = getFingerPressPosition(n->pitch, n->finger);
+                        const double errCm = glm::distance(hand[fingerIdx].joints[3].pos, key) * kCmPerIkUnit;
+                        st.errN++; st.errSum += errCm; st.errMax = std::max(st.errMax, errCm);
+                        if (errCm >= 1.0) st.errOver1cm++;
+                        if (n->finger == 1 && getKeyLayout(n->pitch).isBlack) { st.thumbBlackN++; st.thumbBlackSum += errCm; }
+                    }
+                }
+            }
         }
 
-        // 4. 렌더링용 Vertex 배열 데이터 매핑 
+        // 4. 렌더링용 Vertex 배열 데이터 매핑
         for (int fingerIdx = 0; fingerIdx < 10; fingerIdx++) {
             for (int i = 0; i < 4; i++) {
                 int vIdx = (fingerIdx * 4) + i;
@@ -2020,7 +2160,7 @@ private:
 
     // 오른손 관절 각도와 손목 위치를 30 FPS CSV로 저장한다 (형식: IK_Handoff_Format.md)
     void exportJointAnglesCsv(const std::string& jointsPath, const std::string& wristPath, float fps = 30.0f) {
-        const float cmPerUnit = 2.3f / kWhiteKeyWidth;        // 흰 건반 폭: IK 0.45 = 실제 2.3 cm
+        const float cmPerUnit = kCmPerIkUnit;
         static const char* fingerNames[5] = { "thumb", "index", "middle", "ring", "pinky" };
         static const char* jointSuffix[3] = { "01", "02", "03" };   // joints[0..2] -> _01_r, _02_r, _03_r
 
@@ -2030,6 +2170,16 @@ private:
         wf << "frame,time_ms,x_cm,y_cm,z_cm,yaw_deg,pitch_deg,roll_deg\n";
         jf << std::fixed << std::setprecision(4);
         wf << std::fixed << std::setprecision(4);
+
+        // 손목 회전을 wrist.csv 에 쓸지. 기본은 쓰지 않는다(0,0,0).
+        // UE 임포터(import_ik_csv_to_anim.py)는 이 열을 hand_r 회전에 그대로 적용하는데, IK 의 yaw/roll 이
+        // MetaHuman hand_r 의 어느 로컬 축에 해당하는지는 아직 정하지 않았다. 축을 맞추기 전에는
+        // PH_EXPORT_WRIST_ROT 를 켠 출력으로 시험만 한다. 값은 운지법 규약(yaw + 새끼 쪽, roll + 엄지 쪽 듦)이다.
+        const bool writeWristRot = std::getenv("PH_EXPORT_WRIST_ROT") != nullptr;
+        const bool metrics = std::getenv("PH_IK_METRICS") != nullptr;
+        ikStats = IkStats{};
+        float prevAngleDeg[5][3][3] = {};                              // 떨림: 인접 프레임 관절 각도 변화
+        double jitterMax = 0.0; long jitterOver25 = 0; std::string jitterBone;
 
         const float innerHz = 60.0f;                                   // 화면에서 보이는 움직임과 같은 갱신 속도
         const int subSteps = static_cast<int>(innerHz / fps);          // 30 FPS 기록이면 2
@@ -2042,9 +2192,30 @@ private:
             }
             for (int s = 0; s < subSteps; ++s) {                       // 마지막 서브스텝이 정확히 frame/fps 시각이 되게 한다
                 const float t = std::max(0.0f, (frame * subSteps - (subSteps - 1) + s) / innerHz);
+                collectStats = metrics && (s == subSteps - 1);         // 기록되는 프레임만 집계
                 updateJacobianKinematics(t, getActiveNotesForCurrentTime(t));
             }
+            collectStats = false;
             const float timeMs = frame * 1000.0f / fps;
+
+            if (metrics) {
+                for (int f = 0; f < 5; ++f)
+                    for (int j = 0; j < 3; ++j) {
+                        const glm::vec3 a = glm::degrees(hand[5 + f].joints[j].angle);
+                        const float cur[3] = { a.x, a.y, a.z };
+                        for (int k = 0; k < 3; ++k) {
+                            if (frame > 0) {
+                                const double d = std::abs(cur[k] - prevAngleDeg[f][j][k]);
+                                if (d > 25.0) jitterOver25++;
+                                if (d > jitterMax) {
+                                    jitterMax = d;
+                                    jitterBone = std::string(fingerNames[f]) + "_" + jointSuffix[j] + "_r frame " + std::to_string(frame);
+                                }
+                            }
+                            prevAngleDeg[f][j][k] = cur[k];
+                        }
+                    }
+            }
 
             for (int f = 0; f < 5; ++f) {
                 const Finger& finger = hand[5 + f];            // 5~9 = 오른손 (엄지 -> 소지)
@@ -2059,9 +2230,28 @@ private:
             wf << frame << ',' << timeMs << ','
                << exportRightWrist.x * cmPerUnit << ','        // x: 앞뒤, y: 높이, z: 좌우 (IK 축 그대로)
                << exportRightWrist.y * cmPerUnit << ','
-               << exportRightWrist.z * cmPerUnit << ",0,0,0\n";   // IK 에는 손목 회전이 없다
+               << exportRightWrist.z * cmPerUnit << ',';
+            if (writeWristRot) wf << exportRightWristYawDeg << ",0," << exportRightWristRollDeg << '\n';
+            else               wf << "0,0,0\n";
         }
-        std::cout << "[Export] wrote " << frames + 1 << " frames to " << jointsPath << std::endl;
+        std::cout << "[Export] wrote " << frames + 1 << " frames to " << jointsPath
+                  << (writeWristRot ? " (wrist rotation written)" : " (wrist rotation 0)") << std::endl;
+
+        if (metrics) {
+            const IkStats& st = ikStats;
+            auto pct = [](long a, long b) { return b ? 100.0 * a / b : 0.0; };
+            static const char* modeName[4] = { "off", "yaw", "roll", "both" };
+            std::cout << std::fixed << std::setprecision(3)
+                      << "[Metrics] right hand, wrist rotation = " << modeName[wristRotationMode()] << "\n"
+                      << "  tip-key error (>=150ms after onset): mean " << (st.errN ? st.errSum / st.errN : 0.0)
+                      << " cm, max " << st.errMax << " cm, >=1cm " << pct(st.errOver1cm, st.errN) << "% (n=" << st.errN << ")\n"
+                      << "  thumb-black error: mean " << (st.thumbBlackN ? st.thumbBlackSum / st.thumbBlackN : 0.0)
+                      << " cm (n=" << st.thumbBlackN << ")\n"
+                      << "  unconverged in 40 iters: all " << pct(st.unconverged, st.solves) << "% (n=" << st.solves
+                      << "), pressing " << pct(st.pressedUnconverged, st.pressedSolves) << "% (n=" << st.pressedSolves << ")"
+                      << ", mean iters " << (st.solves ? double(st.iterSum) / st.solves : 0.0) << "\n"
+                      << "  jitter: max " << jitterMax << " deg (" << jitterBone << "), jumps >25deg " << jitterOver25 << std::endl;
+        }
     }
 
     void drawFrame() {
