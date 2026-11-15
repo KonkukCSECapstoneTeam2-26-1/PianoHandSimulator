@@ -55,6 +55,9 @@ IMPLEMENT_GLOBAL_SHADER(FPianoHandImplicitSmoothCS, "/PianoHand/Private/Implicit
 IMPLEMENT_GLOBAL_SHADER(FPianoHandImplicitAdvectCS, "/PianoHand/Private/ImplicitSkinning.usf", "ImplicitAdvectCS", SF_Compute);
 IMPLEMENT_GLOBAL_SHADER(FPianoHandImplicitDebugCS, "/PianoHand/Private/ImplicitSkinning.usf", "ImplicitDebugCS", SF_Compute);
 IMPLEMENT_GLOBAL_SHADER(FPianoHandImplicitFinalizeCS, "/PianoHand/Private/ImplicitSkinning.usf", "ImplicitFinalizeCS", SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FPianoHandFleshCorrectCS, "/PianoHand/Private/ImplicitSkinning.usf", "FleshCorrectCS", SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FPianoHandFleshSmoothCS, "/PianoHand/Private/ImplicitSkinning.usf", "FleshSmoothCS", SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FPianoHandFleshApplyCS, "/PianoHand/Private/ImplicitSkinning.usf", "FleshApplyCS", SF_Compute);
 
 #define PH_IMPLICIT_SHADER_BOILERPLATE(ClassName) \
 bool ClassName::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters) \
@@ -73,6 +76,9 @@ PH_IMPLICIT_SHADER_BOILERPLATE(FPianoHandImplicitSmoothCS)
 PH_IMPLICIT_SHADER_BOILERPLATE(FPianoHandImplicitAdvectCS)
 PH_IMPLICIT_SHADER_BOILERPLATE(FPianoHandImplicitDebugCS)
 PH_IMPLICIT_SHADER_BOILERPLATE(FPianoHandImplicitFinalizeCS)
+PH_IMPLICIT_SHADER_BOILERPLATE(FPianoHandFleshCorrectCS)
+PH_IMPLICIT_SHADER_BOILERPLATE(FPianoHandFleshSmoothCS)
+PH_IMPLICIT_SHADER_BOILERPLATE(FPianoHandFleshApplyCS)
 #undef PH_IMPLICIT_SHADER_BOILERPLATE
 
 bool FPianoHandSkinDeformerCS::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
@@ -429,7 +435,36 @@ namespace PianoHandSkinDeformer
 		};
 
 		AddSkinPasses(TEXT("SkinDeformer"), AllBones, AllBoneNormals, PositionUAV, TangentUAV);
-		PianoHandFlesh::AddFleshBlendPass(GraphBuilder, MeshObject, PositionBuffer, Lod.GetNumVertices()); // 04_Flesh: Flesh 위치를 스키닝 직후에 섞음(데이터 없으면 아무 일도 안 함)
+
+		// 04_Flesh (kyungmin's adapter) / Phase 13: the adapter lerps a position buffer towards the Flesh surface. It is
+		// run on a COPY so the Flesh surface is available as its own buffer; what happens with it is decided below:
+		//  - implicit skinning on and bFleshCorrection: masked low-frequency correction after the implicit stage
+		//  - otherwise: the adapter's original behaviour, the skinned positions become the (blended) Flesh surface.
+		// The Flesh rest shape is captured whenever the pose is at the reference pose (thickness bias reference).
+		FRDGBufferRef FleshSurface = nullptr;
+		FRDGBufferRef FleshRestRDG = nullptr;
+		{
+			const uint32 NumFleshVerts = Lod.GetNumVertices();
+			const uint64 FleshBytes = (uint64)NumFleshVerts * 3u * sizeof(float);
+			FRDGBufferRef Temp = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateBufferDesc(sizeof(float), FMath::Max(NumFleshVerts * 3u, 1u)), TEXT("PianoHandFleshSurface"));
+			AddCopyBufferPass(GraphBuilder, Temp, 0, PositionBuffer, 0, FMath::Min<uint64>(FleshBytes, PositionBuffer->Desc.GetSize()));
+			if (PianoHandFlesh::AddFleshBlendPass(GraphBuilder, MeshObject, Temp, NumFleshVerts))
+			{
+				FleshSurface = Temp;
+				if (Params.FleshPoseDeltaDeg <= Params.FleshRestCaptureDeg)
+				{
+					FRDGBufferRef RestBuf = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateBufferDesc(sizeof(float), FMath::Max(NumFleshVerts * 3u, 1u)), TEXT("PianoHandFleshRest"));
+					AddCopyBufferPass(GraphBuilder, RestBuf, 0, Temp, 0, FleshBytes);
+					GraphBuilder.QueueBufferExtraction(RestBuf, &State.FleshRest);
+					State.FleshRestNumVerts = NumFleshVerts;
+					FleshRestRDG = RestBuf;
+				}
+				else if (State.FleshRest.IsValid() && State.FleshRestNumVerts == NumFleshVerts)
+				{
+					FleshRestRDG = GraphBuilder.RegisterExternalBuffer(State.FleshRest, TEXT("PianoHandFleshRest"));
+				}
+			}
+		}
 
 		// -------------------------------------------------------------------
 		// Phase 8: implicit skinning. The LBS / DQS pose above is the initial solution; every vertex
@@ -444,6 +479,25 @@ namespace PianoHandSkinDeformer
 		FRDGBufferRef ImplicitStateBuffer = nullptr;
 		const bool bImplicit = Params.bImplicitSkinning && Implicit.IsValid() && Implicit->bValid
 			&& Implicit->NumVertices == NumLodVerticesEarly && PrimInverses.Num() == Implicit->PrimInfo.Num() && Params.ImplicitIterations > 0;
+		// Phase 13: masked correction needs the implicit data (fold sides, one-ring) and a captured rest shape
+		const bool bFleshCorrect = FleshSurface != nullptr && FleshRestRDG != nullptr && Params.bFleshCorrection && bImplicit;
+		if (FleshSurface != nullptr && Params.bFleshCorrection && !bFleshCorrect)
+		{
+			static uint32 GFleshWaitCount = 0;
+			if ((GFleshWaitCount++ % 300u) == 0u)
+			{
+				UE_LOG(LogPianoHand, Display, TEXT("[SkinDeformer] %s: Flesh frame present but the masked correction is not running yet (rest shape %s, pose delta %.1f deg vs capture threshold %.1f, implicit %d)"),
+					*OwnerName.ToString(), FleshRestRDG != nullptr ? TEXT("captured") : TEXT("NOT captured"), Params.FleshPoseDeltaDeg, Params.FleshRestCaptureDeg, bImplicit ? 1 : 0);
+			}
+		}
+		if (FleshSurface != nullptr && !bFleshCorrect)
+		{
+			// the adapter's original behaviour: the skinned positions become the blended Flesh surface
+			AddCopyBufferPass(GraphBuilder, PositionBuffer, 0, FleshSurface, 0, FMath::Min<uint64>((uint64)NumLodVerticesEarly * 3u * sizeof(float), PositionBuffer->Desc.GetSize()));
+		}
+		// per-vertex weight of the Flesh correction, read by the detail pass (0 everywhere when inactive)
+		FRDGBufferRef FleshWeightBuf = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateStructuredDesc(sizeof(float), FMath::Max(NumLodVerticesEarly, 1u)), TEXT("PianoHandFleshWeight"));
+		AddClearUAVPass(GraphBuilder, GraphBuilder.CreateUAV(FleshWeightBuf), 0u);
 		if (bImplicit)
 		{
 			// Static tables live in pooled buffers across frames; re-uploaded when the build changes.
@@ -664,6 +718,61 @@ namespace PianoHandSkinDeformer
 			{
 				State.ImplicitTracked.SafeRelease();
 				State.ImplicitTrackedNumVerts = 0;
+			}
+
+			// ---- Phase 13: Flesh low-frequency correction inside the folds ------------------------------
+			if (bFleshCorrect)
+			{
+				FRDGBufferRef CorrA = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateStructuredDesc(sizeof(FVector4f), FMath::Max(NumLodVerticesEarly, 1u)), TEXT("PianoHandFleshCorrA"));
+				FRDGBufferRef CorrB = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateStructuredDesc(sizeof(FVector4f), FMath::Max(NumLodVerticesEarly, 1u)), TEXT("PianoHandFleshCorrB"));
+				{
+					TShaderMapRef<FPianoHandFleshCorrectCS> Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+					FPianoHandFleshCorrectCS::FParameters* P = GraphBuilder.AllocParameters<FPianoHandFleshCorrectCS::FParameters>();
+					P->Common = Common;
+					P->FleshStrength = FMath::Max(Params.FleshStrength, 0.0f);
+					P->FleshPalmWeight = FMath::Clamp(Params.FleshPalmWeight, 0.0f, 1.0f);
+					P->FleshMaxCm = FMath::Max(Params.FleshMaxCm, 0.1f);
+					P->BendGateStart = FMath::DegreesToRadians(Params.ImplicitBendStart);
+					P->PairBend = PairBendSRV;
+					P->PrePosition = GraphBuilder.CreateSRV(ImplicitPrePos, PF_R32_FLOAT);
+					P->FleshIn = GraphBuilder.CreateSRV(FleshSurface, PF_R32_FLOAT);
+					P->FleshRestIn = GraphBuilder.CreateSRV(FleshRestRDG, PF_R32_FLOAT);
+					P->RestPositionIn = PositionSRV;
+					P->VertexRot = GraphBuilder.CreateSRV(VertexRotBuffer);
+					P->FleshCorrOut = GraphBuilder.CreateUAV(CorrA);
+					FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("PianoHand.FleshCorrect"), Shader, P,
+						FComputeShaderUtils::GetGroupCount(NumLodVerticesEarly, FPianoHandFleshCorrectCS::ThreadGroupSize));
+				}
+				FRDGBufferRef Cur = CorrA, Nxt = CorrB;
+				const int32 SmoothIt = FMath::Clamp(Params.FleshSmoothIterations, 0, 32);
+				for (int32 It = 0; It < SmoothIt; ++It)
+				{
+					TShaderMapRef<FPianoHandFleshSmoothCS> Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+					FPianoHandFleshSmoothCS::FParameters* P = GraphBuilder.AllocParameters<FPianoHandFleshSmoothCS::FParameters>();
+					P->Common = Common;
+					P->FleshSmoothLambda = FMath::Clamp(Params.FleshSmoothLambda, 0.0f, 1.0f);
+					P->FleshCorrIn = GraphBuilder.CreateSRV(Cur);
+					P->FleshCorrOut = GraphBuilder.CreateUAV(Nxt);
+					FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("PianoHand.FleshSmooth(%d)", It), Shader, P,
+						FComputeShaderUtils::GetGroupCount(NumLodVerticesEarly, FPianoHandFleshSmoothCS::ThreadGroupSize));
+					Swap(Cur, Nxt);
+				}
+				{
+					TShaderMapRef<FPianoHandFleshApplyCS> Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+					FPianoHandFleshApplyCS::FParameters* P = GraphBuilder.AllocParameters<FPianoHandFleshApplyCS::FParameters>();
+					P->Common = Common;
+					P->FleshCorrIn = GraphBuilder.CreateSRV(Cur);
+					P->PositionUAV = PositionUAV;
+					P->FleshWeightOut = GraphBuilder.CreateUAV(FleshWeightBuf);
+					FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("PianoHand.FleshApply"), Shader, P,
+						FComputeShaderUtils::GetGroupCount(NumLodVerticesEarly, FPianoHandFleshApplyCS::ThreadGroupSize));
+				}
+				if (!State.bLoggedFlesh)
+				{
+					State.bLoggedFlesh = true;
+					UE_LOG(LogPianoHand, Display, TEXT("[SkinDeformer] %s: Flesh correction on - masked low-frequency Flesh displacement inside the folds (strength %.2f, %d smoothing steps, palm weight %.2f)"),
+						*OwnerName.ToString(), Params.FleshStrength, SmoothIt, Params.FleshPalmWeight);
+				}
 			}
 		}
 
@@ -981,6 +1090,8 @@ namespace PianoHandSkinDeformer
 				DispParams->VertexTensor = VertexTensorSRV;
 				DispParams->RelaxStateIn = RelaxStateSRV;
 				DispParams->WeldCanon = WeldCanonSRV;
+				DispParams->FleshWeightIn = GraphBuilder.CreateSRV(FleshWeightBuf);
+				DispParams->FleshReplace = FMath::Clamp(Params.FleshReplace, 0.0f, 1.0f);
 				DispParams->PositionBufferUAV = PositionUAV;
 				DispParams->TangentBufferUAV = TangentUAV;
 				DispParams->ColorBufferUAV = DetailColorUAV;
@@ -1347,6 +1458,20 @@ void UPianoHandSkinDeformerInstance::EnqueueWork(FEnqueueWorkDesc const& InDesc)
 
 	// RefPoseInverse * ComponentSpace for every bone of the skeleton (UE row-vector convention).
 	const TArray<FTransform>& ComponentSpaceTransforms = SkinnedComponent->GetComponentSpaceTransforms();
+	// Phase 13: how far the pose is from the reference pose (the Flesh rest shape is captured there)
+	if (RefPoseAsset.Get() != SkeletalMesh || RefPoseCSRotation.Num() != ComponentSpaceTransforms.Num())
+	{
+		TArray<FTransform> RefCS;
+		PianoHandProportions::RefPoseComponentSpace(SkeletalMesh, RefCS);
+		RefPoseCSRotation.SetNum(RefCS.Num());
+		for (int32 B = 0; B < RefCS.Num(); ++B) { RefPoseCSRotation[B] = RefCS[B].GetRotation(); }
+		RefPoseAsset = SkeletalMesh;
+	}
+	float PoseDeltaDeg = 0.0f;
+	for (int32 B = 0; B < FMath::Min(ComponentSpaceTransforms.Num(), RefPoseCSRotation.Num()); ++B)
+	{
+		PoseDeltaDeg = FMath::Max(PoseDeltaDeg, (float)FMath::RadiansToDegrees(ComponentSpaceTransforms[B].GetRotation().AngularDistance(RefPoseCSRotation[B])));
+	}
 	const TArray<FMatrix44f>& RefBasesInvMatrix = SkeletalMesh->GetRefBasesInvMatrix();
 	const int32 NumBones = FMath::Min(ComponentSpaceTransforms.Num(), RefBasesInvMatrix.Num());
 
@@ -1577,6 +1702,15 @@ void UPianoHandSkinDeformerInstance::EnqueueWork(FEnqueueWorkDesc const& InDesc)
 		FrameParams.ImplicitStretchKeep = Source->ImplicitStretchKeep;
 		FrameParams.bImplicitTracking = Source->bImplicitTracking;
 		FrameParams.ImplicitTrackMaxStepDeg = Source->ImplicitTrackMaxStepDeg;
+		FrameParams.bFleshCorrection = Source->bFleshCorrection;
+		FrameParams.FleshStrength = Source->FleshStrength;
+		FrameParams.FleshPalmWeight = Source->FleshPalmWeight;
+		FrameParams.FleshSmoothIterations = Source->FleshSmoothIterations;
+		FrameParams.FleshSmoothLambda = Source->FleshSmoothLambda;
+		FrameParams.FleshReplace = Source->FleshReplace;
+		FrameParams.FleshRestCaptureDeg = Source->FleshRestCaptureDeg;
+		FrameParams.FleshMaxCm = Source->FleshMaxCm;
+		FrameParams.FleshPoseDeltaDeg = PoseDeltaDeg;
 	}
 	else
 	{

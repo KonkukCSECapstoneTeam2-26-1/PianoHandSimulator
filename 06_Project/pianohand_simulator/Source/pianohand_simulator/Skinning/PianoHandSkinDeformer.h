@@ -368,6 +368,9 @@ public:
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float>, VertexTensor)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float2>, RelaxStateIn)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, WeldCanon)
+		/** Phase 13: 0..1 per vertex, how much of this vertex the Flesh correction already shaped (volume / pad terms step back). */
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float>, FleshWeightIn)
+		SHADER_PARAMETER(float, FleshReplace)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<float>, PositionBufferUAV)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<SNORM float4>, TangentBufferUAV)
 		/** Rewritten with the bone-relative strain (R stretch, G along-bone compression, B across, A slack). */
@@ -553,6 +556,73 @@ public:
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float>, PairBend)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<float>, PrePosition)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<float>, PositionUAV)
+	END_SHADER_PARAMETER_STRUCT()
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
+	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment);
+};
+
+// ---------------------------------------------------------------------------
+// Phase 13 (11-07) - Chaos Flesh as a LOW-FREQUENCY source for the inside of a bending joint.
+// Kyungmin's adapter (Flesh/PianoHandFleshInput) publishes one Flesh surface position per render vertex.
+// Instead of replacing the skinned positions with it, the deformer takes the Flesh displacement relative
+// to the rigidly carried rest offset, keeps it only inside the folds (FoldSide x bend), low-passes it over
+// the one-ring and adds it after the implicit stage. The wrinkle geometry then rides on the Flesh bulk.
+// ---------------------------------------------------------------------------
+
+/** Per vertex: masked Flesh correction (xyz) and its mask weight (w). */
+class FPianoHandFleshCorrectCS : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FPianoHandFleshCorrectCS);
+	SHADER_USE_PARAMETER_STRUCT(FPianoHandFleshCorrectCS, FGlobalShader);
+	static constexpr uint32 ThreadGroupSize = 64;
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_STRUCT_INCLUDE(FPianoHandImplicitCommonParameters, Common)
+		SHADER_PARAMETER(float, FleshStrength)
+		SHADER_PARAMETER(float, FleshPalmWeight)
+		SHADER_PARAMETER(float, FleshMaxCm)
+		SHADER_PARAMETER(float, BendGateStart)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float>, PairBend)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<float>, PrePosition)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<float>, FleshIn)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<float>, FleshRestIn)
+		SHADER_PARAMETER_SRV(Buffer<float>, RestPositionIn)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, VertexRot)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<float4>, FleshCorrOut)
+	END_SHADER_PARAMETER_STRUCT()
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
+	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment);
+};
+
+/** One Jacobi smoothing step of the correction over the (welded) one-ring. */
+class FPianoHandFleshSmoothCS : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FPianoHandFleshSmoothCS);
+	SHADER_USE_PARAMETER_STRUCT(FPianoHandFleshSmoothCS, FGlobalShader);
+	static constexpr uint32 ThreadGroupSize = 64;
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_STRUCT_INCLUDE(FPianoHandImplicitCommonParameters, Common)
+		SHADER_PARAMETER(float, FleshSmoothLambda)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, FleshCorrIn)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<float4>, FleshCorrOut)
+	END_SHADER_PARAMETER_STRUCT()
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
+	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment);
+};
+
+/** Adds the smoothed correction to the positions and hands the mask weight to the detail pass. */
+class FPianoHandFleshApplyCS : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FPianoHandFleshApplyCS);
+	SHADER_USE_PARAMETER_STRUCT(FPianoHandFleshApplyCS, FGlobalShader);
+	static constexpr uint32 ThreadGroupSize = 64;
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_STRUCT_INCLUDE(FPianoHandImplicitCommonParameters, Common)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, FleshCorrIn)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<float>, PositionUAV)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<float>, FleshWeightOut)
 	END_SHADER_PARAMETER_STRUCT()
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
 	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment);
@@ -1007,6 +1077,50 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Implicit", meta = (UIMin = "1", UIMax = "90"))
 	float ImplicitTrackMaxStepDeg = 25.0f;
 
+	/**
+	 * Phase 13: when a Piano Hand Flesh Input component publishes Chaos Flesh positions for this mesh, use them as a
+	 * low-frequency correction inside the folds (after the implicit stage) instead of replacing the skinned positions.
+	 * Off = the adapter's original behaviour (lerp the skinned positions towards Flesh before everything else).
+	 * Needs implicit skinning (its fold sides and one-ring); without it the original blend is used as well.
+	 * Set the Flesh component's Blend to 1 - the strength is FleshStrength here.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Flesh")
+	bool bFleshCorrection = true;
+
+	/** Scale of the masked Flesh correction (1 = the Flesh displacement as is). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Flesh", meta = (ClampMin = "0", UIMax = "2"))
+	float FleshStrength = 1.0f;
+
+	/** Weight of the correction on palm / metacarpal vertices (no fold side there). 0 = fingers only. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Flesh", meta = (ClampMin = "0", ClampMax = "1"))
+	float FleshPalmWeight = 0.0f;
+
+	/** Jacobi smoothing steps of the correction over the one-ring (removes Flesh's tet-grid noise and jitter). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Flesh", meta = (ClampMin = "0", ClampMax = "32"))
+	int32 FleshSmoothIterations = 6;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Flesh", meta = (ClampMin = "0", ClampMax = "1"))
+	float FleshSmoothLambda = 0.5f;
+
+	/** How much the detail pass's volume bulge and palmar pads step back where the Flesh correction is active (1 = fully). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Flesh", meta = (ClampMin = "0", ClampMax = "1"))
+	float FleshReplace = 1.0f;
+
+	/**
+	 * The Flesh surface is thicker than the skinned mesh even at rest. Its rest shape is captured whenever the pose is
+	 * within this many degrees of the reference pose (every bone), and only the deviation from that rigidly carried
+	 * rest offset is used. Until a rest frame has been seen the correction stays off.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Flesh", meta = (ClampMin = "0.1", UIMax = "10"))
+	float FleshRestCaptureDeg = 3.0f;
+
+	/**
+	 * Safety: a Flesh displacement (beyond the carried rest offset) longer than this many cm is not a flesh deformation
+	 * but a broken surface binding (barycentric extrapolation from a far tet) and is ignored for that vertex.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Flesh", meta = (ClampMin = "0.1", UIMax = "5"))
+	float FleshMaxCm = 1.5f;
+
 	/** Bump to force the implicit fields to be rebuilt (also happens when the mesh or the sample counts change). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Implicit")
 	int32 ImplicitBuildSerial = 0;
@@ -1043,6 +1157,10 @@ struct FPianoHandDeformerRenderState
 	uint32 WeldNumVerts = 0;
 	uint32 WeldNumIndices = 0;
 	bool bLoggedWeld = false;
+	/** Phase 13: Flesh surface captured at the reference pose (3 floats per vertex). */
+	TRefCountPtr<FRDGPooledBuffer> FleshRest;
+	uint32 FleshRestNumVerts = 0;
+	bool bLoggedFlesh = false;
 	bool bLoggedProportionsDQS = false;
 	bool bLoggedMaskUnavailable = false;
 
@@ -1171,6 +1289,16 @@ struct FPianoHandDeformerFrameParams
 	float ImplicitStretchKeep = 0.25f;
 	bool bImplicitTracking = true;
 	float ImplicitTrackMaxStepDeg = 25.0f;
+	bool bFleshCorrection = true;
+	float FleshStrength = 1.0f;
+	float FleshPalmWeight = 0.0f;
+	int32 FleshSmoothIterations = 6;
+	float FleshSmoothLambda = 0.5f;
+	float FleshReplace = 1.0f;
+	float FleshRestCaptureDeg = 3.0f;
+	float FleshMaxCm = 1.5f;
+	/** Max angular distance (degrees) of any bone from the reference pose this frame (game thread). */
+	float FleshPoseDeltaDeg = 180.0f;
 };
 
 
@@ -1210,6 +1338,9 @@ private:
 
 	/** Phase 8: implicit fields, built once per mesh / sample count / serial. */
 	TSharedPtr<FPianoHandImplicitData, ESPMode::ThreadSafe> ImplicitData;
+	/** Phase 13: reference-pose component-space rotations, for the Flesh rest-pose gate. */
+	TArray<FQuat> RefPoseCSRotation;
+	TWeakObjectPtr<const USkinnedAsset> RefPoseAsset;
 	TWeakObjectPtr<const USkinnedAsset> ImplicitAsset;
 	int32 ImplicitSamplesBuilt = 0;
 	int32 ImplicitPalmSamplesBuilt = 0;

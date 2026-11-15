@@ -274,6 +274,7 @@ PARAMS = [
     ('DorsalBase',      0.40),   # folds standing over an extended knuckle
     ('DorsalIron',       5.0),   # how fast flexion spends that slack and the surface goes taut
     ('DorsalRelax',      4.0),   # the folds that come back just after a fist opens
+    ('DorsalKeep',       0.35),  # 11-07: fraction of the knuckle fold family that stays as wavy lines when the joint is bent (stretch cannot iron below this)
     ('SideSharpness',    3.0),   # how narrow the palm/back transition is around the sides
     ('SideFlip',         1.0),   # -1 if a rig curls the other way; avoids a re-bake
     ('MaskGain',         1.0),   # widens/narrows the baked concentration band
@@ -302,7 +303,7 @@ STRUCT_ARGS = ['CreaseFrequency', 'CreaseSharpness', 'CreaseWarp', 'CreaseRange'
                'SecondaryDepth', 'JointReach', 'CompressNarrow', 'StretchWiden',
                'FoldsMCP', 'FoldsPIP', 'FoldsDIP', 'DepthMCP', 'DepthPIP', 'DepthDIP', 'PalmSplit', 'SideFolds',
                'PalmarBase', 'PalmarCompress', 'PalmarIron', 'PalmarRelax',
-               'DorsalBase', 'DorsalIron', 'DorsalRelax', 'SideSharpness', 'SideFlip',
+               'DorsalBase', 'DorsalIron', 'DorsalRelax', 'DorsalKeep', 'SideSharpness', 'SideFlip',
                'MaskGain', 'MaskSharpness',
                'CreaseBow', 'PalmBow', 'SideTaper', 'ForkStrength', 'ForkAngle', 'SeedVariation', 'FoldFlattenStart', 'FoldFlattenFull',
                'PalmRange', 'PalmLineDepth', 'PalmLineWidth', 'PalmLineBase', 'PalmLineCompress', 'PalmLineIron',

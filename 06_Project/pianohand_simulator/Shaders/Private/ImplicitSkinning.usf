@@ -66,6 +66,10 @@ float RelaxScale;            // multiplier on mu
 float ContactDepth;          // cm, how far other parts may push a vertex per frame before it is frozen
 float SmoothBeta;            // multiplier on beta in the Laplacian step
 float StretchKeep;           // 10-18: fraction of the correction kept on the stretching (outer) side of a bent joint
+float FleshStrength;         // Phase 13: scale of the masked Flesh correction
+float FleshPalmWeight;       // Phase 13: mask weight on palm / metacarpal vertices (no fold side there)
+float FleshSmoothLambda;     // Phase 13: Jacobi step of the correction smoothing
+float FleshMaxCm;            // Phase 13: displacements longer than this are broken bindings, not flesh - ignored
 
 StructuredBuffer<float4>         HrbfSamples;     // 2 per sample: (p.xyz, a), (b.xyz, 0), normalised coordinates
 StructuredBuffer<float4>         PrimInfo;        // origin.xyz (rest component space), support scale s
@@ -98,6 +102,11 @@ RWStructuredBuffer<float>        BetaOut;
 StructuredBuffer<float>          BetaIn;
 uint                             DebugMode;
 Buffer<float>                    PrePosition;     // positions before the implicit passes
+Buffer<float>                    FleshIn;         // Phase 13: Flesh surface this frame (3 floats per vertex, skinned component space)
+Buffer<float>                    FleshRestIn;     // Phase 13: Flesh surface captured at the reference pose
+RWStructuredBuffer<float4>       FleshCorrOut;    // Phase 13: xyz = masked correction, w = mask weight
+StructuredBuffer<float4>         FleshCorrIn;
+RWStructuredBuffer<float>        FleshWeightOut;  // Phase 13: mask weight for the detail pass
 RWBuffer<UNORM float4>           ColorBufferUAV;  // vertex colour (debug)
 
 float3 LoadP(Buffer<float> Buf, uint V)
@@ -669,4 +678,100 @@ void ImplicitAdvectCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	const float3 Xp = LoadP(TrackedIn, V);
 	const float3 Xr = TransformPosition(PrimPrevInverse[(uint)Prim], Xp);
 	StoreP(V, TransformPosition(PrimNow[(uint)Prim], Xr));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Phase 13 (11-07): Chaos Flesh as a low-frequency source for the inside of a bending joint.
+// The Flesh surface is thicker than the skinned mesh even at rest, so the signal is
+//     D = Flesh - (Skinned + R_v * (FleshRest - Rest))
+// i.e. the Flesh displacement beyond its rigidly carried rest offset (R_v = the vertex's skinning
+// rotation). It is kept only inside the folds (FoldSide x bend gate, per joint of the vertex's part),
+// smoothed over the one-ring to drop the tet-grid noise, and added after the implicit stage so the
+// contact handling stays and the wrinkle geometry rides on the Flesh bulk.
+// ---------------------------------------------------------------------------------------------
+float3 PH_QuatRotate(float4 Q, float3 V)
+{
+	return V + 2.0f * cross(Q.xyz, cross(Q.xyz, V) + Q.w * V);
+}
+
+[numthreads(THREADGROUP_SIZE, 1, 1)]
+void FleshCorrectCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	const uint V = DispatchThreadId.x;
+	if (V >= NumVertices)
+	{
+		return;
+	}
+	const float3 Xs = LoadP(PrePosition, V);
+	const float3 Xf = LoadP(FleshIn, V);
+	const float3 ORest = LoadP(FleshRestIn, V) - LoadP(RestPositionIn, V);
+	const float3 ONow = PH_QuatRotate(VertexRot[V], ORest);
+	const float3 D = Xf - (Xs + ONow);
+	float M = 0.0f;
+	const int Prim = VertexPrim[V];
+	if (Prim < 0)
+	{
+		M = FleshPalmWeight;
+	}
+	else
+	{
+		const uint4 Meta = PrimMeta[(uint)Prim];
+		for (uint n = 0; n < Meta.z; ++n)
+		{
+			const int2 NB = PrimNeighbours[Meta.w + n];
+			if (NB.y == 0)
+			{
+				continue;
+			}
+			const float Gate = smoothstep(0.0f, max(BendGateStart, 0.02f), PairBend[Meta.w + n]);
+			if (Gate <= 0.0f)
+			{
+				continue;
+			}
+			const float Side = (NB.y == 1) ? FoldSide((uint)NB.x, (uint)Prim, Xs, true) : FoldSide((uint)Prim, (uint)NB.x, Xs, false);
+			M = max(M, Gate * Side);
+		}
+	}
+	M = saturate(M * FleshStrength);
+	if (dot(D, D) > FleshMaxCm * FleshMaxCm)
+	{
+		M = 0.0f;   // barycentric extrapolation from a far tet, not a flesh deformation
+	}
+	FleshCorrOut[V] = float4(M * D, M);
+}
+
+[numthreads(THREADGROUP_SIZE, 1, 1)]
+void FleshSmoothCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	const uint V = DispatchThreadId.x;
+	if (V >= NumVertices)
+	{
+		return;
+	}
+	const float4 C = FleshCorrIn[V];
+	const uint Begin = AdjOffsets[V], End = AdjOffsets[V + 1];
+	if (End <= Begin)
+	{
+		FleshCorrOut[V] = C;
+		return;
+	}
+	float4 Sum = float4(0, 0, 0, 0);
+	for (uint k = Begin; k < End; ++k)
+	{
+		Sum += FleshCorrIn[AdjIndices[k]];
+	}
+	FleshCorrOut[V] = lerp(C, Sum / (float)(End - Begin), FleshSmoothLambda);
+}
+
+[numthreads(THREADGROUP_SIZE, 1, 1)]
+void FleshApplyCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	const uint V = DispatchThreadId.x;
+	if (V >= NumVertices)
+	{
+		return;
+	}
+	const float4 C = FleshCorrIn[V];
+	StoreP(V, LoadPU(PositionUAV, V) + C.xyz);
+	FleshWeightOut[V] = saturate(C.w);
 }

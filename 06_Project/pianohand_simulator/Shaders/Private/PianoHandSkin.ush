@@ -102,6 +102,7 @@ struct FPHSkinParams
 	float SideFolds;          // strength of the oblique folds at the sides of a flexed joint
 	float PalmarBase, PalmarCompress, PalmarIron, PalmarRelax;
 	float DorsalBase, DorsalIron, DorsalRelax;
+	float DorsalKeep;         // 11-07: floor of the dorsal fold gate on a bent joint - the creases stay as shallow wavy lines
 	float SideSharpness, SideFlip;
 	float MaskGain, MaskSharpness;
 
@@ -293,6 +294,10 @@ float2 PH_CreaseGates(float Compress, float Stretch, float Relax, FPHSkinParams 
 {
 	float Palm = P.PalmarBase + Compress * P.PalmarCompress + Relax * P.PalmarRelax - Stretch * P.PalmarIron;
 	float Back = P.DorsalBase + Relax * P.DorsalRelax - Stretch * P.DorsalIron;
+	// 11-07: flexion pulls the gathered folds flat, but the creases themselves do not vanish - on a bent knuckle they
+	// stay as a few shallow, wavy lines across the stretched skin (see the fist references). Below this floor the
+	// iron term cannot go once the joint is clearly bent (stretch is the bend proxy on this side).
+	Back = max(Back, P.DorsalKeep * smoothstep(0.04f, 0.25f, Stretch));
 	return float2(saturate(Palm), saturate(Back));
 }
 
@@ -400,7 +405,11 @@ float PH_CreaseHeightAt(float2 UV, float4 M, float4 M2, float SideSign, float3 S
 	// folds of neighbouring fingers do not line up.
 	float Spacing = 1.0f / max(P.CreaseFrequency * Folds, 1e-3f);
 	float Warp = P.CreaseWarp * Spacing * (1.0f + 0.5f * Irreg);
-	float S = S0 + PH_Fbm(UV * 90.0f) * Warp + Var * Seed * Spacing;
+	// 11-07: real knuckle folds MEANDER - broad sinuous curves whose wavelength along the fold is close to a
+	// centimetre and whose amplitude is a good part of the spacing - with only a little fine jitter on top. The
+	// old single fbm at UV*90 (wavelength ~3 mm) nudged the lines but left them reading as straight ruling.
+	float Meander = PH_Fbm(UV * 28.0f + Seed * 13.0f) * Warp * 2.4f + PH_Fbm(UV * 90.0f) * Warp * 0.4f;
+	float S = S0 + Meander + Var * Seed * Spacing;
 
 	// ---- furrow width: Bando w as a fraction of the spacing, coupled to the strain across the
 	// furrow (Weiss et al. 2024, "Fast Dynamic Facial Wrinkles"): a wrinkle is a reserve of skin,
@@ -416,7 +425,7 @@ float PH_CreaseHeightAt(float2 UV, float4 M, float4 M2, float SideSign, float3 S
 	// Pierard / Lagarde classify primary lines at tens of um and expression creases at hundreds).
 	//   primary    one crease on the band centre (the PIP a pair, +-Split), full depth
 	//   secondary  the per-joint family of fine folds, SecondaryDepth of that
-	float Sp = Ss + PH_Fbm(UV * 60.0f + 7.0f) * P.CreaseWarp * 0.5f;
+	float Sp = Ss + PH_Fbm(UV * 22.0f + 7.0f + Seed * 9.0f) * P.CreaseWarp * 0.9f + PH_Fbm(UV * 60.0f + 7.0f) * P.CreaseWarp * 0.25f;
 	float Primary = PH_Furrow(abs(Sp) - Split, Wp);
 
 	// taper: a real crease does not run all the way round; it dies out towards the sides of the

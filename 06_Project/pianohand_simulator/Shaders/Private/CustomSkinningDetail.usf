@@ -157,6 +157,8 @@ StructuredBuffer<FBoneTransform> RefPoseInverses;      // RefBasesInvMatrix in s
 StructuredBuffer<float>          VertexTensor;         // averaged C3, 6 floats per LOD vertex (xx yy zz xy xz yz)
 StructuredBuffer<float2>         RelaxStateIn;         // .y = relax slack, from CustomSkinningTension.usf
 StructuredBuffer<uint>           WeldCanon;            // 10-18: canonical vertex of a UV-seam twin - its normal, tangent and UV are used so both copies displace alike
+StructuredBuffer<float>          FleshWeightIn;        // Phase 13: 0..1, how much Chaos Flesh already shaped this vertex
+float                            FleshReplace;         // Phase 13: how much the volume bulge / palmar pads step back there
 
 RWBuffer<float>                   PositionBufferUAV;   // read + write (displaced in place)
 RWBuffer<TANGENT_RWBUFFER_FORMAT> TangentBufferUAV;    // read only in this pass
@@ -343,7 +345,9 @@ float PalmarFoldDisplacement(uint VertexIndex, float CompressC, uint Bone, uint 
 	const float Split = (JT == 2) ? MaskPalmSplit : 0.0f;                          // the palmar PIP crease is a pair
 	const float Amp = sqrt(Drive);
 	// pads either side of the crease, measured from the outer crease of the pair
-	const float Sp = max(S0 - Split, 0.0f);
+	// 11-07: the pads and the secondary fold meander along the crease like real palmar folds
+	const float Meander = 0.06f * sin(UV.x * 58.0f + UV.y * 41.0f) * (0.6f + 0.4f * sin(UV.y * 27.0f - UV.x * 19.0f));
+	const float Sp = max(S0 - Split + Meander, 0.0f);
 	const float Pad = exp(-(Sp - PalmarPadDist) * (Sp - PalmarPadDist) / max(PalmarPadWidth * PalmarPadWidth, 1e-4f));
 	const float Fold2 = exp(-(Sp - PalmarFold2Dist) * (Sp - PalmarFold2Dist) / max(PalmarFold2Width * PalmarFold2Width, 1e-4f));
 	const float Furrow = MaskFurrow(S0 - Split, MaskCreaseWidth * 1.3f);           // < 0 in the crease
@@ -387,7 +391,9 @@ float DorsalGatherDisplacement(uint VertexIndex, float StretchC, uint Bone, uint
 	// 10-18: gathered skin is rounded PADS separated by narrow fold valleys, not a sine corrugation, and the folds run
 	// continuously across the finger with only a slow change of height - the old per-texel noise made the ridges
 	// read as cobbles and scalloped the silhouette. The folds also die out towards the flanks of the finger.
-	const float Wobble = 0.025f * sin(UV.y * 160.0f + UV.x * 70.0f);                  // cm, a gentle waver of the fold lines
+	// 11-07: broad meander (wavelength ~ 1 cm along the fold, amplitude ~ a third of the spacing) + a little fine waver
+	const float Wobble = 0.07f * sin(UV.y * 52.0f + UV.x * 31.0f) * (0.6f + 0.4f * sin(UV.x * 23.0f - UV.y * 17.0f))
+	                   + 0.02f * sin(UV.y * 160.0f + UV.x * 70.0f);
 	const float Phase = 0.5f - 0.5f * cos(6.2831853f * (S0 + Wobble) / DorsalGatherSpacing);   // 0 on the crease, 1 half a spacing out
 	const float Ridge = pow(Phase, 0.45f);                                               // wide pads, narrow valleys
 	const float Env = exp(-(S0 * S0) / (DorsalGatherReach * DorsalGatherReach));
@@ -442,7 +448,9 @@ void DisplaceCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	// An incompressible slab: thickness scales by 1/J. Clamped to what skin actually does - about
 	// +70% thicker where it is gathered hard (a fist's palmar fold) and -40% where pulled taut -
 	// because past that the strain field is reporting folded-over triangles, not tissue.
-	const float VolumeTerm = VolumeBulge * clamp(1.0f / AreaRatio - 1.0f, -0.4f, 0.7f);
+	// Phase 13: where the Flesh correction shaped the vertex, the analytic volume bulge and the palmar pads step back
+	const float FleshKeep = 1.0f - saturate(FleshWeightIn[Vc] * FleshReplace);
+	const float VolumeTerm = FleshKeep * VolumeBulge * clamp(1.0f / AreaRatio - 1.0f, -0.4f, 0.7f);
 
 	// ---- joint band from the skin weights -----------------------------------
 	const uint StreamOffset = VertexIndex * (InputWeightStride / 4);
@@ -512,7 +520,7 @@ void DisplaceCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		CreaseTerm = MaskCreaseDisplacement(Vc, saturate(Compression * TensionScale), saturate(Stretch * TensionScale))
 		           - RelaxCreaseGain * JointBand * Slack
 		           + DorsalGatherDisplacement(Vc, saturate(Stretch * TensionScale), DominantBone, SecondBone)
-		           + PalmarFoldDisplacement(Vc, saturate(Compression * TensionScale), DominantBone, SecondBone);
+		           + FleshKeep * PalmarFoldDisplacement(Vc, saturate(Compression * TensionScale), DominantBone, SecondBone);
 	}
 
 	// ---- ripples along the bone axis ----------------------------------------

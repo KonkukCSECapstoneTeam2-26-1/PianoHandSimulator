@@ -1126,6 +1126,43 @@ Simulate(실제 Play 경로, 라이브 프레임레이트 추적)로도 확인: 
 주의: `mh_hand_demo.py` 는 `PH_MH_Hand` 를 지우고 다시 스폰하므로 에디터 재시작 후에는 AnimationData(anim_to_play)가
 비어 Play 에서 손이 멈춰 있다. 재시작 뒤에는 `setup_play_level.py` 를 다시 돌려 맵을 저장해야 한다 (이번에 복구함).
 
+## 1-Y. Phase 13 — Chaos Flesh 를 "접힘부의 저주파 살 변형"으로만 받기 (2026-11-07)
+
+**합의.** Flesh 로 손 전체를 덮어쓰지 않고, 살이 접히고 펴지는 부위의 저주파 변형만 받아 우리 파이프라인 위에 얹는다
+(사용자 제안). 경민 님 어댑터(`Flesh/PianoHandFleshInput`)는 그대로 두고 우리 디포머 쪽만 바꿨다.
+
+**구현 (`PianoHandSkinDeformer.cpp` Phase 13, `ImplicitSkinning.usf` FleshCorrect/Smooth/Apply).**
+- 어댑터의 블렌드 패스를 위치 버퍼 **사본**에 돌려 Flesh 표면을 별도 버퍼로 얻는다. implicit 이 켜져 있고
+  `bFleshCorrection` 이면 아래 보정, 아니면 어댑터 원래대로 위치를 통째로 덮어쓴다(경민 님 테스트 레벨 호환).
+- 휴지 자세(모든 뼈가 레퍼런스에서 `FleshRestCaptureDeg` 3° 이내)에서 Flesh 표면을 `FleshRest` 로 캡처해 두고,
+  신호는 `D = Flesh − (Skinned + R_v·(FleshRest − Rest))` — 정점 스키닝 회전 R_v 로 옮긴 휴지 두께 오프셋을 뺀 "살이 더 움직인 양".
+- 마스크 = 관절마다 `FoldSide × 굽힘 게이트` 의 최대값(접힘 안쪽만, 손바닥은 `FleshPalmWeight`), `FleshStrength` 배.
+  1-링 Jacobi 평활 `FleshSmoothIterations`(6) 회로 사면체 격자 잡음 제거, **implicit 뒤·텐션 앞**에 더한다.
+  디테일 패스는 `FleshWeight` 만큼 부피 항·손바닥 패드를 물린다(`FleshReplace`). `FleshMaxCm`(1.5 cm) 보다 긴 변위는
+  살이 아니라 깨진 바인딩으로 보고 버린다.
+- Play 경로에서 실행 확인: "Flesh correction on" 로그, 추적·구속 모두 유지.
+
+**발견 — 표면 바인딩이 깨져 있다.** Play 에서 Flesh 를 섞으면(어댑터 원래 경로) 손이 긴 줄기 모양으로 터진다
+(`skin_v11_flesh_probe.jpg`). 사면체 표면 자체(FleshComponent 렌더)는 멀쩡한 주먹이고, 빠른 읽기를 꺼도 같으므로 솔버나
+어댑터가 아니라 **`GenerateSurfaceBindings` 결과**가 원인이다. 휴지 자세 편차가 0.26 cm 로 작은 것은 증거가 못 된다:
+무게중심 좌표 임베딩은 어느 사면체에 묶여도 휴지 위치는 정확히 재현하고(외삽 가중치), 사면체가 움직여야 틀린 부모가
+드러난다. 렌더 정점 7.4만 개 중 상당수가 먼 사면체에 외삽 가중치로 묶여 있는 것으로 보인다. 경민 님께 요청:
+Dense 메시로 `GenerateSurfaceBindings` 재생성 후, 바인딩 가중치가 [0,1] 밖이거나 부모 사면체까지 거리가 큰 정점 수를
+로그로 확인. 그 전까지 우리 쪽은 `FleshMaxCm` 가드 때문에 Flesh 를 켜도 손이 터지지 않지만 효과도 평가할 수 없다.
+`L_FleshTest` 에서는 Flesh 구동용 `SKM_MH_Hand_R` 손이 Dense 손과 겹쳐 그려지므로(에디터) 주름 평가는 `L_PianoHandDemo` 에서 한다.
+
+**주름 피드백 ("구겨져 있고 마디 위에 구불거리는 주름이 없다").**
+- 머티리얼 관절 주름의 사행(meander): 기존 fbm(UV·90, 파장 ~3 mm, 진폭 0.25 간격)은 직선 괘선처럼 읽혔다. 파장 ~1 cm 의
+  넓은 사행(fbm(UV·28 + seed), 진폭 2.4×CreaseWarp×간격) + 작은 잔떨림으로 바꿨고 1차 주름선에도 같은 사행을 넣었다.
+- 손등 모임 주름 기하·손바닥 패드도 같은 꼴의 사행(0.07 / 0.06 cm)을 따른다.
+- `DorsalKeep`(0.35): 굽힌 마디에서 스트레치가 손등 주름을 전부 다림질하던 것을 바닥값으로 막아, 주먹·반굽힘에서도
+  얕고 구불거리는 선이 남게 했다. 비교 `skin_v11_dorsal_keep.jpg` (0 / 0.35 / 0.6).
+- 펼친 손의 손등·마디 주름은 사행이 들어가 실제 모인 피부에 가깝게 보인다 (`skin_v11_wrinkle_meander.jpg`).
+
+**도구.** 세션 임시 폴더가 지워져 모든 도구를 `~/.claude/projects/-Users-nunsori-Git-PianoHandSimulator/tools/` 로 다시 만들었다
+(원격 실행 클라이언트는 모든 어댑터 바인드 0.0.0.0, 에디터는 별도 세션으로 띄워 작업 중단이 에디터를 죽이지 않게 함,
+`set_t` 는 AnimationData 에 자세를 고정해 스폰 직후 손이 매 틱 0 초로 되돌아가는 문제를 피함).
+
 ## 2. 로드맵
 
 ### Phase 1 — 실제 스켈레탈 메시 연결 (MeshDeformer) — ✅ 완료 (1-B 참조)
