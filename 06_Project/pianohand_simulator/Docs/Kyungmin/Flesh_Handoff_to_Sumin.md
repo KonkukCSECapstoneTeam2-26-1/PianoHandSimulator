@@ -85,9 +85,8 @@ PianoHandFlesh::AddFleshBlendPass(GraphBuilder, MeshObject, PositionBuffer, Lod.
 - `stat Chaos`로 솔버 시간(`UDeformableSolverComponent.Simulate` 약 12 ms), `stat unit`으로 프레임.
 
 ## 9. 알려진 상태와 한계
-- 성능(에디터 PIE, 다른 프로그램 끈 상태): 프레임 약 16.0~16.6 ms(60~62 FPS). 여유 0.1~0.7 ms. 다른 게임을 켜 두면 프레임이 두 배가 됨.
+- 성능(에디터 PIE, 다른 프로그램 끈 상태): 프레임 약 16.0~16.6 ms(60~62 FPS). 여유 0.1~0.7 ms.
 - 손끝 어긋남(Flesh vs 스켈레탈 LBS): 정지 0.35~0.50 cm(Flesh가 부피를 유지해 약간 두꺼움), 움직일 때 대부분 0.3~0.9 cm 뒤처짐, 빠른 순간(100 cm/s 이상, IK 급점프) 최대 약 3 cm.
-- 프레임이 몇 초 멈춘 직후(스크린샷 등) 손끝 어긋남이 최대 10~15 cm로 튄 로그가 2건 있었음. 정상 재생에서 "터짐"은 곽경민 쪽 측정에서는 보지 못함. 수민 님이 본 "터짐"이 어떤 레벨·설정인지 알려 주면 비교 가능.
 - 주먹 쥘 때 안쪽 살이 지글거림(자기충돌 없음), Damping/Inflation 튜닝 미실시.
 - 섞는 것은 위치만, 한 프레임 지연 가능(게임 → 렌더 스레드 전달).
 - 자세한 측정: `Docs/Kyungmin/Flesh_Adapter.md`, `Docs/Kyungmin/4.4_Chaos_Flesh_PBD_Skinning.md` 4.4.7.
