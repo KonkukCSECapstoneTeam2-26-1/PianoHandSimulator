@@ -39,7 +39,9 @@ public:
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
 		SHADER_PARAMETER(uint32, NumVertices)
 		SHADER_PARAMETER(float, BlendWeight)
-		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float3>, FleshPositions)
+		// 3 floats per vertex. NOT StructuredBuffer<float3>: Metal reads float3 elements at a 16-byte stride while the upload is 12 bytes
+		// per vertex, so on macOS every position came out scrambled and the last quarter read zeros (hand exploded into streaks). (sumin, 11-15)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float>, FleshPositions)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<float>, PositionBufferUAV)
 	END_SHADER_PARAMETER_STRUCT()
 
@@ -128,7 +130,9 @@ namespace PianoHandFlesh
 			return false;
 		}
 
-		FRDGBufferRef FleshBuffer = CreateStructuredBuffer(GraphBuilder, TEXT("PianoHandFleshPositions"), Frame->Positions);
+		static_assert(sizeof(FVector3f) == 3 * sizeof(float), "Flesh positions are uploaded as 3 floats per vertex");
+		FRDGBufferRef FleshBuffer = CreateStructuredBuffer(GraphBuilder, TEXT("PianoHandFleshPositions"), sizeof(float), (uint32)Frame->Positions.Num() * 3u,
+			Frame->Positions.GetData(), (uint64)Frame->Positions.Num() * sizeof(FVector3f));
 
 		FPianoHandFleshBlendCS::FParameters* Params = GraphBuilder.AllocParameters<FPianoHandFleshBlendCS::FParameters>();
 		Params->NumVertices = NumLodVertices;

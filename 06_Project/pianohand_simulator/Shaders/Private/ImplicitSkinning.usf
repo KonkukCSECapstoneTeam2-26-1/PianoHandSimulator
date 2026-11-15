@@ -706,7 +706,14 @@ void FleshCorrectCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	const float3 Xf = LoadP(FleshIn, V);
 	const float3 ORest = LoadP(FleshRestIn, V) - LoadP(RestPositionIn, V);
 	const float3 ONow = PH_QuatRotate(VertexRot[V], ORest);
-	const float3 D = Xf - (Xs + ONow);
+	float3 D = Xf - (Xs + ONow);
+	// 11-15: soft length limit. Dropping long displacements outright (the first version) punched holes into the mask and the
+	// fold tore along them once real Flesh data arrived; the inside of a Flesh fold is jittery (no self-collision), so the
+	// displacement is limited in length instead and the one-ring smoothing does the rest.
+	{
+		const float Len = length(D);
+		D *= FleshMaxCm / max(Len, FleshMaxCm);
+	}
 	float M = 0.0f;
 	const int Prim = VertexPrim[V];
 	if (Prim < 0)
@@ -732,12 +739,8 @@ void FleshCorrectCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 			M = max(M, Gate * Side);
 		}
 	}
-	M = saturate(M * FleshStrength);
-	if (dot(D, D) > FleshMaxCm * FleshMaxCm)
-	{
-		M = 0.0f;   // barycentric extrapolation from a far tet, not a flesh deformation
-	}
-	FleshCorrOut[V] = float4(M * D, M);
+	M = saturate(M) ;
+	FleshCorrOut[V] = float4(M * FleshStrength * D, M);
 }
 
 [numthreads(THREADGROUP_SIZE, 1, 1)]

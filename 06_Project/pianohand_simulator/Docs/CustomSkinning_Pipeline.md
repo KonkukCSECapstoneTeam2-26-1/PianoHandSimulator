@@ -1137,19 +1137,25 @@ Simulate(실제 Play 경로, 라이브 프레임레이트 추적)로도 확인: 
 - 휴지 자세(모든 뼈가 레퍼런스에서 `FleshRestCaptureDeg` 3° 이내)에서 Flesh 표면을 `FleshRest` 로 캡처해 두고,
   신호는 `D = Flesh − (Skinned + R_v·(FleshRest − Rest))` — 정점 스키닝 회전 R_v 로 옮긴 휴지 두께 오프셋을 뺀 "살이 더 움직인 양".
 - 마스크 = 관절마다 `FoldSide × 굽힘 게이트` 의 최대값(접힘 안쪽만, 손바닥은 `FleshPalmWeight`), `FleshStrength` 배.
-  1-링 Jacobi 평활 `FleshSmoothIterations`(6) 회로 사면체 격자 잡음 제거, **implicit 뒤·텐션 앞**에 더한다.
-  디테일 패스는 `FleshWeight` 만큼 부피 항·손바닥 패드를 물린다(`FleshReplace`). `FleshMaxCm`(1.5 cm) 보다 긴 변위는
-  살이 아니라 깨진 바인딩으로 보고 버린다.
+  1-링 Jacobi 평활 `FleshSmoothIterations`(24) 회로 사면체 격자 잡음 제거, **implicit 뒤·텐션 앞**에 더한다.
+  디테일 패스는 `FleshWeight` 만큼 부피 항·손바닥 패드를 물린다(`FleshReplace`). 변위 길이는 `FleshMaxCm`(0.4 cm)로 제한한다.
 - Play 경로에서 실행 확인: "Flesh correction on" 로그, 추적·구속 모두 유지.
 
-**발견 — 표면 바인딩이 깨져 있다.** Play 에서 Flesh 를 섞으면(어댑터 원래 경로) 손이 긴 줄기 모양으로 터진다
-(`skin_v11_flesh_probe.jpg`). 사면체 표면 자체(FleshComponent 렌더)는 멀쩡한 주먹이고, 빠른 읽기를 꺼도 같으므로 솔버나
-어댑터가 아니라 **`GenerateSurfaceBindings` 결과**가 원인이다. 휴지 자세 편차가 0.26 cm 로 작은 것은 증거가 못 된다:
-무게중심 좌표 임베딩은 어느 사면체에 묶여도 휴지 위치는 정확히 재현하고(외삽 가중치), 사면체가 움직여야 틀린 부모가
-드러난다. 렌더 정점 7.4만 개 중 상당수가 먼 사면체에 외삽 가중치로 묶여 있는 것으로 보인다. 경민 님께 요청:
-Dense 메시로 `GenerateSurfaceBindings` 재생성 후, 바인딩 가중치가 [0,1] 밖이거나 부모 사면체까지 거리가 큰 정점 수를
-로그로 확인. 그 전까지 우리 쪽은 `FleshMaxCm` 가드 때문에 Flesh 를 켜도 손이 터지지 않지만 효과도 평가할 수 없다.
+**정정 (11-15) — "표면 바인딩 결함"은 오진이었다.** Play 에서 Flesh 를 섞으면 손이 긴 줄기로 터지던 것(`skin_v11_flesh_probe.jpg`)의
+원인은 바인딩이 아니라 **Metal 의 `StructuredBuffer<float3>` 간격**이었다. 어댑터가 위치를 정점당 12 바이트로 올리는데 Metal 은
+float3 원소를 16 바이트 간격으로 읽어, 모든 위치가 어긋나고 뒤쪽 1/4 은 0 을 읽었다(원점으로 뻗는 줄기). Windows(D3D)에서는
+12 바이트로 읽으므로 경민 님 PC 에서는 정상이었다. 어댑터의 자체 검증(엔진 계산과 차이 0)이 통과하는데도 터지는 것을 보고 찾았다.
+수정: `PianoHandFleshInput.cpp` / `PianoHandFleshBlend.usf` 에서 정점당 float 3 개(`StructuredBuffer<float>`)로 올리고 읽는다
+(두 플랫폼 공통, 경민 님 파일 2곳 수정 — 인계 문서 6절의 허락 범위). 수정 후 Flesh 블렌드가 정상 손으로 나온다(`skin_v12_flesh_stride_fix.jpg`).
+
+**합친 뒤 비교 (11-15, `skin_v12_flesh_compare.jpg`, Play 에서 주먹 직전에 정지).**
+- 우리만: 기준.
+- Flesh 전체 블렌드(어댑터 원래 방식, implicit 끔): 주먹에서 손 전체가 구겨진다(Flesh 접힘 안쪽은 자기충돌이 없어 지글거림).
+- 접힘부 결합 강도 1.0: 일부 찢김. 처음엔 긴 변위를 버려서 마스크에 구멍이 났다 → 버리지 않고 길이를 `FleshMaxCm` 로 줄이도록 변경.
+- **접힘부 결합 강도 0.5 / 길이 제한 0.4 cm / 평활 24 회: 찢김 없이 접힘부가 조금 더 도톰해진다. 이 값을 기본으로 채택.**
+  효과는 미묘하다(우리만과 차이가 작음). Flesh 가 접힘부에서 주는 정보의 질이 낮아(지글거림) 더 올리면 깨진다.
 `L_FleshTest` 에서는 Flesh 구동용 `SKM_MH_Hand_R` 손이 Dense 손과 겹쳐 그려지므로(에디터) 주름 평가는 `L_PianoHandDemo` 에서 한다.
+`GC_HandFlesh_Dense`(예전 비교용 지오메트리 캐시)는 저장소에 없고 쓰지 않는다.
 
 **주름 피드백 ("구겨져 있고 마디 위에 구불거리는 주름이 없다").**
 - 머티리얼 관절 주름의 사행(meander): 기존 fbm(UV·90, 파장 ~3 mm, 진폭 0.25 간격)은 직선 괘선처럼 읽혔다. 파장 ~1 cm 의

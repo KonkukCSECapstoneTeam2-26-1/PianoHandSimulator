@@ -9,7 +9,8 @@
 
 uint NumVertices;
 float BlendWeight;
-StructuredBuffer<float3> FleshPositions;
+// 3 floats per vertex (a float3 element is 16 bytes on Metal, the upload is 12 - see PianoHandFleshInput.cpp)
+StructuredBuffer<float> FleshPositions;
 RWBuffer<float> PositionBufferUAV;
 
 [numthreads(THREADGROUP_SIZE, 1, 1)]
@@ -25,7 +26,7 @@ void BlendCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		PositionBufferUAV[VertexIndex * 3 + 0],
 		PositionBufferUAV[VertexIndex * 3 + 1],
 		PositionBufferUAV[VertexIndex * 3 + 2]);
-	const float3 Flesh = FleshPositions[VertexIndex];
+	const float3 Flesh = float3(FleshPositions[VertexIndex * 3 + 0], FleshPositions[VertexIndex * 3 + 1], FleshPositions[VertexIndex * 3 + 2]);
 	const float3 OutP = lerp(Skinned, Flesh, BlendWeight);
 
 	PositionBufferUAV[VertexIndex * 3 + 0] = OutP.x;

@@ -1089,7 +1089,7 @@ public:
 
 	/** Scale of the masked Flesh correction (1 = the Flesh displacement as is). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Flesh", meta = (ClampMin = "0", UIMax = "2"))
-	float FleshStrength = 1.0f;
+	float FleshStrength = 0.5f;
 
 	/** Weight of the correction on palm / metacarpal vertices (no fold side there). 0 = fingers only. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Flesh", meta = (ClampMin = "0", ClampMax = "1"))
@@ -1097,7 +1097,7 @@ public:
 
 	/** Jacobi smoothing steps of the correction over the one-ring (removes Flesh's tet-grid noise and jitter). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Flesh", meta = (ClampMin = "0", ClampMax = "32"))
-	int32 FleshSmoothIterations = 6;
+	int32 FleshSmoothIterations = 24;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Flesh", meta = (ClampMin = "0", ClampMax = "1"))
 	float FleshSmoothLambda = 0.5f;
@@ -1115,11 +1115,11 @@ public:
 	float FleshRestCaptureDeg = 3.0f;
 
 	/**
-	 * Safety: a Flesh displacement (beyond the carried rest offset) longer than this many cm is not a flesh deformation
-	 * but a broken surface binding (barycentric extrapolation from a far tet) and is ignored for that vertex.
+	 * Length limit (cm) of the Flesh displacement beyond the carried rest offset. The inside of a Flesh fold is jittery
+	 * (no self-collision), so longer displacements are shortened to this length before the one-ring smoothing.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Flesh", meta = (ClampMin = "0.1", UIMax = "5"))
-	float FleshMaxCm = 1.5f;
+	float FleshMaxCm = 0.4f;
 
 	/** Bump to force the implicit fields to be rebuilt (also happens when the mesh or the sample counts change). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Implicit")
@@ -1290,13 +1290,13 @@ struct FPianoHandDeformerFrameParams
 	bool bImplicitTracking = true;
 	float ImplicitTrackMaxStepDeg = 25.0f;
 	bool bFleshCorrection = true;
-	float FleshStrength = 1.0f;
+	float FleshStrength = 0.5f;
 	float FleshPalmWeight = 0.0f;
-	int32 FleshSmoothIterations = 6;
+	int32 FleshSmoothIterations = 24;
 	float FleshSmoothLambda = 0.5f;
 	float FleshReplace = 1.0f;
 	float FleshRestCaptureDeg = 3.0f;
-	float FleshMaxCm = 1.5f;
+	float FleshMaxCm = 0.4f;
 	/** Max angular distance (degrees) of any bone from the reference pose this frame (game thread). */
 	float FleshPoseDeltaDeg = 180.0f;
 };

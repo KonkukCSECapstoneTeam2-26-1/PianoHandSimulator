@@ -124,6 +124,8 @@ IMPLICIT = dict(
     implicit_tolerance=0.002, implicit_relax=1.0, implicit_beta_diffusion=12, implicit_smooth_iterations=24,
     implicit_smooth_beta=1.0, implicit_bulge=0.0, implicit_bulge_start=15.0, implicit_bulge_full=70.0,
     implicit_bend_start=10.0, implicit_bend_full=40.0, implicit_contact_depth=0.25, implicit_stretch_keep=0.25,
+    # Phase 13: Chaos Flesh as a low-frequency correction inside the folds (only active when a Flesh Input component publishes data)
+    flesh_correction=True, flesh_strength=0.5, flesh_max_cm=0.4, flesh_smooth_iterations=24,
     implicit_samples_per_bone=50, implicit_palm_samples=100,
 )
 
