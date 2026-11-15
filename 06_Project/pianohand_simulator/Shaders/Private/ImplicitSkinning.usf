@@ -107,6 +107,7 @@ Buffer<float>                    FleshRestIn;     // Phase 13: Flesh surface cap
 RWStructuredBuffer<float4>       FleshCorrOut;    // Phase 13: xyz = masked correction, w = mask weight
 StructuredBuffer<float4>         FleshCorrIn;
 RWStructuredBuffer<float>        FleshWeightOut;  // Phase 13: mask weight for the detail pass
+RWStructuredBuffer<uint>         FleshStatsOut;   // Phase 13b: 8 fixed-point accumulators per primitive (joint accuracy vs Flesh)
 RWBuffer<UNORM float4>           ColorBufferUAV;  // vertex colour (debug)
 
 float3 LoadP(Buffer<float> Buf, uint V)
@@ -694,6 +695,29 @@ float3 PH_QuatRotate(float4 Q, float3 V)
 	return V + 2.0f * cross(Q.xyz, cross(Q.xyz, V) + Q.w * V);
 }
 
+// 0..1: is the vertex on the fold (inner) side of a bent joint of its own part? This is where Flesh is used.
+float PH_FleshJointMask(uint Prim, float3 Xs)
+{
+	float M = 0.0f;
+	const uint4 Meta = PrimMeta[Prim];
+	for (uint n = 0; n < Meta.z; ++n)
+	{
+		const int2 NB = PrimNeighbours[Meta.w + n];
+		if (NB.y == 0)
+		{
+			continue;
+		}
+		const float Gate = smoothstep(0.0f, max(BendGateStart, 0.02f), PairBend[Meta.w + n]);
+		if (Gate <= 0.0f)
+		{
+			continue;
+		}
+		const float Side = (NB.y == 1) ? FoldSide((uint)NB.x, Prim, Xs, true) : FoldSide(Prim, (uint)NB.x, Xs, false);
+		M = max(M, Gate * Side);
+	}
+	return saturate(M);
+}
+
 [numthreads(THREADGROUP_SIZE, 1, 1)]
 void FleshCorrectCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -714,32 +738,8 @@ void FleshCorrectCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		const float Len = length(D);
 		D *= FleshMaxCm / max(Len, FleshMaxCm);
 	}
-	float M = 0.0f;
 	const int Prim = VertexPrim[V];
-	if (Prim < 0)
-	{
-		M = FleshPalmWeight;
-	}
-	else
-	{
-		const uint4 Meta = PrimMeta[(uint)Prim];
-		for (uint n = 0; n < Meta.z; ++n)
-		{
-			const int2 NB = PrimNeighbours[Meta.w + n];
-			if (NB.y == 0)
-			{
-				continue;
-			}
-			const float Gate = smoothstep(0.0f, max(BendGateStart, 0.02f), PairBend[Meta.w + n]);
-			if (Gate <= 0.0f)
-			{
-				continue;
-			}
-			const float Side = (NB.y == 1) ? FoldSide((uint)NB.x, (uint)Prim, Xs, true) : FoldSide((uint)Prim, (uint)NB.x, Xs, false);
-			M = max(M, Gate * Side);
-		}
-	}
-	M = saturate(M) ;
+	const float M = (Prim < 0) ? saturate(FleshPalmWeight) : PH_FleshJointMask((uint)Prim, Xs);
 	FleshCorrOut[V] = float4(M * FleshStrength * D, M);
 }
 
@@ -777,4 +777,51 @@ void FleshApplyCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	const float4 C = FleshCorrIn[V];
 	StoreP(V, LoadPU(PositionUAV, V) + C.xyz);
 	FleshWeightOut[V] = saturate(C.w);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Phase 13b (11-15): accuracy at the joints. Flesh is used on the fold side of the joints, so that is where the
+// result is measured: the distance from each stage's surface to the Flesh surface (rest thickness removed),
+// weighted by the same joint mask. Per primitive, fixed point (x1024):
+//   0 sum w | 1 sum w*e(skinning) | 2 sum w*e(ours without Flesh) | 3 sum w*e(final)
+//   4 max e(skinning) | 5 max e(ours without Flesh) | 6 max e(final) | 7 vertices with w > 0.5
+// ---------------------------------------------------------------------------------------------
+[numthreads(THREADGROUP_SIZE, 1, 1)]
+void FleshStatsCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	const uint V = DispatchThreadId.x;
+	if (V >= NumVertices)
+	{
+		return;
+	}
+	const int Prim = VertexPrim[V];
+	if (Prim < 0)
+	{
+		return;
+	}
+	const float3 Xs = LoadP(PrePosition, V);
+	const float W = PH_FleshJointMask((uint)Prim, Xs);
+	if (W < 0.05f)
+	{
+		return;
+	}
+	const float3 ORest = LoadP(FleshRestIn, V) - LoadP(RestPositionIn, V);
+	const float3 Target = LoadP(FleshIn, V) - PH_QuatRotate(VertexRot[V], ORest);
+	const float3 Final = LoadP(PositionIn, V);
+	const float3 Corr = FleshCorrIn[V].xyz;
+	const float ESkin  = min(length(Target - Xs), 16.0f);
+	const float EOurs  = min(length(Target - (Final - Corr)), 16.0f);
+	const float EFinal = min(length(Target - Final), 16.0f);
+	const uint B = (uint)Prim * 8u;
+	InterlockedAdd(FleshStatsOut[B + 0u], (uint)round(W * 1024.0f));
+	InterlockedAdd(FleshStatsOut[B + 1u], (uint)round(W * ESkin * 1024.0f));
+	InterlockedAdd(FleshStatsOut[B + 2u], (uint)round(W * EOurs * 1024.0f));
+	InterlockedAdd(FleshStatsOut[B + 3u], (uint)round(W * EFinal * 1024.0f));
+	if (W > 0.5f)
+	{
+		InterlockedMax(FleshStatsOut[B + 4u], (uint)round(ESkin * 1024.0f));
+		InterlockedMax(FleshStatsOut[B + 5u], (uint)round(EOurs * 1024.0f));
+		InterlockedMax(FleshStatsOut[B + 6u], (uint)round(EFinal * 1024.0f));
+		InterlockedAdd(FleshStatsOut[B + 7u], 1u);
+	}
 }

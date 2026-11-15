@@ -20,6 +20,7 @@
 #include "RenderGraphResources.h"
 #include "CustomSkinningShader.h"
 #include "Engine/Texture2D.h"
+#include "RHIGPUReadback.h"
 #include "PianoHandSkinDeformer.generated.h"
 
 class USkinnedMeshComponent;
@@ -611,6 +612,30 @@ public:
 	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment);
 };
 
+/** Phase 13b: accuracy at the joints - distance of each stage's surface to the Flesh surface, per primitive (atomics). */
+class FPianoHandFleshStatsCS : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FPianoHandFleshStatsCS);
+	SHADER_USE_PARAMETER_STRUCT(FPianoHandFleshStatsCS, FGlobalShader);
+	static constexpr uint32 ThreadGroupSize = 64;
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_STRUCT_INCLUDE(FPianoHandImplicitCommonParameters, Common)
+		SHADER_PARAMETER(float, BendGateStart)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float>, PairBend)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<float>, PrePosition)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<float>, PositionIn)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<float>, FleshIn)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<float>, FleshRestIn)
+		SHADER_PARAMETER_SRV(Buffer<float>, RestPositionIn)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, VertexRot)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float4>, FleshCorrIn)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, FleshStatsOut)
+	END_SHADER_PARAMETER_STRUCT()
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
+	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment);
+};
+
 /** Adds the smoothed correction to the positions and hands the mask weight to the detail pass. */
 class FPianoHandFleshApplyCS : public FGlobalShader
 {
@@ -1115,6 +1140,19 @@ public:
 	float FleshRestCaptureDeg = 3.0f;
 
 	/**
+	 * Phase 13b: an animation that never passes through the reference pose (the IK clips start bent) never gives the
+	 * capture above a chance. When Play starts and a Flesh Input component is present, every single-node skeletal mesh
+	 * on this skeleton is held at the reference pose for this many seconds (Flesh settles, the rest shape is captured),
+	 * then its animation is restarted from 0. 0 = off.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Flesh", meta = (ClampMin = "0", UIMax = "5"))
+	float FleshCalibrationSeconds = 1.5f;
+
+	/** Log [FleshJoint] every ~300 frames: distance to the Flesh surface on the fold side of the joints, per stage. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Flesh")
+	bool bLogFleshJointAccuracy = true;
+
+	/**
 	 * Length limit (cm) of the Flesh displacement beyond the carried rest offset. The inside of a Flesh fold is jittery
 	 * (no self-collision), so longer displacements are shortened to this length before the one-ring smoothing.
 	 */
@@ -1161,6 +1199,15 @@ struct FPianoHandDeformerRenderState
 	TRefCountPtr<FRDGPooledBuffer> FleshRest;
 	uint32 FleshRestNumVerts = 0;
 	bool bLoggedFlesh = false;
+	/** Phase 13b: joint accuracy readback (8 uints per primitive) and its accumulation between log lines. */
+	TUniquePtr<FRHIGPUBufferReadback> FleshStatsReadback;
+	bool bFleshStatsPending = false;
+	uint32 FleshStatsBytes = 0;
+	uint32 FleshStatsFrame = 0;
+	int32 FleshStatsSamples = 0;
+	double FleshStatsSum[5][4] = {};      // per finger: sum w, sum w*e(skinning), sum w*e(ours), sum w*e(final)
+	double FleshStatsMax[3] = {};         // max e per stage over the window
+	double FleshStatsVerts = 0.0;
 	bool bLoggedProportionsDQS = false;
 	bool bLoggedMaskUnavailable = false;
 
@@ -1297,6 +1344,7 @@ struct FPianoHandDeformerFrameParams
 	float FleshReplace = 1.0f;
 	float FleshRestCaptureDeg = 3.0f;
 	float FleshMaxCm = 0.4f;
+	bool bLogFleshJointAccuracy = true;
 	/** Max angular distance (degrees) of any bone from the reference pose this frame (game thread). */
 	float FleshPoseDeltaDeg = 180.0f;
 };
@@ -1341,6 +1389,12 @@ private:
 	/** Phase 13: reference-pose component-space rotations, for the Flesh rest-pose gate. */
 	TArray<FQuat> RefPoseCSRotation;
 	TWeakObjectPtr<const USkinnedAsset> RefPoseAsset;
+	/** Phase 13b: reference-pose hold at the start of Play (Flesh rest capture). */
+	struct FFleshCalibHold { TWeakObjectPtr<class USkeletalMeshComponent> Component; TWeakObjectPtr<class UAnimationAsset> Asset; bool bLooping = true; };
+	TArray<FFleshCalibHold> FleshCalibHeld;
+	bool bFleshCalibStarted = false;
+	bool bFleshCalibDone = false;
+	double FleshCalibStartSeconds = 0.0;
 	TWeakObjectPtr<const USkinnedAsset> ImplicitAsset;
 	int32 ImplicitSamplesBuilt = 0;
 	int32 ImplicitPalmSamplesBuilt = 0;

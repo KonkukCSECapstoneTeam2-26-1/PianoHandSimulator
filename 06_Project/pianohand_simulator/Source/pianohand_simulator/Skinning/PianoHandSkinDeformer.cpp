@@ -22,6 +22,11 @@
 #include "Rendering/PositionVertexBuffer.h"
 #include "Rendering/SkinWeightVertexBuffer.h"
 #include "../Flesh/PianoHandFleshInput.h"  // 04_Flesh adapter (kyungmin)
+#include "Components/SkeletalMeshComponent.h"
+#include "Animation/AnimationAsset.h"
+#include "Animation/AnimSingleNodeInstance.h"
+#include "Engine/World.h"
+#include "UObject/UObjectIterator.h"
 
 namespace PianoHandImplicit
 {
@@ -58,6 +63,7 @@ IMPLEMENT_GLOBAL_SHADER(FPianoHandImplicitFinalizeCS, "/PianoHand/Private/Implic
 IMPLEMENT_GLOBAL_SHADER(FPianoHandFleshCorrectCS, "/PianoHand/Private/ImplicitSkinning.usf", "FleshCorrectCS", SF_Compute);
 IMPLEMENT_GLOBAL_SHADER(FPianoHandFleshSmoothCS, "/PianoHand/Private/ImplicitSkinning.usf", "FleshSmoothCS", SF_Compute);
 IMPLEMENT_GLOBAL_SHADER(FPianoHandFleshApplyCS, "/PianoHand/Private/ImplicitSkinning.usf", "FleshApplyCS", SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FPianoHandFleshStatsCS, "/PianoHand/Private/ImplicitSkinning.usf", "FleshStatsCS", SF_Compute);
 
 #define PH_IMPLICIT_SHADER_BOILERPLATE(ClassName) \
 bool ClassName::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters) \
@@ -79,6 +85,7 @@ PH_IMPLICIT_SHADER_BOILERPLATE(FPianoHandImplicitFinalizeCS)
 PH_IMPLICIT_SHADER_BOILERPLATE(FPianoHandFleshCorrectCS)
 PH_IMPLICIT_SHADER_BOILERPLATE(FPianoHandFleshSmoothCS)
 PH_IMPLICIT_SHADER_BOILERPLATE(FPianoHandFleshApplyCS)
+PH_IMPLICIT_SHADER_BOILERPLATE(FPianoHandFleshStatsCS)
 #undef PH_IMPLICIT_SHADER_BOILERPLATE
 
 bool FPianoHandSkinDeformerCS::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
@@ -480,8 +487,12 @@ namespace PianoHandSkinDeformer
 		const bool bImplicit = Params.bImplicitSkinning && Implicit.IsValid() && Implicit->bValid
 			&& Implicit->NumVertices == NumLodVerticesEarly && PrimInverses.Num() == Implicit->PrimInfo.Num() && Params.ImplicitIterations > 0;
 		// Phase 13: masked correction needs the implicit data (fold sides, one-ring) and a captured rest shape
-		const bool bFleshCorrect = FleshSurface != nullptr && FleshRestRDG != nullptr && Params.bFleshCorrection && bImplicit;
-		if (FleshSurface != nullptr && Params.bFleshCorrection && !bFleshCorrect)
+		// 11-15: when the masked correction is asked for (implicit on + bFleshCorrection) but the rest shape has not been
+		// captured yet, Flesh is SKIPPED for now - it used to fall back to the full blend, which silently turned the hand
+		// into the raw Flesh surface for the whole clip with animations that never pass through the reference pose.
+		const bool bFleshWanted = Params.bFleshCorrection && bImplicit;
+		const bool bFleshCorrect = FleshSurface != nullptr && FleshRestRDG != nullptr && bFleshWanted;
+		if (FleshSurface != nullptr && bFleshWanted && !bFleshCorrect)
 		{
 			static uint32 GFleshWaitCount = 0;
 			if ((GFleshWaitCount++ % 300u) == 0u)
@@ -490,7 +501,7 @@ namespace PianoHandSkinDeformer
 					*OwnerName.ToString(), FleshRestRDG != nullptr ? TEXT("captured") : TEXT("NOT captured"), Params.FleshPoseDeltaDeg, Params.FleshRestCaptureDeg, bImplicit ? 1 : 0);
 			}
 		}
-		if (FleshSurface != nullptr && !bFleshCorrect)
+		if (FleshSurface != nullptr && !bFleshWanted)
 		{
 			// the adapter's original behaviour: the skinned positions become the blended Flesh surface
 			AddCopyBufferPass(GraphBuilder, PositionBuffer, 0, FleshSurface, 0, FMath::Min<uint64>((uint64)NumLodVerticesEarly * 3u * sizeof(float), PositionBuffer->Desc.GetSize()));
@@ -766,6 +777,82 @@ namespace PianoHandSkinDeformer
 					P->FleshWeightOut = GraphBuilder.CreateUAV(FleshWeightBuf);
 					FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("PianoHand.FleshApply"), Shader, P,
 						FComputeShaderUtils::GetGroupCount(NumLodVerticesEarly, FPianoHandFleshApplyCS::ThreadGroupSize));
+				}
+				// ---- Phase 13b: accuracy at the joints (where Flesh is used), read back every 20 frames ------------
+				if (Params.bLogFleshJointAccuracy)
+				{
+					const int32 NumPrimsStats = Implicit->PrimInfo.Num();
+					if (State.bFleshStatsPending && State.FleshStatsReadback.IsValid() && State.FleshStatsReadback->IsReady())
+					{
+						const uint32* Data = (const uint32*)State.FleshStatsReadback->Lock(State.FleshStatsBytes);
+						if (Data != nullptr && State.FleshStatsBytes == (uint32)NumPrimsStats * 8u * sizeof(uint32))
+						{
+							static const TCHAR* FingerNames[5] = { TEXT("thumb"), TEXT("index"), TEXT("middle"), TEXT("ring"), TEXT("pinky") };
+							for (int32 P = 0; P < NumPrimsStats; ++P)
+							{
+								const FString Name = Implicit->PrimName.IsValidIndex(P) ? Implicit->PrimName[P].ToString() : FString();
+								int32 Finger = INDEX_NONE;
+								for (int32 F = 0; F < 5; ++F) { if (Name.StartsWith(FingerNames[F])) { Finger = F; break; } }
+								if (Finger == INDEX_NONE) { continue; }
+								const uint32* S = Data + P * 8;
+								for (int32 K = 0; K < 4; ++K) { State.FleshStatsSum[Finger][K] += (double)S[K] / 1024.0; }
+								for (int32 K = 0; K < 3; ++K) { State.FleshStatsMax[K] = FMath::Max(State.FleshStatsMax[K], (double)S[4 + K] / 1024.0); }
+								State.FleshStatsVerts += (double)S[7];
+							}
+							++State.FleshStatsSamples;
+						}
+						State.FleshStatsReadback->Unlock();
+						State.bFleshStatsPending = false;
+						if (State.FleshStatsSamples >= 15)
+						{
+							double W = 0.0, E[3] = { 0.0, 0.0, 0.0 };
+							double FingerFinal[5], FingerSkin[5];
+							for (int32 F = 0; F < 5; ++F)
+							{
+								W += State.FleshStatsSum[F][0];
+								for (int32 K = 0; K < 3; ++K) { E[K] += State.FleshStatsSum[F][1 + K]; }
+								const double Wf = FMath::Max(State.FleshStatsSum[F][0], 1e-6);
+								FingerSkin[F] = State.FleshStatsSum[F][1] / Wf;
+								FingerFinal[F] = State.FleshStatsSum[F][3] / Wf;
+							}
+							W = FMath::Max(W, 1e-6);
+							UE_LOG(LogPianoHand, Display, TEXT("[FleshJoint] fold side of the joints, ~%.0f verts: distance to the Flesh surface (rest thickness removed), mean / max cm | skinning %.3f / %.2f | ours without Flesh %.3f / %.2f | final %.3f / %.2f | final vs skinning per finger: thumb %.3f/%.3f index %.3f/%.3f middle %.3f/%.3f ring %.3f/%.3f pinky %.3f/%.3f"),
+								State.FleshStatsVerts / State.FleshStatsSamples,
+								E[0] / W, State.FleshStatsMax[0], E[1] / W, State.FleshStatsMax[1], E[2] / W, State.FleshStatsMax[2],
+								FingerFinal[0], FingerSkin[0], FingerFinal[1], FingerSkin[1], FingerFinal[2], FingerSkin[2], FingerFinal[3], FingerSkin[3], FingerFinal[4], FingerSkin[4]);
+							State.FleshStatsSamples = 0;
+							State.FleshStatsVerts = 0.0;
+							FMemory::Memzero(State.FleshStatsSum);
+							FMemory::Memzero(State.FleshStatsMax);
+						}
+					}
+					if (!State.bFleshStatsPending && (State.FleshStatsFrame++ % 20u) == 0u && NumPrimsStats > 0)
+					{
+						if (!State.FleshStatsReadback.IsValid())
+						{
+							State.FleshStatsReadback = MakeUnique<FRHIGPUBufferReadback>(TEXT("PianoHandFleshStats"));
+						}
+						FRDGBufferRef StatsBuf = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), (uint32)NumPrimsStats * 8u), TEXT("PianoHandFleshStats"));
+						AddClearUAVPass(GraphBuilder, GraphBuilder.CreateUAV(StatsBuf), 0u);
+						TShaderMapRef<FPianoHandFleshStatsCS> Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+						FPianoHandFleshStatsCS::FParameters* P = GraphBuilder.AllocParameters<FPianoHandFleshStatsCS::FParameters>();
+						P->Common = Common;
+						P->BendGateStart = FMath::DegreesToRadians(Params.ImplicitBendStart);
+						P->PairBend = PairBendSRV;
+						P->PrePosition = GraphBuilder.CreateSRV(ImplicitPrePos, PF_R32_FLOAT);
+						P->PositionIn = GraphBuilder.CreateSRV(PositionBuffer, PF_R32_FLOAT);
+						P->FleshIn = GraphBuilder.CreateSRV(FleshSurface, PF_R32_FLOAT);
+						P->FleshRestIn = GraphBuilder.CreateSRV(FleshRestRDG, PF_R32_FLOAT);
+						P->RestPositionIn = PositionSRV;
+						P->VertexRot = GraphBuilder.CreateSRV(VertexRotBuffer);
+						P->FleshCorrIn = GraphBuilder.CreateSRV(Cur);
+						P->FleshStatsOut = GraphBuilder.CreateUAV(StatsBuf);
+						FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("PianoHand.FleshStats"), Shader, P,
+							FComputeShaderUtils::GetGroupCount(NumLodVerticesEarly, FPianoHandFleshStatsCS::ThreadGroupSize));
+						State.FleshStatsBytes = (uint32)NumPrimsStats * 8u * sizeof(uint32);
+						AddEnqueueCopyPass(GraphBuilder, State.FleshStatsReadback.Get(), StatsBuf, State.FleshStatsBytes);
+						State.bFleshStatsPending = true;
+					}
 				}
 				if (!State.bLoggedFlesh)
 				{
@@ -1472,6 +1559,71 @@ void UPianoHandSkinDeformerInstance::EnqueueWork(FEnqueueWorkDesc const& InDesc)
 	{
 		PoseDeltaDeg = FMath::Max(PoseDeltaDeg, (float)FMath::RadiansToDegrees(ComponentSpaceTransforms[B].GetRotation().AngularDistance(RefPoseCSRotation[B])));
 	}
+
+	// Phase 13b: hold the reference pose for a moment after Play starts so the Flesh rest shape can be captured even with
+	// animations that never pass through it (the IK clips start with the fingers bent), then restart the animations.
+	if (const UPianoHandSkinDeformer* CalibSource = Deformer.Get())
+	{
+		UWorld* World = SkinnedComponent->GetWorld();
+		if (!bFleshCalibDone && CalibSource->bFleshCorrection && CalibSource->bImplicitSkinning && CalibSource->FleshCalibrationSeconds > 0.0f
+			&& World != nullptr && World->IsGameWorld())
+		{
+			if (!bFleshCalibStarted)
+			{
+				bool bHasFlesh = false;
+				for (TObjectIterator<UPianoHandFleshInputComponent> It; It; ++It)
+				{
+					if (It->GetWorld() == World && It->bEnabled) { bHasFlesh = true; break; }
+				}
+				if (!bHasFlesh)
+				{
+					bFleshCalibDone = true;   // nothing feeds Flesh into this world
+				}
+				else
+				{
+					bFleshCalibStarted = true;
+					FleshCalibStartSeconds = World->GetTimeSeconds();
+					for (TObjectIterator<USkeletalMeshComponent> It; It; ++It)
+					{
+						USkeletalMeshComponent* Comp = *It;
+						const USkeletalMesh* CompMesh = Comp->GetSkeletalMeshAsset();
+						if (Comp->GetWorld() != World || CompMesh == nullptr || CompMesh->GetSkeleton() != SkeletalMesh->GetSkeleton()
+							|| Comp->GetAnimationMode() != EAnimationMode::AnimationSingleNode)
+						{
+							continue;
+						}
+						UAnimSingleNodeInstance* Single = Comp->GetSingleNodeInstance();
+						UAnimationAsset* Asset = Single != nullptr ? Single->GetAnimationAsset() : nullptr;
+						if (Asset == nullptr) { Asset = Comp->AnimationData.AnimToPlay; }
+						if (Asset == nullptr) { continue; }
+						FFleshCalibHold Hold;
+						Hold.Component = Comp;
+						Hold.Asset = Asset;
+						Hold.bLooping = Comp->AnimationData.bSavedLooping;
+						FleshCalibHeld.Add(Hold);
+						Comp->SetAnimation(nullptr);   // single node with no asset = reference pose
+					}
+					UE_LOG(LogPianoHand, Display, TEXT("[SkinDeformer] %s: Flesh calibration - holding %d skeletal mesh(es) at the reference pose for %.1f s"),
+						*InDesc.OwnerName.ToString(), FleshCalibHeld.Num(), CalibSource->FleshCalibrationSeconds);
+				}
+			}
+			else if (World->GetTimeSeconds() - FleshCalibStartSeconds >= (double)CalibSource->FleshCalibrationSeconds)
+			{
+				for (const FFleshCalibHold& Hold : FleshCalibHeld)
+				{
+					USkeletalMeshComponent* Comp = Hold.Component.Get();
+					UAnimationAsset* Asset = Hold.Asset.Get();
+					if (Comp == nullptr || Asset == nullptr) { continue; }
+					Comp->SetAnimation(Asset);
+					Comp->SetPosition(0.0f, false);
+					Comp->Play(Hold.bLooping);
+				}
+				UE_LOG(LogPianoHand, Display, TEXT("[SkinDeformer] %s: Flesh calibration done - animations restarted"), *InDesc.OwnerName.ToString());
+				FleshCalibHeld.Reset();
+				bFleshCalibDone = true;
+			}
+		}
+	}
 	const TArray<FMatrix44f>& RefBasesInvMatrix = SkeletalMesh->GetRefBasesInvMatrix();
 	const int32 NumBones = FMath::Min(ComponentSpaceTransforms.Num(), RefBasesInvMatrix.Num());
 
@@ -1710,6 +1862,7 @@ void UPianoHandSkinDeformerInstance::EnqueueWork(FEnqueueWorkDesc const& InDesc)
 		FrameParams.FleshReplace = Source->FleshReplace;
 		FrameParams.FleshRestCaptureDeg = Source->FleshRestCaptureDeg;
 		FrameParams.FleshMaxCm = Source->FleshMaxCm;
+		FrameParams.bLogFleshJointAccuracy = Source->bLogFleshJointAccuracy;
 		FrameParams.FleshPoseDeltaDeg = PoseDeltaDeg;
 	}
 	else

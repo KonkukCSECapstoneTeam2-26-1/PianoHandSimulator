@@ -17,8 +17,10 @@
   접힘 안쪽 마스크(관절별 FoldSide × 굽힘)로 걸러 평활한 뒤 implicit **뒤**에 더합니다.
 - 그 외(implicit 끔 = `attach_skin_deformer_flesh.py` 설정): 예전과 똑같이 전체 블렌드. `L_FleshTest` 의 기존 동작은 그대로입니다.
 - 기본값: `FleshStrength` 0.5, `FleshMaxCm` 0.4, `FleshSmoothIterations` 24, `FleshRestCaptureDeg` 3.
-  휴지 캡처는 모든 뼈가 레퍼런스 자세에서 3° 이내일 때 일어나므로, 애니메이션이 한 번은 편 자세를 지나야 보정이 켜집니다
-  (`A_IK_DebClai` 는 시작 자세가 굽어 있어 로그에 "rest shape NOT captured" 가 나올 수 있음 → 필요하면 임계값을 올리거나 첫 프레임 캡처로 바꿀 예정).
+  휴지 캡처는 모든 뼈가 레퍼런스 자세에서 3° 이내일 때 일어납니다. `A_IK_DebClai` 는 시작부터 굽어 있어 캡처가 안 되므로,
+  Play 시작 시 디포머가 같은 스켈레톤의 단일 노드 스켈레탈 메시(제 손과 Flesh 구동용 손)를 `FleshCalibrationSeconds`(1.5 s) 동안
+  레퍼런스 자세로 두었다가 애니메이션을 0 초부터 다시 시작합니다. **Play 직후 1.5 초 동안 손이 펴져 있는 것은 이 때문입니다.**
+  기준 모양이 없을 때는 전체 블렌드로 떨어지지 않고 Flesh 를 건너뜁니다.
 
 ## 3. 비교 결과 (`Docs/images/skin_v12_flesh_compare.jpg`)
 - Flesh 전체 블렌드는 주먹에서 손 전체가 구겨집니다(접힘 안쪽 지글거림이 그대로 표면에 나옴).
@@ -29,3 +31,11 @@
 - `L_FleshTest` 는 건드리지 않았습니다(맵 저장 안 함). `GC_HandFlesh_Dense` 는 저장소에 없고 쓰지 않습니다.
 - `L_PianoHandDemo` 에는 아직 Flesh 액터가 없습니다. 옮길 때는 레벨 파일 수정 순서를 먼저 정하겠습니다.
 - 제 Mac 측정: Flesh 읽기 1.3 ms, 프레임 약 49 ms(20 FPS, 에디터 PIE·다른 프로그램 켠 상태). 60 FPS 수치는 재현하지 못했습니다.
+
+## 5. 마디 기준 정확도와 최종 레벨 (11-15 오후 추가)
+- 로그 `[FleshJoint]`: 마디 접힘 안쪽 정점에서, 휴지 두께를 뺀 Flesh 표면까지의 거리(가중 평균 / 최대, cm)를 단계별로 냅니다.
+  `A_IK_DebClai` 약 2 분 평균: 스키닝만 0.458, 제 파이프라인(Flesh 없이) 0.480, 최종 0.366 (약 24% 감소).
+  최대 2~9 cm 는 IK 급점프 구간의 Flesh 지연입니다. 끄려면 디포머 `bLogFleshJointAccuracy`.
+- `Scripts/create_final_level.py` 가 `L_FleshTest` 의 사본 `L_PianoHandFinal` 을 만듭니다. Flesh 표면·구동용 손·`GC_HandFlesh_Dense` 는
+  게임에서 숨기고 최종 손만 보입니다. 디포머 설정이 레벨에 저장돼 있어 `attach_skin_deformer_flesh.py` 가 필요 없습니다.
+  `L_FleshTest` 는 건드리지 않았으니 그쪽 변경은 자유롭게 하시고, 바뀌면 스크립트를 다시 돌리면 됩니다.
