@@ -582,6 +582,10 @@ public:
 		SHADER_PARAMETER(float, FleshStrength)
 		SHADER_PARAMETER(float, FleshPalmWeight)
 		SHADER_PARAMETER(float, FleshMaxCm)
+		SHADER_PARAMETER(float, FleshTensionGuide)
+		SHADER_PARAMETER(float, FleshTensionStart)
+		SHADER_PARAMETER(float, FleshTensionFull)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float>, FleshTensor)
 		SHADER_PARAMETER(float, BendGateStart)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<float>, PairBend)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<float>, PrePosition)
@@ -1114,7 +1118,7 @@ public:
 
 	/** Scale of the masked Flesh correction (1 = the Flesh displacement as is). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Flesh", meta = (ClampMin = "0", UIMax = "2"))
-	float FleshStrength = 0.5f;
+	float FleshStrength = 0.75f;
 
 	/** Weight of the correction on palm / metacarpal vertices (no fold side there). 0 = fingers only. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Flesh", meta = (ClampMin = "0", ClampMax = "1"))
@@ -1158,6 +1162,20 @@ public:
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Flesh", meta = (ClampMin = "0.1", UIMax = "5"))
 	float FleshMaxCm = 0.4f;
+
+	/**
+	 * 11-15: how much the Flesh correction follows the tension map (0 = even over the fold side of the joint, 1 = only
+	 * where the skin is compressed). The weight ramps from FleshTensionStart to FleshTensionFull of in-plane compression
+	 * (1 - smallest principal stretch of the smoothed strain tensor). Needs bComputeTension.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Flesh", meta = (ClampMin = "0", ClampMax = "1"))
+	float FleshTensionGuide = 1.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Flesh", meta = (ClampMin = "0", UIMax = "0.5"))
+	float FleshTensionStart = 0.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Flesh", meta = (ClampMin = "0", UIMax = "0.8"))
+	float FleshTensionFull = 0.04f;
 
 	/** Bump to force the implicit fields to be rebuilt (also happens when the mesh or the sample counts change). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "PianoHand|Implicit")
@@ -1337,13 +1355,16 @@ struct FPianoHandDeformerFrameParams
 	bool bImplicitTracking = true;
 	float ImplicitTrackMaxStepDeg = 25.0f;
 	bool bFleshCorrection = true;
-	float FleshStrength = 0.5f;
+	float FleshStrength = 0.75f;
 	float FleshPalmWeight = 0.0f;
 	int32 FleshSmoothIterations = 24;
 	float FleshSmoothLambda = 0.5f;
 	float FleshReplace = 1.0f;
 	float FleshRestCaptureDeg = 3.0f;
 	float FleshMaxCm = 0.4f;
+	float FleshTensionGuide = 1.0f;
+	float FleshTensionStart = 0.0f;
+	float FleshTensionFull = 0.04f;
 	bool bLogFleshJointAccuracy = true;
 	/** Max angular distance (degrees) of any bone from the reference pose this frame (game thread). */
 	float FleshPoseDeltaDeg = 180.0f;

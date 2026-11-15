@@ -39,3 +39,13 @@
 - `Scripts/create_final_level.py` 가 `L_FleshTest` 의 사본 `L_PianoHandFinal` 을 만듭니다. Flesh 표면·구동용 손·`GC_HandFlesh_Dense` 는
   게임에서 숨기고 최종 손만 보입니다. 디포머 설정이 레벨에 저장돼 있어 `attach_skin_deformer_flesh.py` 가 필요 없습니다.
   `L_FleshTest` 는 건드리지 않았으니 그쪽 변경은 자유롭게 하시고, 바뀌면 스크립트를 다시 돌리면 됩니다.
+
+## 6. 텐션맵 유도와 레벨 저장 버그 (11-15 저녁 추가)
+- 보정이 굴곡측 전체에 고르게 들어가 손끝 패드가 번지던 것을, 제 텐션맵의 압축량(0~4%)으로 가중하게 바꿨습니다
+  (`FleshTensionGuide` 1.0, 세기 0.75). 손끝 번짐이 없어지고 마디 정확도는 −17% (고르게 넣던 때 −19%).
+  비교 `Docs/images/skin_v13_tension_guide_*.jpg`, 설명은 `CustomSkinning_Pipeline.md` 1-Z.
+- **정정:** 5절의 "디포머 설정이 레벨에 저장돼 있다"는 이전 커밋에서는 사실이 아니었습니다(디포머가 Transient 라 에디터를
+  다시 켜면 빠졌습니다). 이번 커밋에서 고치고 `L_PianoHandFinal` 을 다시 저장했습니다. 그 전에 받아 보셨다면 손이 기본
+  스키닝으로 보였을 겁니다.
+- 제안(경민 님 쪽 작업): 접히는 곳만 무르게 하려면 사면체 강성을 부위별로 주는 방법이 있습니다. 필요하시면 제 접힘 마스크
+  (`T_PH_WrinkleMask`)를 정점 값으로 뽑아 드리겠습니다.

@@ -69,7 +69,11 @@ float StretchKeep;           // 10-18: fraction of the correction kept on the st
 float FleshStrength;         // Phase 13: scale of the masked Flesh correction
 float FleshPalmWeight;       // Phase 13: mask weight on palm / metacarpal vertices (no fold side there)
 float FleshSmoothLambda;     // Phase 13: Jacobi step of the correction smoothing
-float FleshMaxCm;            // Phase 13: displacements longer than this are broken bindings, not flesh - ignored
+float FleshMaxCm;            // Phase 13: length limit of the Flesh displacement (cm)
+float FleshTensionGuide;     // 11-15: 0 = even over the fold side, 1 = only where the tension map says the skin is compressed
+float FleshTensionStart;     // in-plane compression where the weight starts
+float FleshTensionFull;      // ... and where it is full
+StructuredBuffer<float>          FleshTensor;     // 6 per vertex (xx, yy, zz, xy, xz, yz): smoothed strain tensor C of the tension stage
 
 StructuredBuffer<float4>         HrbfSamples;     // 2 per sample: (p.xyz, a), (b.xyz, 0), normalised coordinates
 StructuredBuffer<float4>         PrimInfo;        // origin.xyz (rest component space), support scale s
@@ -739,7 +743,19 @@ void FleshCorrectCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		D *= FleshMaxCm / max(Len, FleshMaxCm);
 	}
 	const int Prim = VertexPrim[V];
-	const float M = (Prim < 0) ? saturate(FleshPalmWeight) : PH_FleshJointMask((uint)Prim, Xs);
+	float M = (Prim < 0) ? saturate(FleshPalmWeight) : PH_FleshJointMask((uint)Prim, Xs);
+	if (FleshTensionGuide > 0.0f && M > 0.0f)
+	{
+		// C = (in-plane right Cauchy-Green) + n n^T, so its eigenvalues are lambda1^2, lambda2^2 and 1:
+		// trace - 1 = l1^2 + l2^2, det = l1^2 l2^2  ->  the smallest principal stretch without needing a tangent frame
+		const float Cxx = FleshTensor[V * 6u + 0u], Cyy = FleshTensor[V * 6u + 1u], Czz = FleshTensor[V * 6u + 2u];
+		const float Cxy = FleshTensor[V * 6u + 3u], Cxz = FleshTensor[V * 6u + 4u], Cyz = FleshTensor[V * 6u + 5u];
+		const float S = max(Cxx + Cyy + Czz - 1.0f, 0.0f);
+		const float Pd = max(Cxx * (Cyy * Czz - Cyz * Cyz) - Cxy * (Cxy * Czz - Cyz * Cxz) + Cxz * (Cxy * Cyz - Cyy * Cxz), 0.0f);
+		const float LMin = sqrt(max(0.5f * (S - sqrt(max(S * S - 4.0f * Pd, 0.0f))), 0.0f));
+		const float Compress = max(1.0f - LMin, 0.0f);
+		M *= lerp(1.0f, smoothstep(FleshTensionStart, max(FleshTensionFull, FleshTensionStart + 1e-3f), Compress), saturate(FleshTensionGuide));
+	}
 	FleshCorrOut[V] = float4(M * FleshStrength * D, M);
 }
 

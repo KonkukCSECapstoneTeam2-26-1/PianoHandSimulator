@@ -481,6 +481,7 @@ namespace PianoHandSkinDeformer
 		// -------------------------------------------------------------------
 		const uint32 NumLodVerticesEarly = Lod.GetNumVertices();
 		FPianoHandImplicitCommonParameters ImplicitDebugCommon;
+		FRDGBufferSRVRef FleshPairBendSRV = nullptr;
 		FRDGBufferRef ImplicitPrePos = nullptr;
 		FRDGBufferRef ImplicitGradBuffer = nullptr;
 		FRDGBufferRef ImplicitStateBuffer = nullptr;
@@ -554,6 +555,7 @@ namespace PianoHandSkinDeformer
 			TArray<float> PairBendSafe = PairBend;
 			if (PairBendSafe.Num() == 0) { PairBendSafe.Add(0.0f); }
 			FRDGBufferSRVRef PairBendSRV = GraphBuilder.CreateSRV(CreateStructuredBuffer(GraphBuilder, TEXT("PianoHandImplicitPairBend"), PairBendSafe));
+			FleshPairBendSRV = PairBendSRV;
 
 			ImplicitDebugCommon = Common;
 			ImplicitPrePos = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateBufferDesc(sizeof(float), FMath::Max(NumLodVerticesEarly * 3u, 1u)), TEXT("PianoHandImplicitPrePos"));
@@ -731,136 +733,6 @@ namespace PianoHandSkinDeformer
 				State.ImplicitTrackedNumVerts = 0;
 			}
 
-			// ---- Phase 13: Flesh low-frequency correction inside the folds ------------------------------
-			if (bFleshCorrect)
-			{
-				FRDGBufferRef CorrA = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateStructuredDesc(sizeof(FVector4f), FMath::Max(NumLodVerticesEarly, 1u)), TEXT("PianoHandFleshCorrA"));
-				FRDGBufferRef CorrB = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateStructuredDesc(sizeof(FVector4f), FMath::Max(NumLodVerticesEarly, 1u)), TEXT("PianoHandFleshCorrB"));
-				{
-					TShaderMapRef<FPianoHandFleshCorrectCS> Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
-					FPianoHandFleshCorrectCS::FParameters* P = GraphBuilder.AllocParameters<FPianoHandFleshCorrectCS::FParameters>();
-					P->Common = Common;
-					P->FleshStrength = FMath::Max(Params.FleshStrength, 0.0f);
-					P->FleshPalmWeight = FMath::Clamp(Params.FleshPalmWeight, 0.0f, 1.0f);
-					P->FleshMaxCm = FMath::Max(Params.FleshMaxCm, 0.1f);
-					P->BendGateStart = FMath::DegreesToRadians(Params.ImplicitBendStart);
-					P->PairBend = PairBendSRV;
-					P->PrePosition = GraphBuilder.CreateSRV(ImplicitPrePos, PF_R32_FLOAT);
-					P->FleshIn = GraphBuilder.CreateSRV(FleshSurface, PF_R32_FLOAT);
-					P->FleshRestIn = GraphBuilder.CreateSRV(FleshRestRDG, PF_R32_FLOAT);
-					P->RestPositionIn = PositionSRV;
-					P->VertexRot = GraphBuilder.CreateSRV(VertexRotBuffer);
-					P->FleshCorrOut = GraphBuilder.CreateUAV(CorrA);
-					FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("PianoHand.FleshCorrect"), Shader, P,
-						FComputeShaderUtils::GetGroupCount(NumLodVerticesEarly, FPianoHandFleshCorrectCS::ThreadGroupSize));
-				}
-				FRDGBufferRef Cur = CorrA, Nxt = CorrB;
-				const int32 SmoothIt = FMath::Clamp(Params.FleshSmoothIterations, 0, 32);
-				for (int32 It = 0; It < SmoothIt; ++It)
-				{
-					TShaderMapRef<FPianoHandFleshSmoothCS> Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
-					FPianoHandFleshSmoothCS::FParameters* P = GraphBuilder.AllocParameters<FPianoHandFleshSmoothCS::FParameters>();
-					P->Common = Common;
-					P->FleshSmoothLambda = FMath::Clamp(Params.FleshSmoothLambda, 0.0f, 1.0f);
-					P->FleshCorrIn = GraphBuilder.CreateSRV(Cur);
-					P->FleshCorrOut = GraphBuilder.CreateUAV(Nxt);
-					FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("PianoHand.FleshSmooth(%d)", It), Shader, P,
-						FComputeShaderUtils::GetGroupCount(NumLodVerticesEarly, FPianoHandFleshSmoothCS::ThreadGroupSize));
-					Swap(Cur, Nxt);
-				}
-				{
-					TShaderMapRef<FPianoHandFleshApplyCS> Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
-					FPianoHandFleshApplyCS::FParameters* P = GraphBuilder.AllocParameters<FPianoHandFleshApplyCS::FParameters>();
-					P->Common = Common;
-					P->FleshCorrIn = GraphBuilder.CreateSRV(Cur);
-					P->PositionUAV = PositionUAV;
-					P->FleshWeightOut = GraphBuilder.CreateUAV(FleshWeightBuf);
-					FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("PianoHand.FleshApply"), Shader, P,
-						FComputeShaderUtils::GetGroupCount(NumLodVerticesEarly, FPianoHandFleshApplyCS::ThreadGroupSize));
-				}
-				// ---- Phase 13b: accuracy at the joints (where Flesh is used), read back every 20 frames ------------
-				if (Params.bLogFleshJointAccuracy)
-				{
-					const int32 NumPrimsStats = Implicit->PrimInfo.Num();
-					if (State.bFleshStatsPending && State.FleshStatsReadback.IsValid() && State.FleshStatsReadback->IsReady())
-					{
-						const uint32* Data = (const uint32*)State.FleshStatsReadback->Lock(State.FleshStatsBytes);
-						if (Data != nullptr && State.FleshStatsBytes == (uint32)NumPrimsStats * 8u * sizeof(uint32))
-						{
-							static const TCHAR* FingerNames[5] = { TEXT("thumb"), TEXT("index"), TEXT("middle"), TEXT("ring"), TEXT("pinky") };
-							for (int32 P = 0; P < NumPrimsStats; ++P)
-							{
-								const FString Name = Implicit->PrimName.IsValidIndex(P) ? Implicit->PrimName[P].ToString() : FString();
-								int32 Finger = INDEX_NONE;
-								for (int32 F = 0; F < 5; ++F) { if (Name.StartsWith(FingerNames[F])) { Finger = F; break; } }
-								if (Finger == INDEX_NONE) { continue; }
-								const uint32* S = Data + P * 8;
-								for (int32 K = 0; K < 4; ++K) { State.FleshStatsSum[Finger][K] += (double)S[K] / 1024.0; }
-								for (int32 K = 0; K < 3; ++K) { State.FleshStatsMax[K] = FMath::Max(State.FleshStatsMax[K], (double)S[4 + K] / 1024.0); }
-								State.FleshStatsVerts += (double)S[7];
-							}
-							++State.FleshStatsSamples;
-						}
-						State.FleshStatsReadback->Unlock();
-						State.bFleshStatsPending = false;
-						if (State.FleshStatsSamples >= 15)
-						{
-							double W = 0.0, E[3] = { 0.0, 0.0, 0.0 };
-							double FingerFinal[5], FingerSkin[5];
-							for (int32 F = 0; F < 5; ++F)
-							{
-								W += State.FleshStatsSum[F][0];
-								for (int32 K = 0; K < 3; ++K) { E[K] += State.FleshStatsSum[F][1 + K]; }
-								const double Wf = FMath::Max(State.FleshStatsSum[F][0], 1e-6);
-								FingerSkin[F] = State.FleshStatsSum[F][1] / Wf;
-								FingerFinal[F] = State.FleshStatsSum[F][3] / Wf;
-							}
-							W = FMath::Max(W, 1e-6);
-							UE_LOG(LogPianoHand, Display, TEXT("[FleshJoint] fold side of the joints, ~%.0f verts: distance to the Flesh surface (rest thickness removed), mean / max cm | skinning %.3f / %.2f | ours without Flesh %.3f / %.2f | final %.3f / %.2f | final vs skinning per finger: thumb %.3f/%.3f index %.3f/%.3f middle %.3f/%.3f ring %.3f/%.3f pinky %.3f/%.3f"),
-								State.FleshStatsVerts / State.FleshStatsSamples,
-								E[0] / W, State.FleshStatsMax[0], E[1] / W, State.FleshStatsMax[1], E[2] / W, State.FleshStatsMax[2],
-								FingerFinal[0], FingerSkin[0], FingerFinal[1], FingerSkin[1], FingerFinal[2], FingerSkin[2], FingerFinal[3], FingerSkin[3], FingerFinal[4], FingerSkin[4]);
-							State.FleshStatsSamples = 0;
-							State.FleshStatsVerts = 0.0;
-							FMemory::Memzero(State.FleshStatsSum);
-							FMemory::Memzero(State.FleshStatsMax);
-						}
-					}
-					if (!State.bFleshStatsPending && (State.FleshStatsFrame++ % 20u) == 0u && NumPrimsStats > 0)
-					{
-						if (!State.FleshStatsReadback.IsValid())
-						{
-							State.FleshStatsReadback = MakeUnique<FRHIGPUBufferReadback>(TEXT("PianoHandFleshStats"));
-						}
-						FRDGBufferRef StatsBuf = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), (uint32)NumPrimsStats * 8u), TEXT("PianoHandFleshStats"));
-						AddClearUAVPass(GraphBuilder, GraphBuilder.CreateUAV(StatsBuf), 0u);
-						TShaderMapRef<FPianoHandFleshStatsCS> Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
-						FPianoHandFleshStatsCS::FParameters* P = GraphBuilder.AllocParameters<FPianoHandFleshStatsCS::FParameters>();
-						P->Common = Common;
-						P->BendGateStart = FMath::DegreesToRadians(Params.ImplicitBendStart);
-						P->PairBend = PairBendSRV;
-						P->PrePosition = GraphBuilder.CreateSRV(ImplicitPrePos, PF_R32_FLOAT);
-						P->PositionIn = GraphBuilder.CreateSRV(PositionBuffer, PF_R32_FLOAT);
-						P->FleshIn = GraphBuilder.CreateSRV(FleshSurface, PF_R32_FLOAT);
-						P->FleshRestIn = GraphBuilder.CreateSRV(FleshRestRDG, PF_R32_FLOAT);
-						P->RestPositionIn = PositionSRV;
-						P->VertexRot = GraphBuilder.CreateSRV(VertexRotBuffer);
-						P->FleshCorrIn = GraphBuilder.CreateSRV(Cur);
-						P->FleshStatsOut = GraphBuilder.CreateUAV(StatsBuf);
-						FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("PianoHand.FleshStats"), Shader, P,
-							FComputeShaderUtils::GetGroupCount(NumLodVerticesEarly, FPianoHandFleshStatsCS::ThreadGroupSize));
-						State.FleshStatsBytes = (uint32)NumPrimsStats * 8u * sizeof(uint32);
-						AddEnqueueCopyPass(GraphBuilder, State.FleshStatsReadback.Get(), StatsBuf, State.FleshStatsBytes);
-						State.bFleshStatsPending = true;
-					}
-				}
-				if (!State.bLoggedFlesh)
-				{
-					State.bLoggedFlesh = true;
-					UE_LOG(LogPianoHand, Display, TEXT("[SkinDeformer] %s: Flesh correction on - masked low-frequency Flesh displacement inside the folds (strength %.2f, %d smoothing steps, palm weight %.2f)"),
-						*OwnerName.ToString(), Params.FleshStrength, SmoothIt, Params.FleshPalmWeight);
-				}
-			}
 		}
 
 		// -------------------------------------------------------------------
@@ -1044,6 +916,159 @@ namespace PianoHandSkinDeformer
 				FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("PianoHand.TensorSmoothResolve(%d)", It), ResolveSmooth, RP,
 					FComputeShaderUtils::GetGroupCount(NumLodVertices, FPianoHandTensorSmoothResolveCS::ThreadGroupSize));
 				VertexTensorBuffer = Smoothed;
+			}
+		}
+
+
+		// -------------------------------------------------------------------
+		// Phase 13: Chaos Flesh correction at the joints. Runs AFTER the tension stage (11-15) so the mask can follow the
+		// strain tensor; the tension itself is measured on the surface before this small low-frequency correction.
+		// -------------------------------------------------------------------
+		if (bImplicit)
+		{
+			// ---- Phase 13: Flesh low-frequency correction inside the folds ------------------------------
+			if (bFleshCorrect)
+			{
+				FRDGBufferRef CorrA = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateStructuredDesc(sizeof(FVector4f), FMath::Max(NumLodVerticesEarly, 1u)), TEXT("PianoHandFleshCorrA"));
+				FRDGBufferRef CorrB = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateStructuredDesc(sizeof(FVector4f), FMath::Max(NumLodVerticesEarly, 1u)), TEXT("PianoHandFleshCorrB"));
+				{
+					TShaderMapRef<FPianoHandFleshCorrectCS> Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+					FPianoHandFleshCorrectCS::FParameters* P = GraphBuilder.AllocParameters<FPianoHandFleshCorrectCS::FParameters>();
+					P->Common = ImplicitDebugCommon;
+					P->FleshStrength = FMath::Max(Params.FleshStrength, 0.0f);
+					P->FleshPalmWeight = FMath::Clamp(Params.FleshPalmWeight, 0.0f, 1.0f);
+					P->FleshMaxCm = FMath::Max(Params.FleshMaxCm, 0.1f);
+					// 11-15: the correction follows OUR tension map - it is weighted by the in-plane compression of the skin
+					// (smallest principal stretch of the smoothed strain tensor), so the Flesh bulk only shows where the skin
+					// is actually gathered instead of spreading evenly over the whole fold side of the phalanx
+					const bool bTensionGuide = VertexTensorBuffer != nullptr && Params.FleshTensionGuide > 0.0f;
+					FRDGBufferRef TensorForFlesh = VertexTensorBuffer;
+					if (TensorForFlesh == nullptr)
+					{
+						TensorForFlesh = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateStructuredDesc(sizeof(float), 6u), TEXT("PianoHandFleshTensorDummy"));
+						AddClearUAVPass(GraphBuilder, GraphBuilder.CreateUAV(TensorForFlesh), 0.0f);
+					}
+					P->FleshTensor = GraphBuilder.CreateSRV(TensorForFlesh);
+					P->FleshTensionGuide = bTensionGuide ? FMath::Clamp(Params.FleshTensionGuide, 0.0f, 1.0f) : 0.0f;
+					P->FleshTensionStart = Params.FleshTensionStart;
+					P->FleshTensionFull = FMath::Max(Params.FleshTensionFull, Params.FleshTensionStart + 1e-3f);
+					P->BendGateStart = FMath::DegreesToRadians(Params.ImplicitBendStart);
+					P->PairBend = FleshPairBendSRV;
+					P->PrePosition = GraphBuilder.CreateSRV(ImplicitPrePos, PF_R32_FLOAT);
+					P->FleshIn = GraphBuilder.CreateSRV(FleshSurface, PF_R32_FLOAT);
+					P->FleshRestIn = GraphBuilder.CreateSRV(FleshRestRDG, PF_R32_FLOAT);
+					P->RestPositionIn = PositionSRV;
+					P->VertexRot = GraphBuilder.CreateSRV(VertexRotBuffer);
+					P->FleshCorrOut = GraphBuilder.CreateUAV(CorrA);
+					FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("PianoHand.FleshCorrect"), Shader, P,
+						FComputeShaderUtils::GetGroupCount(NumLodVerticesEarly, FPianoHandFleshCorrectCS::ThreadGroupSize));
+				}
+				FRDGBufferRef Cur = CorrA, Nxt = CorrB;
+				const int32 SmoothIt = FMath::Clamp(Params.FleshSmoothIterations, 0, 32);
+				for (int32 It = 0; It < SmoothIt; ++It)
+				{
+					TShaderMapRef<FPianoHandFleshSmoothCS> Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+					FPianoHandFleshSmoothCS::FParameters* P = GraphBuilder.AllocParameters<FPianoHandFleshSmoothCS::FParameters>();
+					P->Common = ImplicitDebugCommon;
+					P->FleshSmoothLambda = FMath::Clamp(Params.FleshSmoothLambda, 0.0f, 1.0f);
+					P->FleshCorrIn = GraphBuilder.CreateSRV(Cur);
+					P->FleshCorrOut = GraphBuilder.CreateUAV(Nxt);
+					FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("PianoHand.FleshSmooth(%d)", It), Shader, P,
+						FComputeShaderUtils::GetGroupCount(NumLodVerticesEarly, FPianoHandFleshSmoothCS::ThreadGroupSize));
+					Swap(Cur, Nxt);
+				}
+				{
+					TShaderMapRef<FPianoHandFleshApplyCS> Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+					FPianoHandFleshApplyCS::FParameters* P = GraphBuilder.AllocParameters<FPianoHandFleshApplyCS::FParameters>();
+					P->Common = ImplicitDebugCommon;
+					P->FleshCorrIn = GraphBuilder.CreateSRV(Cur);
+					P->PositionUAV = PositionUAV;
+					P->FleshWeightOut = GraphBuilder.CreateUAV(FleshWeightBuf);
+					FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("PianoHand.FleshApply"), Shader, P,
+						FComputeShaderUtils::GetGroupCount(NumLodVerticesEarly, FPianoHandFleshApplyCS::ThreadGroupSize));
+				}
+				// ---- Phase 13b: accuracy at the joints (where Flesh is used), read back every 20 frames ------------
+				if (Params.bLogFleshJointAccuracy)
+				{
+					const int32 NumPrimsStats = Implicit->PrimInfo.Num();
+					if (State.bFleshStatsPending && State.FleshStatsReadback.IsValid() && State.FleshStatsReadback->IsReady())
+					{
+						const uint32* Data = (const uint32*)State.FleshStatsReadback->Lock(State.FleshStatsBytes);
+						if (Data != nullptr && State.FleshStatsBytes == (uint32)NumPrimsStats * 8u * sizeof(uint32))
+						{
+							static const TCHAR* FingerNames[5] = { TEXT("thumb"), TEXT("index"), TEXT("middle"), TEXT("ring"), TEXT("pinky") };
+							for (int32 P = 0; P < NumPrimsStats; ++P)
+							{
+								const FString Name = Implicit->PrimName.IsValidIndex(P) ? Implicit->PrimName[P].ToString() : FString();
+								int32 Finger = INDEX_NONE;
+								for (int32 F = 0; F < 5; ++F) { if (Name.StartsWith(FingerNames[F])) { Finger = F; break; } }
+								if (Finger == INDEX_NONE) { continue; }
+								const uint32* S = Data + P * 8;
+								for (int32 K = 0; K < 4; ++K) { State.FleshStatsSum[Finger][K] += (double)S[K] / 1024.0; }
+								for (int32 K = 0; K < 3; ++K) { State.FleshStatsMax[K] = FMath::Max(State.FleshStatsMax[K], (double)S[4 + K] / 1024.0); }
+								State.FleshStatsVerts += (double)S[7];
+							}
+							++State.FleshStatsSamples;
+						}
+						State.FleshStatsReadback->Unlock();
+						State.bFleshStatsPending = false;
+						if (State.FleshStatsSamples >= 15)
+						{
+							double W = 0.0, E[3] = { 0.0, 0.0, 0.0 };
+							double FingerFinal[5], FingerSkin[5];
+							for (int32 F = 0; F < 5; ++F)
+							{
+								W += State.FleshStatsSum[F][0];
+								for (int32 K = 0; K < 3; ++K) { E[K] += State.FleshStatsSum[F][1 + K]; }
+								const double Wf = FMath::Max(State.FleshStatsSum[F][0], 1e-6);
+								FingerSkin[F] = State.FleshStatsSum[F][1] / Wf;
+								FingerFinal[F] = State.FleshStatsSum[F][3] / Wf;
+							}
+							W = FMath::Max(W, 1e-6);
+							UE_LOG(LogPianoHand, Display, TEXT("[FleshJoint] fold side of the joints, ~%.0f verts: distance to the Flesh surface (rest thickness removed), mean / max cm | skinning %.3f / %.2f | ours without Flesh %.3f / %.2f | final %.3f / %.2f | final vs skinning per finger: thumb %.3f/%.3f index %.3f/%.3f middle %.3f/%.3f ring %.3f/%.3f pinky %.3f/%.3f"),
+								State.FleshStatsVerts / State.FleshStatsSamples,
+								E[0] / W, State.FleshStatsMax[0], E[1] / W, State.FleshStatsMax[1], E[2] / W, State.FleshStatsMax[2],
+								FingerFinal[0], FingerSkin[0], FingerFinal[1], FingerSkin[1], FingerFinal[2], FingerSkin[2], FingerFinal[3], FingerSkin[3], FingerFinal[4], FingerSkin[4]);
+							State.FleshStatsSamples = 0;
+							State.FleshStatsVerts = 0.0;
+							FMemory::Memzero(State.FleshStatsSum);
+							FMemory::Memzero(State.FleshStatsMax);
+						}
+					}
+					if (!State.bFleshStatsPending && (State.FleshStatsFrame++ % 20u) == 0u && NumPrimsStats > 0)
+					{
+						if (!State.FleshStatsReadback.IsValid())
+						{
+							State.FleshStatsReadback = MakeUnique<FRHIGPUBufferReadback>(TEXT("PianoHandFleshStats"));
+						}
+						FRDGBufferRef StatsBuf = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), (uint32)NumPrimsStats * 8u), TEXT("PianoHandFleshStats"));
+						AddClearUAVPass(GraphBuilder, GraphBuilder.CreateUAV(StatsBuf), 0u);
+						TShaderMapRef<FPianoHandFleshStatsCS> Shader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
+						FPianoHandFleshStatsCS::FParameters* P = GraphBuilder.AllocParameters<FPianoHandFleshStatsCS::FParameters>();
+						P->Common = ImplicitDebugCommon;
+						P->BendGateStart = FMath::DegreesToRadians(Params.ImplicitBendStart);
+						P->PairBend = FleshPairBendSRV;
+						P->PrePosition = GraphBuilder.CreateSRV(ImplicitPrePos, PF_R32_FLOAT);
+						P->PositionIn = GraphBuilder.CreateSRV(PositionBuffer, PF_R32_FLOAT);
+						P->FleshIn = GraphBuilder.CreateSRV(FleshSurface, PF_R32_FLOAT);
+						P->FleshRestIn = GraphBuilder.CreateSRV(FleshRestRDG, PF_R32_FLOAT);
+						P->RestPositionIn = PositionSRV;
+						P->VertexRot = GraphBuilder.CreateSRV(VertexRotBuffer);
+						P->FleshCorrIn = GraphBuilder.CreateSRV(Cur);
+						P->FleshStatsOut = GraphBuilder.CreateUAV(StatsBuf);
+						FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("PianoHand.FleshStats"), Shader, P,
+							FComputeShaderUtils::GetGroupCount(NumLodVerticesEarly, FPianoHandFleshStatsCS::ThreadGroupSize));
+						State.FleshStatsBytes = (uint32)NumPrimsStats * 8u * sizeof(uint32);
+						AddEnqueueCopyPass(GraphBuilder, State.FleshStatsReadback.Get(), StatsBuf, State.FleshStatsBytes);
+						State.bFleshStatsPending = true;
+					}
+				}
+				if (!State.bLoggedFlesh)
+				{
+					State.bLoggedFlesh = true;
+					UE_LOG(LogPianoHand, Display, TEXT("[SkinDeformer] %s: Flesh correction on - masked low-frequency Flesh displacement inside the folds (strength %.2f, %d smoothing steps, palm weight %.2f)"),
+						*OwnerName.ToString(), Params.FleshStrength, SmoothIt, Params.FleshPalmWeight);
+				}
 			}
 		}
 
@@ -1862,6 +1887,9 @@ void UPianoHandSkinDeformerInstance::EnqueueWork(FEnqueueWorkDesc const& InDesc)
 		FrameParams.FleshReplace = Source->FleshReplace;
 		FrameParams.FleshRestCaptureDeg = Source->FleshRestCaptureDeg;
 		FrameParams.FleshMaxCm = Source->FleshMaxCm;
+		FrameParams.FleshTensionGuide = Source->FleshTensionGuide;
+		FrameParams.FleshTensionStart = Source->FleshTensionStart;
+		FrameParams.FleshTensionFull = Source->FleshTensionFull;
 		FrameParams.bLogFleshJointAccuracy = Source->bLogFleshJointAccuracy;
 		FrameParams.FleshPoseDeltaDeg = PoseDeltaDeg;
 	}
@@ -1904,7 +1932,9 @@ UPianoHandSkinDeformer* UPianoHandSkinningLibrary::ApplyCustomSkinning(USkinnedM
 		return nullptr;
 	}
 
-	UPianoHandSkinDeformer* Deformer = NewObject<UPianoHandSkinDeformer>(Component, NAME_None, RF_Transient);
+	// Not transient: a deformer attached in the editor world is a subobject of the component and is saved with the level
+	// (L_PianoHandFinal relies on it). A transient one silently disappeared after an editor restart.
+	UPianoHandSkinDeformer* Deformer = NewObject<UPianoHandSkinDeformer>(Component, NAME_None, RF_Transactional);
 	Deformer->SkinMode = Mode;
 	Deformer->bComputeTension = bComputeTension || bDetailDisplacement;   // detail needs the strain field
 	Deformer->TensionScale = FMath::Max(TensionScale, 0.01f);

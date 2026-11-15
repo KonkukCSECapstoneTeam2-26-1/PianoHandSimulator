@@ -125,7 +125,10 @@ IMPLICIT = dict(
     implicit_smooth_beta=1.0, implicit_bulge=0.0, implicit_bulge_start=15.0, implicit_bulge_full=70.0,
     implicit_bend_start=10.0, implicit_bend_full=40.0, implicit_contact_depth=0.25, implicit_stretch_keep=0.25,
     # Phase 13: Chaos Flesh as a low-frequency correction inside the folds (only active when a Flesh Input component publishes data)
-    flesh_correction=True, flesh_strength=0.5, flesh_max_cm=0.4, flesh_smooth_iterations=24,
+    flesh_correction=True, flesh_strength=0.75, flesh_max_cm=0.4, flesh_smooth_iterations=24,
+    # 11-15: the correction follows OUR tension map - weight ramps over 0..4 % in-plane compression, so it stays inside the
+    # folds instead of spreading over the whole flexor side (fingertip pads were smeared by the even version)
+    flesh_tension_guide=1.0, flesh_tension_start=0.0, flesh_tension_full=0.04,
     implicit_samples_per_bone=50, implicit_palm_samples=100,
 )
 
