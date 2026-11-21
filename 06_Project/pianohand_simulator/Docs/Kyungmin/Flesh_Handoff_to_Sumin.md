@@ -86,6 +86,7 @@ PianoHandFlesh::AddFleshBlendPass(GraphBuilder, MeshObject, PositionBuffer, Lod.
 
 ## 9. 알려진 상태와 한계
 - 성능(에디터 PIE, 다른 프로그램 끈 상태): 프레임 약 16.0~16.6 ms(60~62 FPS). 여유 0.1~0.7 ms.
+- 수민 님 결합 후 `L_PianoHandFinal`(2026-11-22 측정): 결합 패스 매 프레임 실행(불일치 0), 프레임 대부분 15.5~16.4 ms(61~64 FPS), `stat unit` Game 16.5 / GPU 7.2 ms(병목은 게임 스레드, GPU 여유 큼). `[FleshJoint]` 접힘 쪽 거리는 스키닝만 0.25~0.30 → 최종 0.18~0.25 cm(약 20~30% 개선). 엄지는 거의 개선 없음(약 0.38 cm). 최대 약 1.5 cm는 Flesh 없이 수민 님 단계만 돌린 값(약 1.55 cm)과 같아 Flesh 결합 쪽이 아님.
 - 손끝 어긋남(Flesh vs 스켈레탈 LBS): 정지 0.35~0.50 cm(Flesh가 부피를 유지해 약간 두꺼움), 움직일 때 대부분 0.3~0.9 cm 뒤처짐, 빠른 순간(100 cm/s 이상, IK 급점프) 최대 약 3 cm.
 - 주먹 쥘 때 안쪽 살이 지글거림(자기충돌 없음), Damping/Inflation 튜닝 미실시.
 - 섞는 것은 위치만, 한 프레임 지연 가능(게임 → 렌더 스레드 전달).
