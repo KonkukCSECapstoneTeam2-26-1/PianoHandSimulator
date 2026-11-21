@@ -52,12 +52,20 @@ FINGER_DIFFICULTY = shared_constants.FINGER_DIFFICULTY
 POSITION_SHIFT_THRESHOLD = shared_constants.POSITION_SHIFT_THRESHOLD
 
 class NoteEvent:
-    def __init__(self, pitch, velocity, start_ms, duration_ms, hand):
+    def __init__(self, pitch, velocity, start_ms, duration_ms, hand,
+                 channel=0, program=shared_constants.GM_DEFAULT_PROGRAM,
+                 track_index=0, track_name=""):
         self.pitch = pitch
         self.velocity = velocity
         self.start_ms = start_ms
         self.duration_ms = duration_ms
         self.hand = hand
+        # 음원 출처 (피아노 트랙 자동 선별용 / 요구사항 2.3).
+        # program 은 해당 음표의 타격 시점에 그 채널에 걸려 있던 음색이다.
+        self.channel = channel
+        self.program = program
+        self.track_index = track_index
+        self.track_name = track_name
         self.finger = 0
         self.role = "INNER" # Default role
         self.is_black = (pitch % 12) in BLACK_KEYS
@@ -120,6 +128,104 @@ def _find_split_pitch(all_notes):
         if density < min_density:
             min_density, best_pitch = density, p
     return best_pitch
+
+# ── 피아노 트랙 자동 선별 (요구사항 2.3) ────────────────────────────
+# 입력 MIDI 가 피아노 독주 악보라는 보장이 없다. 게임·밴드 편곡 MIDI 에는
+# 드럼·베이스·효과음 트랙이 함께 들어 있고, 지금까지는 그 음표가 전부
+# 건반 운지 대상으로 들어갔다. 특히 GM 타악 채널은 note 번호가 악기 번호인데
+# 그 값이 88키 음역 안에 들어오기 때문에 음역 필터로는 걸러지지 않았다.
+#
+# 2단계로 거른다.
+#   1단계 (무조건) — 건반으로 연주할 수 없는 음원을 제외한다.
+#       · GM 타악 채널(10번) : note 번호가 음높이가 아니다
+#       · program 112~127    : Percussive / Sound Effects
+#   2단계 (조건부) — 1단계를 통과한 음표 중 피아노 음색(program 0~7)이
+#       PIANO_ARRANGEMENT_SHARE 이상을 차지하면 **피아노 트랙만** 쓴다.
+#       그 비율에 못 미치면 이미 피아노 독주 편곡이 아니므로, 피아노 트랙만
+#       남기면 반주와 선율이 함께 날아간다. 그 경우 1단계 결과를 그대로 쓴다.
+#
+# 임계값 근거: 01_Design/15_Piano_Track_Selection.md (실곡 10곡 전수 측정)
+PIANO_ARRANGEMENT_SHARE = 0.80
+
+def _is_unplayable_source(note):
+    """건반으로 연주할 수 없는 음원인지 (1단계)."""
+    if note.channel == shared_constants.GM_PERCUSSION_CHANNEL:
+        return True
+    if note.program >= shared_constants.GM_UNPLAYABLE_PROGRAM_MIN:
+        return True
+    return False
+
+def _is_piano_program(note):
+    return (shared_constants.GM_PIANO_PROGRAM_MIN
+            <= note.program <= shared_constants.GM_PIANO_PROGRAM_MAX)
+
+def select_piano_sources(all_notes, share_threshold=PIANO_ARRANGEMENT_SHARE,
+                         report=None):
+    """피아노 연주 대상 음표만 남겨 반환한다 (요구사항 2.3).
+
+    원본 리스트는 바꾸지 않고 새 리스트를 돌려준다.
+    `report` 에 dict 를 넘기면 어떤 근거로 몇 개를 빼고 어떤 판정을
+    내렸는지 채워 넣는다 (활동서·설계 문서에 쓸 근거).
+    """
+    if report is None:
+        report = {}
+    total = len(all_notes)
+
+    playable = [n for n in all_notes if not _is_unplayable_source(n)]
+    percussion = sum(1 for n in all_notes
+                     if n.channel == shared_constants.GM_PERCUSSION_CHANNEL)
+    effects = sum(1 for n in all_notes
+                  if n.channel != shared_constants.GM_PERCUSSION_CHANNEL
+                  and n.program >= shared_constants.GM_UNPLAYABLE_PROGRAM_MIN)
+
+    piano = [n for n in playable if _is_piano_program(n)]
+    share = (len(piano) / len(playable)) if playable else 0.0
+    # 피아노 음색이 충분히 지배적일 때만 그 트랙만 남긴다.
+    # 음표가 하나도 없으면(피아노 트랙 부재) 판정 자체를 하지 않는다.
+    piano_only = bool(piano) and share >= share_threshold
+    kept = piano if piano_only else playable
+
+    report.update({
+        "total": total,
+        "percussion_dropped": percussion,
+        "effects_dropped": effects,
+        "playable": len(playable),
+        "piano_notes": len(piano),
+        "piano_share": share,
+        "piano_only": piano_only,
+        "kept": len(kept),
+    })
+    return kept
+
+def build_program_timeline(mid):
+    """채널별 음색 변경 이력을 파일 전체 시간 순으로 만든다.
+
+    GM 에서 program_change 는 **채널 단위 상태**이고, 그 상태는 파일 전체에
+    걸쳐 시간 순으로 바뀐다. 트랙별로 따로 추적하면 format 1 에서 한 채널을
+    여러 트랙이 공유할 때 규격과 다른 음색이 잡힌다.
+
+    반환: {channel: [(tick, program), ...]} — tick 오름차순
+    """
+    timeline = {}
+    tick = 0
+    for msg in mido.merge_tracks(mid.tracks):
+        tick += msg.time
+        if msg.type == 'program_change':
+            timeline.setdefault(msg.channel, []).append((tick, msg.program))
+    return timeline
+
+def program_at(timeline, channel, tick):
+    """해당 채널이 그 tick 시점에 쓰고 있던 program.
+
+    앞선 program_change 가 없으면 GM 기본값(0, Acoustic Grand Piano).
+    """
+    entries = timeline.get(channel)
+    if not entries:
+        return shared_constants.GM_DEFAULT_PROGRAM
+    idx = bisect_right([t for t, _ in entries], tick)
+    if idx == 0:
+        return shared_constants.GM_DEFAULT_PROGRAM
+    return entries[idx - 1][1]
 
 DEFAULT_TEMPO = 500000  # us/beat = 120 BPM
 
@@ -343,8 +449,12 @@ def parse_midi_to_hand_chords(file_path):
     tick_to_ms = _make_tick_to_ms(_build_tempo_map(mid), mid.ticks_per_beat)
     all_notes = []
 
+    # 채널별 음색 이력 (요구사항 2.3). 음표마다 그 타격 시점에 그 채널에
+    # 걸려 있던 program 을 붙인다.
+    program_timeline = build_program_timeline(mid)
+
     # 트랙별로 처리하여 트랙 이름 힌트 활용
-    for track in mid.tracks:
+    for track_index, track in enumerate(mid.tracks):
         hand_hint = _detect_hand_from_track_name(track.name)
         # pitch별 FIFO 큐: 떼기 전에 같은 음을 재타격하는 경우 선행 음이 유실되지 않도록 함
         active_notes = {}
@@ -352,28 +462,54 @@ def parse_midi_to_hand_chords(file_path):
         for msg in track:
             tick += msg.time
             if msg.type == 'note_on' and msg.velocity > 0:
-                active_notes.setdefault(msg.note, []).append((tick, msg.velocity))
+                prog = program_at(program_timeline, msg.channel, tick)
+                active_notes.setdefault(msg.note, []).append(
+                    (tick, msg.velocity, msg.channel, prog))
             elif (msg.type == 'note_off') or (msg.type == 'note_on' and msg.velocity == 0):
                 pending = active_notes.get(msg.note)
                 if pending:
-                    start_tick, vel = pending.pop(0)
+                    start_tick, vel, ch, prog = pending.pop(0)
                     start_ms = tick_to_ms(start_tick)
                     # 트랙 힌트가 없으면 -1로 보관 (후처리에서 pitch 기반 결정)
                     all_notes.append(NoteEvent(msg.note, vel, start_ms,
                                                tick_to_ms(tick) - start_ms,
-                                               hand_hint if hand_hint is not None else -1))
+                                               hand_hint if hand_hint is not None else -1,
+                                               channel=ch, program=prog,
+                                               track_index=track_index,
+                                               track_name=track.name))
 
         # note_off 없이 트랙이 끝난 음표는 트랙 종료 시점에서 닫아 유실을 막음
         end_ms = tick_to_ms(tick)
         for pitch, pending in active_notes.items():
-            for start_tick, vel in pending:
+            for start_tick, vel, ch, prog in pending:
                 start_ms = tick_to_ms(start_tick)
                 all_notes.append(NoteEvent(pitch, vel, start_ms, end_ms - start_ms,
-                                           hand_hint if hand_hint is not None else -1))
+                                           hand_hint if hand_hint is not None else -1,
+                                           channel=ch, program=prog,
+                                           track_index=track_index,
+                                           track_name=track.name))
+
+    # 피아노 트랙 자동 선별 (요구사항 2.3).
+    # 음역 필터보다 **먼저** 돌려야 한다. GM 타악 채널의 note 번호는 악기 번호이고
+    # 그 값(35~81)이 88키 음역 안에 들어오기 때문에, 음역 필터만으로는 걸러지지
+    # 않고 드럼 한 대가 건반 한 개로 운지되어 버린다.
+    select_report = {}
+    all_notes = select_piano_sources(all_notes, report=select_report)
+    if select_report["percussion_dropped"] or select_report["effects_dropped"]:
+        print(f"  [선별] 타악 채널 {select_report['percussion_dropped']}개 · "
+              f"효과음 {select_report['effects_dropped']}개 제외 "
+              f"(전체 {select_report['total']}개 중)")
+    if select_report["piano_only"]:
+        print(f"  [선별] 피아노 음색 점유율 {select_report['piano_share']*100:.1f}% "
+              f"→ 피아노 트랙만 사용 ({select_report['kept']}개)")
+    elif select_report["playable"]:
+        print(f"  [선별] 피아노 음색 점유율 {select_report['piano_share']*100:.1f}% "
+              f"(임계 {PIANO_ARRANGEMENT_SHARE*100:.0f}% 미달) "
+              f"→ 연주 가능 트랙 전체 사용 ({select_report['kept']}개)")
 
     # 피아노 88키 범위(A0~C8) 밖 음표 제거.
-    # MIDI에는 베이스·드럼 등 비피아노 트랙이 섞여 있을 수 있고, 그 음표는
-    # 건반 좌표가 정의되지 않는다. (요구사항 2.3의 피아노 트랙 자동 선별은 미구현 상태)
+    # 선별을 통과한 트랙에도 피아노 음역을 벗어나는 음표(초저역 베이스 등)가
+    # 남아 있을 수 있고, 그 음표는 건반 좌표가 정의되지 않는다.
     out_of_range = [n for n in all_notes if not (PIANO_MIN_PITCH <= n.pitch <= PIANO_MAX_PITCH)]
     if out_of_range:
         lo = min(n.pitch for n in out_of_range)

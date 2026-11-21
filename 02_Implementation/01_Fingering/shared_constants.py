@@ -55,6 +55,24 @@ MIDI_MIN = 21    # A0
 MIDI_MAX = 108   # C8
 WHITE_KEY_COUNT = 52
 
+# ── 3b. GM 음색 분류 (피아노 트랙 자동 선별용 / 요구사항 2.3) ─────────
+# General MIDI 규격에서 10번 채널(0-base 9)은 타악 전용이다.
+# 이 채널의 note 번호는 음높이가 아니라 **악기 번호**(35=Bass Drum 등)이므로
+# 건반 좌표로 해석할 수 없다. 그런데 값이 35~81 로 88키 범위(21~108) 안에
+# 들어오기 때문에 음역 필터만으로는 걸러지지 않는다.
+GM_PERCUSSION_CHANNEL = 9
+
+# GM program 0~7 = Piano 계열 (0 Acoustic Grand ~ 7 Clavi)
+GM_PIANO_PROGRAM_MIN = 0
+GM_PIANO_PROGRAM_MAX = 7
+
+# GM program 112~127 = Percussive(112~119) + Sound Effects(120~127).
+# 음고 의미가 없거나 건반 연주 대상이 아닌 효과음 구간이다.
+GM_UNPLAYABLE_PROGRAM_MIN = 112
+
+# program_change 메시지가 없는 채널의 기본 음색 (GM 규격: Acoustic Grand Piano)
+GM_DEFAULT_PROGRAM = 0
+
 # ── 4. 피치 분류 ──────────────────────────────────────────────────────
 BLACK_KEY_PITCH_CLASSES = {1, 3, 6, 8, 10}
 WHITE_KEY_PITCH_CLASSES = {0, 2, 4, 5, 7, 9, 11}

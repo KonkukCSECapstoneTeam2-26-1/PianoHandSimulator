@@ -25,17 +25,36 @@ import piano_fingering_engine as engine  # noqa: E402
 def reference_note_starts(path):
     """mido의 템포맵 적용 이터레이션으로 note_on 절대 시각(ms)을 산출 — 정답.
 
-    엔진은 피아노 88키 음역(A0~C8) 밖 음표를 제외하므로(베이스·드럼 등 비피아노
-    트랙이 섞인 MIDI 대응), 정답도 동일 범위로 제한해 비교한다.
+    이 테스트가 보는 것은 **시각 변환**이므로, 음표 집합은 엔진과 같은 기준으로
+    맞춘다. 두 단계를 정답에도 적용한다.
+
+      1. 피아노 트랙 자동 선별 (요구사항 2.3) — 타악 채널·효과음 음색 제외 및
+         피아노 편곡 판정. 판정 자체는 `tests/test_track_selection.py` 가 따로
+         검증하므로, 여기서는 엔진의 선별 함수를 그대로 불러 기준만 공유한다.
+      2. 피아노 88키 음역(A0~C8) 밖 음표 제외.
+
+    시각은 mido 의 템포맵 이터레이션으로 독립 산출하므로, 엔진의 tick→ms 변환과
+    비교하는 의미는 그대로 유지된다.
     """
     mid = mido.MidiFile(path)
-    abs_sec, starts = 0.0, []
+    abs_sec = 0.0
+    # mido 의 평탄화 이터레이션은 파일 전체를 시간 순으로 주므로, 채널별 음색을
+    # 그대로 따라가면 엔진의 program 귀속(채널 단위·시간 순)과 같은 기준이 된다.
+    channel_program = {}
+    candidates = []
     for msg in mid:
         abs_sec += msg.time
-        if msg.type == "note_on" and msg.velocity > 0:
-            if engine.PIANO_MIN_PITCH <= msg.note <= engine.PIANO_MAX_PITCH:
-                starts.append(abs_sec * 1000)
-    return sorted(starts)
+        if msg.type == "program_change":
+            channel_program[msg.channel] = msg.program
+        elif msg.type == "note_on" and msg.velocity > 0:
+            candidates.append(engine.NoteEvent(
+                msg.note, msg.velocity, abs_sec * 1000, 1.0, -1,
+                channel=msg.channel,
+                program=channel_program.get(msg.channel, 0)))
+
+    selected = engine.select_piano_sources(candidates)
+    return sorted(n.start_ms for n in selected
+                  if engine.PIANO_MIN_PITCH <= n.pitch <= engine.PIANO_MAX_PITCH)
 
 
 def engine_note_starts(path):

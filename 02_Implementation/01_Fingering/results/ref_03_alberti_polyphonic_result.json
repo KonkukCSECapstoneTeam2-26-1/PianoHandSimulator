@@ -15,6 +15,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.31,
+        "wrist_x_mm": 386.57,
         "wrist_yaw_deg": 5.0,
         "wrist_roll_deg": 0
     },
@@ -34,6 +35,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.529,
+        "wrist_x_mm": 644.29,
         "wrist_yaw_deg": -10.0,
         "wrist_roll_deg": 0
     },
@@ -53,6 +55,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.391,
+        "wrist_x_mm": 480.29,
         "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
@@ -72,6 +75,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.356,
+        "wrist_x_mm": 433.43,
         "wrist_yaw_deg": -10.0,
         "wrist_roll_deg": 0
     },
@@ -91,6 +95,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.391,
+        "wrist_x_mm": 480.29,
         "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
@@ -110,6 +115,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.31,
+        "wrist_x_mm": 386.57,
         "wrist_yaw_deg": -10.0,
         "wrist_roll_deg": 0
     },
@@ -129,6 +135,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.506,
+        "wrist_x_mm": 620.86,
         "wrist_yaw_deg": -5.0,
         "wrist_roll_deg": 0
     },
@@ -148,6 +155,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.391,
+        "wrist_x_mm": 480.29,
         "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
@@ -167,6 +175,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.356,
+        "wrist_x_mm": 433.43,
         "wrist_yaw_deg": -10.0,
         "wrist_roll_deg": 0
     },
@@ -186,6 +195,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.391,
+        "wrist_x_mm": 480.29,
         "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
@@ -205,6 +215,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.31,
+        "wrist_x_mm": 386.57,
         "wrist_yaw_deg": -10.0,
         "wrist_roll_deg": 0
     },
@@ -224,6 +235,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.494,
+        "wrist_x_mm": 597.43,
         "wrist_yaw_deg": 0.0,
         "wrist_roll_deg": 0
     },
@@ -243,6 +255,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.391,
+        "wrist_x_mm": 480.29,
         "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
@@ -262,6 +275,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.356,
+        "wrist_x_mm": 433.43,
         "wrist_yaw_deg": -10.0,
         "wrist_roll_deg": 0
     },
@@ -281,6 +295,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.391,
+        "wrist_x_mm": 480.29,
         "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
@@ -300,6 +315,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.31,
+        "wrist_x_mm": 386.57,
         "wrist_yaw_deg": -10.0,
         "wrist_roll_deg": 0
     },
@@ -319,6 +335,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.471,
+        "wrist_x_mm": 574.0,
         "wrist_yaw_deg": 5.0,
         "wrist_roll_deg": 0
     },
@@ -338,6 +355,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.391,
+        "wrist_x_mm": 480.29,
         "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
@@ -357,6 +375,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.356,
+        "wrist_x_mm": 433.43,
         "wrist_yaw_deg": -10.0,
         "wrist_roll_deg": 0
     },
@@ -376,6 +395,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.391,
+        "wrist_x_mm": 480.29,
         "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
@@ -395,6 +415,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.31,
+        "wrist_x_mm": 386.57,
         "wrist_yaw_deg": -10.0,
         "wrist_roll_deg": 0
     },
@@ -414,6 +435,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.448,
+        "wrist_x_mm": 550.57,
         "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
@@ -433,6 +455,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.391,
+        "wrist_x_mm": 480.29,
         "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
@@ -452,6 +475,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.356,
+        "wrist_x_mm": 433.43,
         "wrist_yaw_deg": -10.0,
         "wrist_roll_deg": 0
     },
@@ -471,6 +495,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.391,
+        "wrist_x_mm": 480.29,
         "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
@@ -490,6 +515,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.31,
+        "wrist_x_mm": 386.57,
         "wrist_yaw_deg": -10.0,
         "wrist_roll_deg": 0
     },
@@ -509,6 +535,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.471,
+        "wrist_x_mm": 574.0,
         "wrist_yaw_deg": 5.0,
         "wrist_roll_deg": 0
     },
@@ -528,6 +555,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.391,
+        "wrist_x_mm": 480.29,
         "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
@@ -547,6 +575,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.356,
+        "wrist_x_mm": 433.43,
         "wrist_yaw_deg": -10.0,
         "wrist_roll_deg": 0
     },
@@ -566,6 +595,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.391,
+        "wrist_x_mm": 480.29,
         "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
@@ -585,6 +615,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.31,
+        "wrist_x_mm": 386.57,
         "wrist_yaw_deg": -10.0,
         "wrist_roll_deg": 0
     },
@@ -604,6 +635,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.494,
+        "wrist_x_mm": 597.43,
         "wrist_yaw_deg": 0.0,
         "wrist_roll_deg": 0
     },
@@ -623,6 +655,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.391,
+        "wrist_x_mm": 480.29,
         "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
@@ -642,6 +675,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.356,
+        "wrist_x_mm": 433.43,
         "wrist_yaw_deg": -10.0,
         "wrist_roll_deg": 0
     },
@@ -661,6 +695,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.391,
+        "wrist_x_mm": 480.29,
         "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
@@ -680,6 +715,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.31,
+        "wrist_x_mm": 386.57,
         "wrist_yaw_deg": -10.0,
         "wrist_roll_deg": 0
     },
@@ -699,6 +735,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.506,
+        "wrist_x_mm": 620.86,
         "wrist_yaw_deg": -5.0,
         "wrist_roll_deg": 0
     },
@@ -718,6 +755,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.391,
+        "wrist_x_mm": 480.29,
         "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
@@ -737,6 +775,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.356,
+        "wrist_x_mm": 433.43,
         "wrist_yaw_deg": -10.0,
         "wrist_roll_deg": 0
     },
@@ -756,6 +795,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.391,
+        "wrist_x_mm": 480.29,
         "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
@@ -775,6 +815,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.31,
+        "wrist_x_mm": 386.57,
         "wrist_yaw_deg": -10.0,
         "wrist_roll_deg": 0
     },
@@ -794,6 +835,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.529,
+        "wrist_x_mm": 644.29,
         "wrist_yaw_deg": -10.0,
         "wrist_roll_deg": 0
     },
@@ -813,6 +855,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.391,
+        "wrist_x_mm": 480.29,
         "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
@@ -832,6 +875,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.356,
+        "wrist_x_mm": 433.43,
         "wrist_yaw_deg": -10.0,
         "wrist_roll_deg": 0
     },
@@ -851,6 +895,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.391,
+        "wrist_x_mm": 480.29,
         "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
@@ -870,6 +915,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.31,
+        "wrist_x_mm": 386.57,
         "wrist_yaw_deg": -10.0,
         "wrist_roll_deg": 0
     },
@@ -889,6 +935,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.506,
+        "wrist_x_mm": 620.86,
         "wrist_yaw_deg": -5.0,
         "wrist_roll_deg": 0
     },
@@ -908,6 +955,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.391,
+        "wrist_x_mm": 480.29,
         "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
@@ -927,6 +975,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.356,
+        "wrist_x_mm": 433.43,
         "wrist_yaw_deg": -10.0,
         "wrist_roll_deg": 0
     },
@@ -946,6 +995,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.391,
+        "wrist_x_mm": 480.29,
         "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
@@ -965,6 +1015,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.31,
+        "wrist_x_mm": 386.57,
         "wrist_yaw_deg": -10.0,
         "wrist_roll_deg": 0
     },
@@ -984,6 +1035,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.494,
+        "wrist_x_mm": 597.43,
         "wrist_yaw_deg": 0.0,
         "wrist_roll_deg": 0
     },
@@ -1003,6 +1055,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.391,
+        "wrist_x_mm": 480.29,
         "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
@@ -1022,6 +1075,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.356,
+        "wrist_x_mm": 433.43,
         "wrist_yaw_deg": -10.0,
         "wrist_roll_deg": 0
     },
@@ -1041,6 +1095,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.391,
+        "wrist_x_mm": 480.29,
         "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
@@ -1060,6 +1115,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.31,
+        "wrist_x_mm": 386.57,
         "wrist_yaw_deg": -10.0,
         "wrist_roll_deg": 0
     },
@@ -1079,6 +1135,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.471,
+        "wrist_x_mm": 574.0,
         "wrist_yaw_deg": 5.0,
         "wrist_roll_deg": 0
     },
@@ -1098,6 +1155,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.391,
+        "wrist_x_mm": 480.29,
         "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     },
@@ -1117,6 +1175,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.356,
+        "wrist_x_mm": 433.43,
         "wrist_yaw_deg": -10.0,
         "wrist_roll_deg": 0
     },
@@ -1136,6 +1195,7 @@
         "target_y_mm": 30.0,
         "target_z_mm": -6.3,
         "wrist_pos_normalized": 0.391,
+        "wrist_x_mm": 480.29,
         "wrist_yaw_deg": 10.0,
         "wrist_roll_deg": 0
     }
