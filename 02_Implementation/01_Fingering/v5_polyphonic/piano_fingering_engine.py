@@ -703,6 +703,19 @@ OCCUPANCY_SPAN_PENALTY = 5000    # 순간 손 범위 초과 (화음 내 SpanPena
 OCCUPANCY_FINGER_PENALTY = 4000  # 한 손가락이 두 건반
 OCCUPANCY_ORDER_PENALTY = 1500   # pitch 순 ↔ 손가락 순 어긋남
 
+# --- 코스트 결합 방식 (13_Cost_Function_Design.md 4절 · 6.3절) ----------------
+# 전이 비용을 '하드 제약 위반'(화음 span 5000 · 동시 누름 2500 · 교차 2000 · 순간 점유 위반)과
+# '선호도'(나머지 전부)로 나눈 뒤, 경로 전체를 아래 방식 중 하나로 평가한다.
+#   "add"     : 위반 + 선호도를 그냥 더한다 (기존 동작, 기본값)
+#   "max"     : 경로에서 가장 큰 한 번의 위반을 먼저 비교하고, 같으면 선호도 합으로 비교
+#   "product" : 전이마다 실현 가능성 f = 1 / (1 + 위반 / PRODUCT_VIOLATION_SCALE) 를 곱하고,
+#               선호도 합 + PRODUCT_VIOLATION_CEILING × (1 − Π f) 로 평가 (위반 비용이 상한에서 포화)
+# 환경 변수 PH_COST_COMBINE 이나 모듈 속성(engine.COST_COMBINE = "max")으로 바꾼다.
+COST_COMBINE_MODES = ("add", "max", "product")
+COST_COMBINE = os.environ.get("PH_COST_COMBINE", "add")
+PRODUCT_VIOLATION_SCALE = 1000.0    # 위반 1000 = 실현 가능성 1/2
+PRODUCT_VIOLATION_CEILING = 5000.0  # 위반 비용 상한 (화음 span 위반 1건과 같은 수준)
+
 def _occupies_at(note, t_ms):
     """음표가 시각 t 에 아직 건반을 점유하고 있는가.
 
@@ -830,7 +843,13 @@ def solve_fingering_chord_dp(chord_sequence, hand_id):
     dp.append(first_states)
 
     def calc_transition_cost(prev_notes, prev_f_tuple, curr_notes, curr_f_tuple):
+        """(전체 비용, 그중 하드 제약 위반분)을 돌려준다.
+
+        전체 비용은 기존 식 그대로다(add 모드의 결과가 바뀌지 않도록 합산 순서도 유지).
+        위반분은 결합 방식(COST_COMBINE)이 위반과 선호도를 따로 다룰 때 쓴다.
+        """
         penalty = 0
+        hard = 0
         # 1. Span Check — 인접 쌍뿐 아니라 모든 손가락 쌍을 검사한다.
         #    인접만 보면 2-3(6) · 3-5(9)가 각각 통과하면서 2-5가 15반음(한계 12)이 되는
         #    물리적으로 불가능한 화음이 DP를 통과한다.
@@ -839,6 +858,7 @@ def solve_fingering_chord_dp(chord_sequence, hand_id):
                 f_pair = tuple(sorted((curr_f_tuple[i], curr_f_tuple[j])))
                 if (curr_notes[j].pitch - curr_notes[i].pitch) > MAX_SPAN.get(f_pair, 12):
                     penalty += 5000
+                    hard += 5000
 
         # 2. Role Affinity (손마다 해부학적으로 다르게 적용)
         role_penalty = 0
@@ -888,6 +908,7 @@ def solve_fingering_chord_dp(chord_sequence, hand_id):
         for f in curr_f_tuple:
             if f in busy_fingers:
                 penalty += 2500  # 물리적으로 불가능에 가까움
+                hard += 2500
 
         # 6. 아르페지오 롤링
         # 연속 단음에서 피치 방향과 손가락 방향이 일치해야 자연스러운 롤링
@@ -936,12 +957,16 @@ def solve_fingering_chord_dp(chord_sequence, hand_id):
 
         # 4. Wrist & Crossing (Standard V4 logic updated for LH)
         p_diff = curr_notes[0].pitch - prev_notes[-1].pitch
+        crossings = 0
         if hand_id == 1: # Right Hand
-            if p_diff > 0 and curr_f_tuple[0] < prev_f_tuple[-1] and curr_f_tuple[0] != 1: penalty += 2000
-            if p_diff < 0 and curr_f_tuple[-1] > prev_f_tuple[0] and prev_f_tuple[0] != 1: penalty += 2000
+            if p_diff > 0 and curr_f_tuple[0] < prev_f_tuple[-1] and curr_f_tuple[0] != 1: crossings += 1
+            if p_diff < 0 and curr_f_tuple[-1] > prev_f_tuple[0] and prev_f_tuple[0] != 1: crossings += 1
         else: # Left Hand (Fingers 5->1)
-            if p_diff < 0 and curr_f_tuple[-1] < prev_f_tuple[0] and curr_f_tuple[-1] != 1: penalty += 2000
-            if p_diff > 0 and curr_f_tuple[0] > prev_f_tuple[-1] and prev_f_tuple[-1] != 1: penalty += 2000
+            if p_diff < 0 and curr_f_tuple[-1] < prev_f_tuple[0] and curr_f_tuple[-1] != 1: crossings += 1
+            if p_diff > 0 and curr_f_tuple[0] > prev_f_tuple[-1] and prev_f_tuple[-1] != 1: crossings += 1
+        for _ in range(crossings):
+            penalty += 2000
+            hard += 2000
 
         wrist_move = abs((sum(n.pitch for n in curr_notes)/len(curr_notes)) - (sum(n.pitch for n in prev_notes)/len(prev_notes)))
         if wrist_move > POSITION_SHIFT_THRESHOLD: penalty += (wrist_move - POSITION_SHIFT_THRESHOLD) * 2
@@ -951,7 +976,36 @@ def solve_fingering_chord_dp(chord_sequence, hand_id):
             if curr_notes[i].is_black and f == 1: note_penalty += 25
             if curr_notes[i].is_black and f == 5: note_penalty += 10
 
-        return wrist_move * 2.0 + note_penalty + penalty + role_penalty
+        return wrist_move * 2.0 + note_penalty + penalty + role_penalty, hard
+
+    # 경로 누적값 acc = (전체 비용 합, 위반 합, 한 전이의 최대 위반, 실현 가능성 곱).
+    # DP 상태값은 (비교 키, 이전 상태, acc) 이고, 비교 키는 결합 방식에 따라 정해진다.
+    mode = COST_COMBINE
+    if mode not in COST_COMBINE_MODES:
+        raise ValueError(f"COST_COMBINE must be one of {COST_COMBINE_MODES}, got {mode!r}")
+
+    def path_key(acc):
+        total, hard_sum, hard_max, feas = acc
+        if mode == "add":
+            return total
+        pref = total - hard_sum
+        if mode == "max":
+            return (hard_max, pref)
+        return pref + PRODUCT_VIOLATION_CEILING * (1.0 - feas)
+
+    def extend(acc, transition, occ):
+        """경로 누적값에 전이 하나를 더한다. occ(순간 점유 위반)는 전부 하드 제약 위반이다."""
+        total, hard_sum, hard_max, feas = acc
+        trans_total, trans_hard = transition
+        step_hard = trans_hard + occ
+        if step_hard:
+            feas *= 1.0 / (1.0 + step_hard / PRODUCT_VIOLATION_SCALE)
+        # 합산 순서는 기존 식 (이전 비용 + 전이 비용) + 점유 위반 그대로 — add 모드 결과를 비트 단위로 보존
+        return ((total + trans_total) + occ, hard_sum + step_hard, max(hard_max, step_hard), feas)
+
+    # 첫 화음 상태도 같은 형식으로 바꾼다 (첫 화음은 span 위반 조합을 이미 걸렀으므로 위반 0)
+    dp[0] = {s: (path_key(acc), None, acc)
+             for s, (c, _) in dp[0].items() for acc in [(c, 0, 0, 1.0)]}
 
     for c_idx in range(1, len(chord_sequence)):
         curr_chord, prev_chord = chord_sequence[c_idx], chord_sequence[c_idx-1]
@@ -966,16 +1020,17 @@ def solve_fingering_chord_dp(chord_sequence, hand_id):
             advanced[key] = advance_held(prev_held, c_idx - 1, prev_f, t_now, c_idx)
 
         for curr_f in get_combinations(len(curr_chord)):
-            for prev_state, (prev_c, _) in prev_states.items():
+            for prev_state, (_prev_key, _, prev_acc) in prev_states.items():
                 prev_f, _prev_held = prev_state
                 held_now = advanced[prev_state]
-                cost = (prev_c
-                        + calc_transition_cost(prev_chord, prev_f, curr_chord, curr_f)
-                        + occupancy_penalty(curr_chord, curr_f, held_now))
+                acc = extend(prev_acc,
+                             calc_transition_cost(prev_chord, prev_f, curr_chord, curr_f),
+                             occupancy_penalty(curr_chord, curr_f, held_now))
+                key = path_key(acc)
                 state = (curr_f, held_now)
                 known = curr_states.get(state)
-                if known is None or cost < known[0]:
-                    curr_states[state] = (cost, prev_state)
+                if known is None or key < known[0]:
+                    curr_states[state] = (key, prev_state, acc)
 
         # 빔 가지치기: 상위 DP_BEAM_WIDTH 개만 유지해 상태 폭발을 막는다.
         # 점유 집합이 상태에 포함되면서 경로마다 서로 다른 상태가 생기므로,
@@ -1162,7 +1217,7 @@ def calculate_wrist_x_mm(chord_group):
     return round(sum(xs) / len(xs), 2)
 
 # --- 4. Main Analysis ---
-def analyze_polyphonic(file_path):
+def analyze_polyphonic(file_path, output_dir=None):
     print(f"Analyzing with Polyphonic Voice Leading (V5): {file_path}...")
     split_report = {}
     hand_chords = split_wide_chords_between_hands(
@@ -1222,8 +1277,10 @@ def analyze_polyphonic(file_path):
     final_notes.sort(key=lambda x: x["start_ms"])
     
     # 스크립트 위치 기준으로 상위 폴더(01_Fingering) 내의 결과 폴더 지정
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    output_dir = os.path.abspath(os.path.join(base_dir, "../results"))
+    # output_dir 를 주면 그곳에 쓴다 (비교 도구가 results/ 를 덮어쓰지 않도록)
+    if output_dir is None:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        output_dir = os.path.abspath(os.path.join(base_dir, "../results"))
     
     if not os.path.exists(output_dir): os.makedirs(output_dir)
     midi_name = os.path.splitext(os.path.basename(file_path))[0]
