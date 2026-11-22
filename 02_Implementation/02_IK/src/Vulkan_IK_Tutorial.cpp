@@ -546,12 +546,12 @@ private:
                 float zOff = (h == 0) ? zOffsetsL[f] : zOffsetsR[f];
 
                 if (f == 0) {
-                    // [엄지] 신전(펴는 방향) 여유를 넓혀 짧은 거리 타겟에서 베이스 관절이
-                    // 과도하게 젖혀지지 않고도 자연스럽게 펴진 자세를 취할 수 있게 함.
-                    // DIP(joint2)는 실제 연주 시 거의 펴진 채로 유지되므로 굽힘 범위를 좁힘
-                    hand[i].joints[0].limits = deg2rad(50.0f, 50.0f, -40.0f, 40.0f, 0.0f, 15.0f);
-                    hand[i].joints[1].limits = deg2rad(110.0f, 15.0f, 0.0f, 0.0f, 0.0f, 0.0f); // [실험] PIP는 문제삼지 않았으니 여유를 더 줌
-                    hand[i].joints[2].limits = deg2rad(32.0f, 15.0f, 0.0f, 0.0f, 0.0f, 0.0f); // DIP는 요청대로 좁게 유지
+                    // [엄지] joints[0..2] = CMC / MCP / IP (MetaHuman thumb_01 / 02 / 03).
+                    // CMC 젖힘 50 -> 15도, MCP 굽힘 110 -> 60도: 실제 엄지 범위(MCP 50~60도)로 좁힘. 넓게 두면 솔버가
+                    // CMC 를 젖히고 MCP 를 90도 넘게 꺾는 갈고리 해를 쓴다 (대기 타겟 수정과 함께, 손끝 정확도는 변화 없음).
+                    hand[i].joints[0].limits = deg2rad(50.0f, 15.0f, -40.0f, 40.0f, 0.0f, 15.0f);
+                    hand[i].joints[1].limits = deg2rad(60.0f, 15.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+                    hand[i].joints[2].limits = deg2rad(32.0f, 15.0f, 0.0f, 0.0f, 0.0f, 0.0f); // IP(끝마디)는 요청대로 좁게 유지
                     hand[i].joints[3].limits = deg2rad(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
                     hand[i].rootOffset = glm::vec3(-kThumbRootBackCm * kIkUnitPerCm, -0.2f, zOff);
                 }
@@ -1799,11 +1799,16 @@ private:
         // 펴는 쪽 여유가 거의 없는 이 손가락 구조에서 오히려 수렴이 안 되는 어려운 자세였음
         // (디버그로 확인: err~0.3 고착). 실제 이완된 손가락처럼 자연스럽게 아래로 굽은
         // 자세를 목표로 삼아 관절 한계와 맞는 자세로 바꿈.
-        float restX = 0.9f;
-        float restY = -0.35f;
+        const glm::vec3 restOffset(0.9f, -0.35f, 0.0f);
+        // 엄지는 뿌리(CMC)가 4.5 cm 뒤에 있고 사슬이 1.72 단위(8.8 cm)로 길어서, 위 대기 지점(뿌리에서 0.97 단위)으로
+        // 보내면 사슬을 접어야만 닿는다. 그러면 솔버가 CMC를 위로 젖히고(-38도) MCP를 94도 꺾는 갈고리 자세로 수렴했다
+        // (deb_clai 대기 프레임 56% 전부, UE 에서 엄지 끝이 잘록해 보인 원인). 흰 건반 타건 지점(뿌리 기준 약 1.48, -0.4)
+        // 바로 위에 대기시켜 누를 때와 비슷한 자세(-12/34/28도)로 쉬게 한다.
+        const glm::vec3 thumbRestOffset(1.5f, -0.35f, 0.0f);
         for (int i = 0; i < 10; i++) {
             glm::vec3 wristPos = (i < 5) ? currentLeftWrist : currentRightWrist;
-            desiredTargets[i] = wristPos + hand[i].rootOffset + glm::vec3(restX, restY, 0.0f);
+            const bool isThumb = (i % 5 == 0);
+            desiredTargets[i] = wristPos + hand[i].rootOffset + (isThumb ? thumbRestOffset : restOffset);
         }
 
         // 2. 활성화된 Note 위치로 덮어쓰기
@@ -2034,6 +2039,8 @@ private:
         const float innerHz = 60.0f;                                   // 화면에서 보이는 움직임과 같은 갱신 속도
         const int subSteps = static_cast<int>(innerHz / fps);          // 30 FPS 기록이면 2
         const int frames = static_cast<int>(std::ceil(songLengthMs / 1000.0f * fps));
+        long pressCount[5] = {}, missCount[5] = {};                    // 오른손 손가락별 손끝 정확도 (누른 프레임 기준)
+        double errSumCm[5] = {};
         std::cout << "[Export] start: " << frames + 1 << " frames (Debug build is slow, use Release)" << std::endl;
         for (int frame = 0; frame <= frames; ++frame) {
             if (frame % 30 == 0) glfwPollEvents();                     // 계산 중에도 창이 "응답 없음"이 되지 않게 한다
@@ -2045,6 +2052,17 @@ private:
                 updateJacobianKinematics(t, getActiveNotesForCurrentTime(t));
             }
             const float timeMs = frame * 1000.0f / fps;
+
+            // 손끝 정확도 집계: 누른 지 150 ms 이후(손가락이 도착할 시간)의 손끝-타건 지점 거리
+            for (const auto& note : getActiveNotesForCurrentTime(frame / fps)) {
+                if (note.hand != 1 || note.finger < 1 || note.finger > 5) continue;
+                if (std::fmod(timeMs, songLengthMs) - note.time_ms < 150.0f) continue;
+                const int f = note.finger - 1;
+                const float errCm = glm::distance(hand[5 + f].joints[3].pos, getFingerPressPosition(note.pitch, note.finger)) * cmPerUnit;
+                ++pressCount[f];
+                if (errCm >= 1.0f) ++missCount[f];
+                errSumCm[f] += errCm;
+            }
 
             for (int f = 0; f < 5; ++f) {
                 const Finger& finger = hand[5 + f];            // 5~9 = 오른손 (엄지 -> 소지)
@@ -2062,6 +2080,12 @@ private:
                << exportRightWrist.z * cmPerUnit << ",0,0,0\n";   // IK 에는 손목 회전이 없다
         }
         std::cout << "[Export] wrote " << frames + 1 << " frames to " << jointsPath << std::endl;
+        for (int f = 0; f < 5; ++f) {
+            if (pressCount[f] == 0) continue;
+            std::cout << std::fixed << "[Export] " << fingerNames[f] << ": tip error >= 1 cm "
+                      << std::setprecision(1) << 100.0 * missCount[f] / pressCount[f] << "% , mean "
+                      << std::setprecision(2) << errSumCm[f] / pressCount[f] << " cm (" << pressCount[f] << " pressed frames)" << std::endl;
+        }
     }
 
     void drawFrame() {
