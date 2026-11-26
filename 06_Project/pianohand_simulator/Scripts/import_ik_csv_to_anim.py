@@ -12,7 +12,7 @@ Each CSV angle is a DELTA from the bone's reference pose, composed onto the refe
 make_mh_hand_poses.py does. MetaHuman finger bones point down -X and bend on local yaw, so:
 
     yaw   = SIGN['flex']  * flex_deg      (IK flex is + when closing, MetaHuman curls with negative yaw -> -1)
-    pitch = SIGN['abd']   * abd_deg       (spread, about the palm normal)
+    pitch = SIGN['abd']   * abd_deg       (spread, about the palm normal; -1 confirmed, thumb uses THUMB_ABD_SIGN)
     roll  = SIGN['twist'] * twist_deg     (about the finger axis)
 
 The sign/axis table is the part to confirm against the IK program's own convention - it lives in one place (SIGN).
@@ -36,7 +36,11 @@ SCRIPTS_DIR = os.path.join(PROJECT_DIR, 'Scripts')
 SAMPLES_DIR = os.path.join(PROJECT_DIR, 'Docs', 'Kyungmin', 'samples')
 JOINTS_CSV = globals().get('IK_JOINTS_CSV', os.path.join(SAMPLES_DIR, 'ik_sample_joints.csv'))
 WRIST_CSV = globals().get('IK_WRIST_CSV', None)
-SIGN = globals().get('IK_SIGN', {'flex': -1.0, 'abd': 1.0, 'twist': 1.0})
+# abd: IK abd > 0 turns a right-hand finger toward the THUMB (rotation about +y, thumb at -z), while a +pitch on a
+# MetaHuman finger root turns it toward the PINKY (Scripts/check_ik_abd_sign.py, 2026-11-27: all four fingers) -> -1.
+# The thumb keeps the old +1 until its bend plane is retargeted (IK_Handoff_Format.md open item 11).
+SIGN = globals().get('IK_SIGN', {'flex': -1.0, 'abd': -1.0, 'twist': 1.0})
+THUMB_ABD_SIGN = globals().get('IK_THUMB_ABD_SIGN', 1.0)
 # The IK program's axes (x = depth, y = height, z = left-right) are not UE's, and how the wrist is placed (bone offset
 # vs component move) is undecided - so wrist TRANSLATION stays off until both are settled. Wrist rotation is applied.
 APPLY_WRIST_TRANSLATION = globals().get('IK_APPLY_WRIST_TRANSLATION', False)
@@ -117,7 +121,8 @@ def run():
                     pos.append(ref.translation)
             else:
                 flex, abd, twist = tracks[bone][i]
-                delta = unreal.Rotator(roll=SIGN['twist'] * twist, pitch=SIGN['abd'] * abd, yaw=SIGN['flex'] * flex)
+                abd_sign = THUMB_ABD_SIGN if bone.startswith('thumb') else SIGN['abd']
+                delta = unreal.Rotator(roll=SIGN['twist'] * twist, pitch=abd_sign * abd, yaw=SIGN['flex'] * flex)
                 pos.append(ref.translation)
             rot.append(ML.compose_rotators(delta, ref_rot).quaternion())
             scl.append(one)
